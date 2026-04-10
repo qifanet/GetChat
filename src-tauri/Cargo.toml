@@ -1,0 +1,27 @@
+[package]
+name = "getchat"
+version = "0.1.0"
+description = "A local-first AI exploration workbench with branching conversations"
+authors = ["QiFans"]
+edition = "2021"
+
+[lib]
+name = "getchat_lib"
+crate-type = ["cdylib", "lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
