@@ -162,7 +162,15 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
       className={`group rounded-[22px] px-3 py-3 transition-colors ${
         isCurrent ? "bg-white shadow-ring" : "bg-white/72 hover:bg-white"
       }`}
+      role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleClick();
+        }
+      }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">

@@ -85,7 +85,7 @@ pub async fn build_prompt_messages(
                     "FAILED" => true, // Failed messages may have partial useful content
                     "STREAMING" => false,
                     "ABORTED" => false,
-                    _ => true,
+                    _ => false,
                 };
 
                 if include && !row.content_text.is_empty() {

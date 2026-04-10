@@ -92,7 +92,7 @@ pub async fn set_branch_preferred_model(
     input: SetBranchPreferredModelInput,
 ) -> Result<BranchDto, AppError> {
     let start = std::time::Instant::now();
-    let branch = branches::find_by_id(&state.db, &input.branch_id)
+    let _branch = branches::find_by_id(&state.db, &input.branch_id)
         .await?
         .ok_or_else(|| AppError::not_found("Branch not found"))?;
 
@@ -122,7 +122,6 @@ pub async fn set_branch_preferred_model(
         "ok"
     );
 
-    let _ = branch;
     Ok(snapshot_service::map_branch_row_public(&updated, is_mainline))
 }
 

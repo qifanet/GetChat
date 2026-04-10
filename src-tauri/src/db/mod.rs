@@ -23,7 +23,6 @@
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
-use std::str::FromStr;
 use std::path::Path;
 
 // ============================================================================
@@ -40,9 +39,10 @@ const BUSY_TIMEOUT_MS: u32 = 5000;
  * rather than a raw PRAGMA statement, because sqlx executes it at the right
  * point in the connection lifecycle.
  */
-fn connect_options(db_path: &str) -> SqliteConnectOptions {
-    SqliteConnectOptions::from_str(db_path)
-        .expect("Invalid SQLite connection string")
+fn connect_options(db_path: &Path) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(true)
         .foreign_keys(true)
         .busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS as u64))
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -66,8 +66,7 @@ fn connect_options(db_path: &str) -> SqliteConnectOptions {
  * Panics if the database file cannot be opened or migrations fail.
  */
 pub async fn init_pool(db_path: &Path) -> SqlitePool {
-    let conn_str = format!("sqlite://{}?mode=rwc", db_path.display());
-    let options = connect_options(&conn_str);
+    let options = connect_options(db_path);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)

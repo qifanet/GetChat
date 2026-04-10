@@ -127,7 +127,8 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
     let default_model_id = app_kv::get(&state.db, "default_model_id")
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .and_then(|v| serde_json::from_str::<String>(&v).ok());
 
     let duration_ms = start.elapsed().as_millis() as u64;
     tracing::info!(
@@ -168,9 +169,10 @@ pub async fn save_last_workspace(
 /** Get the default model ID. */
 #[tauri::command]
 pub async fn get_default_model(state: State<'_, AppState>) -> Result<Option<String>, AppError> {
-    app_kv::get(&state.db, "default_model_id")
+    let raw = app_kv::get(&state.db, "default_model_id")
         .await
-        .map_err(AppError::from)
+        .map_err(AppError::from)?;
+    Ok(raw.and_then(|v| serde_json::from_str::<String>(&v).ok()))
 }
 
 /** Set the default model ID. */
@@ -180,9 +182,13 @@ pub async fn set_default_model(
     model_id: Option<String>,
 ) -> Result<(), AppError> {
     match model_id {
-        Some(model_id) => app_kv::set(&state.db, "default_model_id", &model_id)
-            .await
-            .map_err(AppError::from),
+        Some(model_id) => {
+            let json_str = serde_json::to_string(&model_id)
+                .map_err(|e| AppError::invalid_argument(format!("Failed to serialize model_id: {e}")))?;
+            app_kv::set(&state.db, "default_model_id", &json_str)
+                .await
+                .map_err(AppError::from)
+        }
         None => app_kv::delete(&state.db, "default_model_id")
             .await
             .map_err(AppError::from),
