@@ -137,3 +137,26 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# ============================================================================
+# GetChat / Tauri / Rust specific
+# ============================================================================
+
+# Tauri build output
+src-tauri/target/
+src-tauri/WixTools/
+
+# Rust compiled artifacts
+*.rs.bk
+Cargo.lock
+
+# Tauri generated icons (rebuild from source)
+src-tauri/icons/
+
+# SQLite database files (local runtime data)
+*.db
+*.db-shm
+*.db-wal
+
+# Tauri dev cache
+.claude/
