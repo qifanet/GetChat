@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-const forms = require("@tailwindcss/forms");
+import forms from '@tailwindcss/forms';
 
 export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
