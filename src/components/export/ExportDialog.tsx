@@ -11,7 +11,7 @@
  *   - JSON: structured data including full snapshot metadata
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStore";
 import {
@@ -104,6 +104,15 @@ export function ExportDialog() {
   const [scope, setScope] = useState<ExportScope>("CURRENT_PATH");
   const [format, setFormat] = useState<ExportFormat>("MARKDOWN");
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   const exportContent = useMemo(() => {
     if (!activeSnapshot) return null;
@@ -134,7 +143,13 @@ export function ExportDialog() {
 
     await copyTextToClipboard(exportContent);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current);
+    }
+    copiedTimerRef.current = window.setTimeout(() => {
+      setCopied(false);
+      copiedTimerRef.current = null;
+    }, 1500);
   }, [exportContent]);
 
   if (!exportDialogOpen || !activeSnapshot) {
