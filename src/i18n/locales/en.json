@@ -137,7 +137,9 @@
     "continueFromHere": "Continue from here",
     "reEdit": "Edit again",
     "applyToCurrentBranch": "Apply to current path",
-    "modelUsed": "Model: {{name}}"
+    "modelUsed": "Model: {{name}}",
+    "variantCount": "{{current}} / {{total}} candidates",
+    "variantHint": "{{count}} candidate answers"
   },
   "composer": {
     "label": "Compose",
@@ -146,7 +148,9 @@
     "stop": "Stop generating",
     "providerRequiredHint": "Enable an AI service in Settings to send messages.",
     "modelRequiredHint": "Choose a default model in Settings to send messages.",
-    "shortcutHint": "Press Enter to send. Use Shift + Enter for a new line."
+    "shortcutHint": "Press Enter to send. Use Shift + Enter for a new line.",
+    "sendAsNewBranch": "Send as new branch",
+    "branchModeHint": "New branch: original path stays unchanged."
   },
   "onboarding": {
     "badge": "First setup",
@@ -239,6 +243,21 @@
     "defaultModelSaveFailed": "Failed to save the default model",
     "providerSaved": "Provider saved.",
     "providerDeleted": "Provider deleted.",
-    "defaultModelSaved": "Default model updated."
+    "defaultModelSaved": "Default model updated.",
+    "languageTitle": "Language / 语言",
+    "languageHelp": "Switch the interface language. Changes take effect immediately.",
+    "languageChanged": "Language switched."
+  },
+  "export": {
+    "title": "Export",
+    "currentPath": "Current path",
+    "wholeTree": "Whole conversation",
+    "markdown": "Markdown",
+    "json": "JSON",
+    "cancel": "Cancel",
+    "download": "Download",
+    "copiedToClipboard": "Copied to clipboard",
+    "copyContent": "Copy content",
+    "noConversation": "No conversation open"
   }
 }

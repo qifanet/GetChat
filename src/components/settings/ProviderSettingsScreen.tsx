@@ -7,9 +7,9 @@
  * maintain providers, manage multiple model profiles under each provider, and
  * set the application-level fallback model without leaving the workspace.
  */
-
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
 import {
   createModelProfileId,
   getModelDisplayName,
@@ -19,16 +19,13 @@ import { useAppStore } from "../../stores/useAppStore";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
-
 type EditableProviderId = string | "new";
-
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
   id: string;
   requestName: string;
   displayName: string;
 }
-
 /** Draft state for the provider editor form. */
 interface ProviderFormState {
   id?: string;
@@ -40,13 +37,11 @@ interface ProviderFormState {
   enabled: boolean;
   models: ProviderModelFormState[];
 }
-
 /** Lightweight local feedback used by the settings workspace. */
 interface SettingsFeedbackState {
   tone: "success" | "error" | "info";
   message: string;
 }
-
 /** Create a new model draft with a stable system-owned model profile ID. */
 function createDraftModel(
   requestName = "",
@@ -58,7 +53,6 @@ function createDraftModel(
     displayName,
   };
 }
-
 /** Return sensible provider presets so new forms start from usable defaults. */
 function getProviderPreset(type: ProviderType): Pick<
   ProviderFormState,
@@ -75,7 +69,6 @@ function getProviderPreset(type: ProviderType): Pick<
       models: [defaultModel],
     };
   }
-
   const defaultModel = createDraftModel("gpt-4.1-mini", "GPT-4.1 Mini");
   return {
     type,
@@ -86,7 +79,6 @@ function getProviderPreset(type: ProviderType): Pick<
     models: [defaultModel],
   };
 }
-
 /** Map a persisted provider into the editable provider form shape. */
 function buildFormFromProvider(
   provider: ProviderConfig,
@@ -100,7 +92,6 @@ function buildFormFromProvider(
       requestName: model.requestName,
       displayName: model.displayName,
     }));
-
   return {
     id: provider.id,
     type: provider.type,
@@ -112,7 +103,6 @@ function buildFormFromProvider(
     models,
   };
 }
-
 /** Build a fresh provider form using the selected preset. */
 function buildEmptyProviderForm(
   type: ProviderType = "OPENAI_COMPATIBLE"
@@ -122,7 +112,6 @@ function buildEmptyProviderForm(
     apiKey: "",
   };
 }
-
 /** Compare the form draft with the persisted provider, including nested models. */
 function isProviderDraftChanged(
   form: ProviderFormState,
@@ -132,7 +121,6 @@ function isProviderDraftChanged(
   if (!provider) {
     return true;
   }
-
   const savedModels = provider.modelIds
     .map((modelId) => providerModels[modelId])
     .filter((model): model is NonNullable<typeof model> => Boolean(model))
@@ -141,13 +129,11 @@ function isProviderDraftChanged(
       requestName: model.requestName,
       displayName: model.displayName,
     }));
-
   const currentModels = form.models.map((model) => ({
     id: model.id,
     requestName: model.requestName.trim(),
     displayName: model.displayName.trim(),
   }));
-
   return (
     form.type !== provider.type ||
     form.name.trim() !== provider.name ||
@@ -158,7 +144,6 @@ function isProviderDraftChanged(
     JSON.stringify(currentModels) !== JSON.stringify(savedModels)
   );
 }
-
 /** Resolve a display label for a model ID using the form draft before store data. */
 function resolveDraftModelDisplayName(
   modelId: string | null | undefined,
@@ -168,24 +153,20 @@ function resolveDraftModelDisplayName(
   if (!modelId) {
     return fallbackLabel;
   }
-
   const model = models.find((item) => item.id === modelId);
   if (!model) {
     return modelId;
   }
-
   return model.displayName.trim() || model.requestName.trim() || model.id;
 }
-
 interface ProviderSettingsScreenProps {
   onClose: () => void;
 }
-
 /** Render the provider settings workspace with multi-model configuration support. */
 export function ProviderSettingsScreen({
   onClose,
 }: ProviderSettingsScreenProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const providersById = useAppStore((s) => s.providers);
   const providerModelsById = useAppStore((s) => s.providerModels);
   const providerOrder = useAppStore((s) => s.providerOrder);
@@ -194,7 +175,6 @@ export function ProviderSettingsScreen({
   const removeProvider = useAppStore((s) => s.removeProvider);
   const setDefaultModel = useAppStore((s) => s.setDefaultModel);
   const loadSettings = useAppStore((s) => s.loadSettings);
-
   const orderedProviders = useMemo(
     () =>
       providerOrder
@@ -207,7 +187,6 @@ export function ProviderSettingsScreen({
       listAvailableModelOptions(providersById, providerOrder, providerModelsById),
     [providerModelsById, providerOrder, providersById]
   );
-
   const [selectedProviderId, setSelectedProviderId] =
     useState<EditableProviderId>(providerOrder[0] ?? "new");
   const [form, setForm] = useState<ProviderFormState>(() =>
@@ -224,7 +203,6 @@ export function ProviderSettingsScreen({
   const [feedback, setFeedback] = useState<SettingsFeedbackState | null>(null);
   const selectedSavedProvider =
     selectedProviderId !== "new" ? providersById[selectedProviderId] ?? null : null;
-
   const isProviderDraftDirty = useMemo(
     () => isProviderDraftChanged(form, selectedSavedProvider, providerModelsById),
     [form, providerModelsById, selectedSavedProvider]
@@ -255,15 +233,12 @@ export function ProviderSettingsScreen({
     form.models,
     t("shell.modelUnset")
   );
-
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
-
   useEffect(() => {
     setDefaultModelDraft(appDefaultModelId ?? "");
   }, [appDefaultModelId]);
-
   useEffect(() => {
     if (
       selectedProviderId !== "new" &&
@@ -273,45 +248,37 @@ export function ProviderSettingsScreen({
       setSelectedProviderId(providerOrder[0]);
       return;
     }
-
     if (selectedProviderId === "new") {
       return;
     }
-
     const provider = providersById[selectedProviderId];
     if (provider) {
       setForm(buildFormFromProvider(provider, providerModelsById));
     }
   }, [providerModelsById, providerOrder, providersById, selectedProviderId]);
-
   useEffect(() => {
     setFeedback(null);
   }, [selectedProviderId]);
-
   useEffect(() => {
     setForm((current) => {
       if (current.models.length === 0) {
         if (current.defaultModelId === "") {
           return current;
         }
-
         return {
           ...current,
           defaultModelId: "",
         };
       }
-
       if (current.models.some((model) => model.id === current.defaultModelId)) {
         return current;
       }
-
       return {
         ...current,
         defaultModelId: current.models[0].id,
       };
     });
   }, [form.models]);
-
   /** Patch one top-level form field while preserving the current draft. */
   function patchForm<K extends keyof ProviderFormState>(
     key: K,
@@ -322,7 +289,6 @@ export function ProviderSettingsScreen({
       [key]: value,
     }));
   }
-
   /** Patch one model row inside the nested provider models list. */
   function patchModel(
     modelId: string,
@@ -335,7 +301,6 @@ export function ProviderSettingsScreen({
       ),
     }));
   }
-
   /** Apply a provider-type preset while keeping user-entered values when possible. */
   function applyProviderType(type: ProviderType): void {
     const preset = getProviderPreset(type);
@@ -360,7 +325,6 @@ export function ProviderSettingsScreen({
           : current.models,
     }));
   }
-
   /** Start a fresh provider draft using the chosen provider type preset. */
   function startCreatingProvider(type: ProviderType = "OPENAI_COMPATIBLE"): void {
     setSelectedProviderId("new");
@@ -368,7 +332,6 @@ export function ProviderSettingsScreen({
     setError(null);
     setFeedback(null);
   }
-
   /** Add a new empty model row and keep the provider default model coherent. */
   function handleAddModel(): void {
     const nextModel = createDraftModel();
@@ -378,14 +341,12 @@ export function ProviderSettingsScreen({
       defaultModelId: current.defaultModelId || nextModel.id,
     }));
   }
-
   /** Remove a model row while always keeping at least one model in the form. */
   function handleRemoveModel(modelId: string): void {
     setForm((current) => {
       if (current.models.length <= 1) {
         return current;
       }
-
       const models = current.models.filter((model) => model.id !== modelId);
       return {
         ...current,
@@ -397,13 +358,11 @@ export function ProviderSettingsScreen({
       };
     });
   }
-
   /** Validate and persist the provider draft through the existing settings slice. */
   async function handleSaveProvider(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
-
     try {
       const normalizedModels = form.models.map((model) => ({
         id: model.id,
@@ -413,7 +372,6 @@ export function ProviderSettingsScreen({
       if (normalizedModels.length === 0) {
         throw new Error(t("settings.modelsRequired"));
       }
-
       if (
         normalizedModels.some(
           (model) => model.requestName.length === 0 || model.displayName.length === 0
@@ -421,7 +379,6 @@ export function ProviderSettingsScreen({
       ) {
         throw new Error(t("settings.modelFieldsRequired"));
       }
-
       const resolvedDefaultModelId =
         normalizedModels.find((model) => model.id === form.defaultModelId)?.id ??
         normalizedModels[0].id;
@@ -435,7 +392,6 @@ export function ProviderSettingsScreen({
         models: normalizedModels,
         enabled: form.enabled,
       };
-
       const savedProvider = await saveProvider(payload);
       setSelectedProviderId(savedProvider.id);
       setForm(buildFormFromProvider(savedProvider, useAppStore.getState().providerModels));
@@ -453,18 +409,15 @@ export function ProviderSettingsScreen({
       setIsSubmitting(false);
     }
   }
-
   /** Delete the currently selected provider after an explicit user confirmation. */
   async function handleDeleteProvider(): Promise<void> {
     if (selectedProviderId === "new") {
       return;
     }
-
     const confirmed = window.confirm(t("settings.confirmDeleteProvider"));
     if (!confirmed) {
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -488,7 +441,6 @@ export function ProviderSettingsScreen({
       setIsSubmitting(false);
     }
   }
-
   /** Persist the application-wide default model choice. */
   async function handleSaveDefaultModel(): Promise<void> {
     setIsSubmitting(true);
@@ -509,7 +461,6 @@ export function ProviderSettingsScreen({
       setIsSubmitting(false);
     }
   }
-
   /** Probe the current saved provider through the backend connection test command. */
   async function handleTestConnection(): Promise<void> {
     if (selectedProviderId === "new" || isProviderDraftDirty) {
@@ -519,11 +470,9 @@ export function ProviderSettingsScreen({
       });
       return;
     }
-
     setIsTestingConnection(true);
     setError(null);
     setFeedback(null);
-
     try {
       await tauriCmd.testProviderConnection(selectedProviderId);
       setFeedback({
@@ -544,7 +493,6 @@ export function ProviderSettingsScreen({
       setIsTestingConnection(false);
     }
   }
-
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col gap-4 bg-transparent xl:flex-row">
       <aside className="app-panel flex w-full shrink-0 flex-col rounded-shell bg-white/95 xl:w-[330px]">
@@ -557,7 +505,6 @@ export function ProviderSettingsScreen({
             <IconChevronLeft size={14} />
             {t("settings.backToWorkspace")}
           </button>
-
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-miro-blue-light text-miro-blue shadow-ring">
               <IconSettings size={18} />
@@ -573,7 +520,6 @@ export function ProviderSettingsScreen({
             </div>
           </div>
         </div>
-
         <div className="grid grid-cols-3 gap-2 px-5 py-4">
           <div className="rounded-panel bg-miro-surface-low px-3 py-3">
             <p className="app-section-label mb-1">{t("settings.providerCount")}</p>
@@ -588,7 +534,6 @@ export function ProviderSettingsScreen({
             <p className="text-lg font-semibold text-miro-text">{configuredModelCount}</p>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           <button
             type="button"
@@ -597,7 +542,6 @@ export function ProviderSettingsScreen({
           >
             {t("settings.addProvider")}
           </button>
-
           <div className="space-y-2">
             {orderedProviders.map((provider) => {
               const isSelected = selectedProviderId === provider.id;
@@ -609,7 +553,6 @@ export function ProviderSettingsScreen({
                 providerModelsById,
                 t("shell.modelUnset")
               );
-
               return (
                 <button
                   key={provider.id}
@@ -645,11 +588,9 @@ export function ProviderSettingsScreen({
                         : t("settings.apiKeyMissing")}
                     </span>
                   </div>
-
                   <div className="mt-2 line-clamp-1 text-xs text-miro-text-secondary">
                     {provider.baseUrl}
                   </div>
-
                   <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-miro-text-secondary">
                     <span>{provider.enabled ? t("settings.enabled") : t("settings.disabled")}</span>
                     <span>{t("settings.modelCountShort", { count: provider.modelIds.length })}</span>
@@ -664,7 +605,6 @@ export function ProviderSettingsScreen({
           </div>
         </div>
       </aside>
-
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid max-w-6xl gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
@@ -694,7 +634,6 @@ export function ProviderSettingsScreen({
                 </div>
               </div>
             </section>
-
             <section className="app-panel rounded-shell bg-white/95 p-6">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
@@ -705,7 +644,6 @@ export function ProviderSettingsScreen({
                     {t("settings.defaultModelHelp")}
                   </p>
                 </div>
-
                 <div className="flex w-full max-w-xl flex-col gap-3 sm:flex-row">
                   <select
                     value={defaultModelDraft}
@@ -730,7 +668,6 @@ export function ProviderSettingsScreen({
                 </div>
               </div>
             </section>
-
             <section className="app-panel rounded-shell bg-white/95 p-6">
               <div className="mb-6 flex flex-col gap-2">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
@@ -742,7 +679,6 @@ export function ProviderSettingsScreen({
                   {t("settings.providerFormHelp")}
                 </p>
               </div>
-
               <form className="space-y-5" onSubmit={(event) => void handleSaveProvider(event)}>
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="space-y-2">
@@ -764,7 +700,6 @@ export function ProviderSettingsScreen({
                       </option>
                     </select>
                   </label>
-
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-miro-text">
                       {t("settings.providerName")}
@@ -777,7 +712,6 @@ export function ProviderSettingsScreen({
                     />
                   </label>
                 </div>
-
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-miro-text">
                     {t("settings.baseUrl")}
@@ -789,7 +723,6 @@ export function ProviderSettingsScreen({
                     required
                   />
                 </label>
-
                 <label className="inline-flex items-center gap-3 rounded-panel bg-miro-surface-low px-4 py-3 text-sm text-miro-text shadow-ring">
                   <input
                     type="checkbox"
@@ -799,7 +732,6 @@ export function ProviderSettingsScreen({
                   />
                   <span>{t("settings.enabledProvider")}</span>
                 </label>
-
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-miro-text">
                     {t("settings.apiKey")}
@@ -813,7 +745,6 @@ export function ProviderSettingsScreen({
                     className="app-input"
                   />
                 </label>
-
                 <section className="rounded-[28px] border border-miro-border/70 bg-miro-bg/70 p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -824,7 +755,6 @@ export function ProviderSettingsScreen({
                         {t("settings.modelsHelp")}
                       </p>
                     </div>
-
                     <button
                       type="button"
                       onClick={handleAddModel}
@@ -833,14 +763,12 @@ export function ProviderSettingsScreen({
                       + {t("settings.addModel")}
                     </button>
                   </div>
-
                   <div className="mt-5 space-y-4">
                     {form.models.length === 0 ? (
                       <div className="rounded-panel border border-dashed border-miro-border bg-white/70 px-4 py-5 text-sm text-miro-text-secondary">
                         {t("settings.noModels")}
                       </div>
                     ) : null}
-
                     {form.models.map((model, index) => {
                       const isProviderDefault = form.defaultModelId === model.id;
                       return (
@@ -864,7 +792,6 @@ export function ProviderSettingsScreen({
                                 {t("settings.modelRoutingHelp")}
                               </p>
                             </div>
-
                             <div className="flex flex-wrap items-center gap-2">
                               {!isProviderDefault ? (
                                 <button
@@ -902,7 +829,6 @@ export function ProviderSettingsScreen({
                                 required
                               />
                             </label>
-
                             <label className="space-y-2">
                               <span className="text-sm font-medium text-miro-text">
                                 {t("settings.modelDisplayName")}
@@ -918,7 +844,6 @@ export function ProviderSettingsScreen({
                               />
                             </label>
                           </div>
-
                           <label className="mt-4 block space-y-2">
                             <span className="text-sm font-medium text-miro-text">
                               {t("settings.providerModelId")}
@@ -934,25 +859,21 @@ export function ProviderSettingsScreen({
                     })}
                   </div>
                 </section>
-
                 <div className="rounded-panel border border-dashed border-miro-border bg-miro-bg px-4 py-3 text-sm leading-6 text-miro-text-secondary">
                   {selectedProviderId === "new" || isProviderDraftDirty
                     ? t("settings.saveBeforeTesting")
                     : t("settings.connectionHelp")}
                 </div>
-
                 {error ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     {error}
                   </div>
                 ) : null}
-
                 {feedback ? (
                   <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackClassName}`}>
                     {feedback.message}
                   </div>
                 ) : null}
-
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <div className="flex flex-wrap gap-3">
                     <button
@@ -985,7 +906,6 @@ export function ProviderSettingsScreen({
                         : t("settings.testConnection")}
                     </button>
                   </div>
-
                   {selectedProviderId !== "new" ? (
                     <button
                       type="button"
@@ -1000,7 +920,6 @@ export function ProviderSettingsScreen({
               </form>
             </section>
           </div>
-
           <aside className="space-y-4">
             <section className="app-panel rounded-shell bg-white/95 p-5">
               <p className="app-section-label mb-3">{t("settings.currentSummary")}</p>
@@ -1036,7 +955,6 @@ export function ProviderSettingsScreen({
                   </span>
                 </div>
               </div>
-
               <div className="mt-4 flex flex-wrap gap-2">
                 {form.models.map((model) => (
                   <span
@@ -1052,7 +970,36 @@ export function ProviderSettingsScreen({
                 ))}
               </div>
             </section>
-
+            <section className="app-panel rounded-shell bg-white/95 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+                    {t("settings.languageTitle")}
+                  </h3>
+                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
+                    {t("settings.languageHelp")}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {(Object.entries(SUPPORTED_LOCALES) as [SupportedLocale, string][]).map(
+                    ([localeKey, localeLabel]) => (
+                      <button
+                        key={localeKey}
+                        type="button"
+                        onClick={() => i18n.changeLanguage(localeKey)}
+                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                          i18n.language === localeKey
+                            ? "bg-miro-blue-light text-miro-blue shadow-ring"
+                            : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
+                        }`}
+                      >
+                        {localeLabel}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </section>
             <section className="app-panel rounded-shell bg-white/95 p-5">
               <p className="app-section-label mb-3">{t("settings.configurationAdvice")}</p>
               <div className="space-y-3 text-sm leading-6 text-miro-text-secondary">
@@ -1067,3 +1014,4 @@ export function ProviderSettingsScreen({
     </section>
   );
 }
+

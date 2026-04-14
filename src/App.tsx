@@ -8,7 +8,6 @@
  *   3. Workspace-first entry even when no provider is configured.
  *   4. Compare mode and settings remain first-class surfaces in the same app.
  */
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelDisplayName } from "./features/models/modelUtils";
@@ -24,34 +23,33 @@ import { CompareWorkspace } from "./components/compare/CompareWorkspace";
 import { ConversationListItem } from "./components/conversations/ConversationListItem";
 import { BrandLogo } from "./components/brand/BrandLogo";
 import {
+  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconChevronUp,
   IconExport,
   IconSettings,
 } from "./components/common/Icon";
 import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsScreen";
-
+import { ExportDialog } from "./components/export/ExportDialog";
+import { BranchRenameDialog } from "./components/branches/BranchRenameDialog";
 type AppPage = "WORKSPACE" | "SETTINGS";
-
 interface ConversationSidebarProps {
   activePage: AppPage;
   onCreateConversation: () => Promise<void>;
   onOpenWorkspace: () => void;
   onOpenSettings: () => void;
 }
-
 interface WorkspaceCenterProps {
   hasConfiguredProviders: boolean;
   onCreateConversation: () => Promise<void>;
   onOpenSettings: () => void;
 }
-
 interface WorkspaceEmptyStateProps {
   hasConfiguredProviders: boolean;
   onCreateConversation: () => Promise<void>;
   onOpenSettings: () => void;
 }
-
 interface ShellHeaderProps {
   activePage: AppPage;
   desktopLeftInset: number;
@@ -61,29 +59,23 @@ interface ShellHeaderProps {
   onOpenWorkspace: () => void;
   onOpenSettings: () => void;
 }
-
 interface OverviewRailProps {
   hasConfiguredProviders: boolean;
   connectedProviderCount: number;
   defaultModelName: string;
 }
-
 interface SidebarBackdropProps {
   onClose: () => void;
 }
-
 const DESKTOP_LEFT_SIDEBAR_WIDTH_PX = 272;
 const DESKTOP_RIGHT_RAIL_WIDTH_PX = 336;
 const DESKTOP_COLLAPSED_EDGE_PX = 28;
-
 // ============================================================================
 // Boot States
 // ============================================================================
-
 /** Full-screen loading state shown during app initialization. */
 function BootScreen() {
   const { t } = useTranslation();
-
   return (
     <div className="app-shell flex h-full items-center justify-center px-6 py-8">
       <div className="app-panel w-full max-w-xl rounded-shell bg-white/96 px-10 py-12 text-center">
@@ -109,11 +101,9 @@ function BootScreen() {
     </div>
   );
 }
-
 /** Full-screen error state shown when initialization fails. */
 function BootError({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { t } = useTranslation();
-
   return (
     <div className="app-shell flex h-full items-center justify-center px-6 py-8">
       <div className="app-panel w-full max-w-xl rounded-shell bg-white/96 px-10 py-12 text-center">
@@ -136,11 +126,9 @@ function BootError({ error, onRetry }: { error: string; onRetry: () => void }) {
     </div>
   );
 }
-
 // ============================================================================
 // Shared Shell Components
 // ============================================================================
-
 /** Backdrop used when a sidebar becomes an overlay drawer in compact mode. */
 function SidebarBackdrop({ onClose }: SidebarBackdropProps) {
   return (
@@ -152,7 +140,6 @@ function SidebarBackdrop({ onClose }: SidebarBackdropProps) {
     />
   );
 }
-
 /** Fixed desktop header with product status and primary navigation. */
 function ShellHeader({
   activePage,
@@ -172,7 +159,6 @@ function ShellHeader({
     activeSnapshot?.summary.title,
     t
   );
-
   return (
     <header
       className="app-shell-header fixed top-0 right-0 z-20 flex h-16 items-center justify-between px-4 sm:px-6"
@@ -189,7 +175,6 @@ function ShellHeader({
           titleClassName="text-base sm:text-lg"
           subtitleClassName="hidden lg:block"
         />
-
         <nav className="hidden items-center gap-2 md:flex">
           <button
             type="button"
@@ -217,7 +202,6 @@ function ShellHeader({
             {t("common.settings")}
           </button>
         </nav>
-
         {activePage === "WORKSPACE" && activeSnapshot ? (
           <div className="hidden min-w-0 items-center gap-3 xl:flex">
             <span className="h-1 w-1 rounded-full bg-miro-border" />
@@ -227,7 +211,6 @@ function ShellHeader({
           </div>
         ) : null}
       </div>
-
       <div className="flex items-center gap-2 sm:gap-3">
         <span
           className={`app-status-pill hidden sm:inline-flex ${
@@ -240,13 +223,11 @@ function ShellHeader({
             ? t("shell.providersReady", { count: connectedProviderCount })
             : t("shell.providersMissing")}
         </span>
-
         {defaultModelName !== t("shell.modelUnset") ? (
           <span className="app-status-pill hidden xl:inline-flex">
             {defaultModelName}
           </span>
         ) : null}
-
         {activePage === "WORKSPACE" && activeSnapshot ? (
           <button
             type="button"
@@ -261,7 +242,6 @@ function ShellHeader({
     </header>
   );
 }
-
 /**
  * Product-style empty workspace state.
  * It keeps the app useful even before a provider is configured.
@@ -272,7 +252,6 @@ function WorkspaceEmptyState({
   onOpenSettings,
 }: WorkspaceEmptyStateProps) {
   const { t } = useTranslation();
-
   return (
     <div className="flex h-full items-center justify-center px-4 py-8">
       <div className="w-full max-w-5xl">
@@ -315,7 +294,6 @@ function WorkspaceEmptyState({
             </button>
           </div>
         </div>
-
         <div className="mx-auto mt-10 grid max-w-4xl gap-4 md:grid-cols-3">
           <div className="app-panel rounded-panel bg-white/96 px-5 py-5">
             <div className="app-section-label mb-2">
@@ -346,11 +324,65 @@ function WorkspaceEmptyState({
     </div>
   );
 }
-
 /**
  * Conversation list sidebar.
  * In compact mode it behaves like a drawer and closes itself after navigation.
  */
+function ArchivedSection() {
+  const { t } = useTranslation();
+  const summaryOrder = useAppStore((state) => state.summaryOrder);
+  const summariesById = useAppStore((state) => state.summariesById);
+  const activeConversationId = useAppStore(
+    (state) => state.workspace.activeConversationId
+  );
+  const openConversation = useAppStore((state) => state.openConversation);
+  const isCompactShell = useCompactAppShell();
+  const collapseSidebar = useAppStore((state) => state.setLeftSidebarCollapsed);
+  const archived = useMemo(
+    () =>
+      summaryOrder
+        .map((id) => summariesById[id])
+        .filter(
+          (summary): summary is NonNullable<typeof summary> =>
+            Boolean(summary?.archivedAt)
+        ),
+    [summaryOrder, summariesById]
+  );
+  const [expanded, setExpanded] = useState(false);
+  if (archived.length === 0) {
+    return null;
+  }
+  return (
+    <div className="pt-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between px-2 py-1.5 text-left"
+      >
+        <span className="app-section-label">{t("conversation.archive")} ({archived.length})</span>
+        {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+      </button>
+      {expanded ? (
+        <div className="mt-1 space-y-2">
+          {archived.map((summary) => (
+            <ConversationListItem
+              key={summary.id}
+              summary={summary}
+              isActive={summary.id === activeConversationId}
+              onOpen={() => {
+                void openConversation(summary.id).finally(() => {
+                  if (isCompactShell) {
+                    collapseSidebar(true);
+                  }
+                });
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 function ConversationSidebar({
   activePage,
   onCreateConversation,
@@ -378,7 +410,6 @@ function ConversationSidebar({
     providerModels,
     t("shell.modelUnset")
   );
-
   return (
     <aside className="app-sidebar-surface flex h-full flex-col">
       <div className="px-6 pb-5 pt-6">
@@ -392,7 +423,6 @@ function ConversationSidebar({
             iconClassName="h-8 w-8"
             subtitleClassName="text-[11px] tracking-[0.18em]"
           />
-
           {isCompactShell ? (
             <button
               type="button"
@@ -404,7 +434,6 @@ function ConversationSidebar({
             </button>
           ) : null}
         </div>
-
         <button
           type="button"
           onClick={() => void onCreateConversation()}
@@ -414,11 +443,9 @@ function ConversationSidebar({
           <span>{t("conversation.newConversation")}</span>
         </button>
       </div>
-
       <div className="px-6 pb-2">
         <p className="app-section-label">{t("shell.recentConversations")}</p>
       </div>
-
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         {summaryOrder.length === 0 ? (
           <div className="rounded-panel bg-white/72 px-5 py-6 shadow-ring">
@@ -436,7 +463,6 @@ function ConversationSidebar({
               if (!summary) {
                 return null;
               }
-
               return (
                 <ConversationListItem
                   key={conversationId}
@@ -455,8 +481,8 @@ function ConversationSidebar({
             })}
           </div>
         )}
+          <ArchivedSection />
       </div>
-
       <div className="mt-auto space-y-3 px-4 pb-5">
         <div className="rounded-panel bg-white/80 px-4 py-4 shadow-ring">
           <div className="app-section-label mb-3">{t("shell.workspaceHealth")}</div>
@@ -477,7 +503,6 @@ function ConversationSidebar({
             </div>
           </div>
         </div>
-
         <button
           type="button"
           onClick={() => {
@@ -486,7 +511,6 @@ function ConversationSidebar({
             } else {
               onOpenSettings();
             }
-
             if (isCompactShell) {
               collapseSidebar(true);
             }
@@ -517,7 +541,6 @@ function ConversationSidebar({
     </aside>
   );
 }
-
 /** Contextual right rail shown when no conversation is open. */
 function WorkspaceOverviewRail({
   hasConfiguredProviders,
@@ -526,7 +549,6 @@ function WorkspaceOverviewRail({
 }: OverviewRailProps) {
   const { t } = useTranslation();
   const summaryOrder = useAppStore((state) => state.summaryOrder);
-
   return (
     <aside className="app-sidebar-surface flex h-full flex-col px-6 py-6">
       <div>
@@ -558,7 +580,6 @@ function WorkspaceOverviewRail({
           </div>
         </div>
       </div>
-
       <div className="mt-8 rounded-panel bg-white/88 px-4 py-4 shadow-ring">
         <p className="app-section-label mb-3">{t("shell.workspaceHealth")}</p>
         <div className="space-y-3 text-sm">
@@ -587,7 +608,6 @@ function WorkspaceOverviewRail({
     </aside>
   );
 }
-
 /** Center workspace surface containing the main content area. */
 function WorkspaceCenter({
   hasConfiguredProviders,
@@ -596,7 +616,6 @@ function WorkspaceCenter({
 }: WorkspaceCenterProps) {
   const activeSnapshot = useAppStore((state) => state.activeSnapshot);
   const workspaceMode = useAppStore((state) => state.workspace.workspaceMode);
-
   if (workspaceMode === "COMPARE") {
     return (
       <main className="app-panel h-full min-w-0 overflow-hidden rounded-shell bg-white/90">
@@ -604,12 +623,10 @@ function WorkspaceCenter({
       </main>
     );
   }
-
   return (
     <main className="app-panel flex h-full min-w-0 flex-col overflow-hidden rounded-shell bg-white/92">
       <TopContextBar />
       <WorkspaceBannerRegion />
-
       <div className="relative flex-1 overflow-y-auto">
         {activeSnapshot ? (
           <MessageList />
@@ -621,12 +638,10 @@ function WorkspaceCenter({
           />
         )}
       </div>
-
       <Composer />
     </main>
   );
 }
-
 /** Fixed edge strip used to reopen a collapsed desktop sidebar. */
 function SidebarEdgeStrip({
   side,
@@ -636,7 +651,6 @@ function SidebarEdgeStrip({
   onExpand: () => void;
 }) {
   const { t } = useTranslation();
-
   return (
     <button
       type="button"
@@ -658,11 +672,9 @@ function SidebarEdgeStrip({
     </button>
   );
 }
-
 // ============================================================================
 // App Component
 // ============================================================================
-
 /** Root application component coordinating the desktop shell and major pages. */
 export function App() {
   const { t } = useTranslation();
@@ -691,7 +703,6 @@ export function App() {
   );
   const createConversation = useAppStore((state) => state.createConversation);
   const openConversation = useAppStore((state) => state.openConversation);
-
   const connectedProviderCount = useMemo(
     () =>
       providerOrder.filter((providerId) => providers[providerId]?.enabled).length,
@@ -703,46 +714,37 @@ export function App() {
     t("shell.modelUnset")
   );
   const hasConfiguredProviders = connectedProviderCount > 0;
-
   useEffect(() => {
     void initializeApp();
   }, [initializeApp]);
-
   useEffect(() => {
     if (!isCompactShell) {
       return;
     }
-
     setLeftSidebarCollapsed(true);
     setRightPanelCollapsed(true);
   }, [isCompactShell, setLeftSidebarCollapsed, setRightPanelCollapsed]);
-
   /** Open the workspace surface and close overlay drawers when needed. */
   const handleOpenWorkspace = useCallback(() => {
     setActivePage("WORKSPACE");
-
     if (isCompactShell) {
       setLeftSidebarCollapsed(true);
       setRightPanelCollapsed(true);
     }
   }, [isCompactShell, setLeftSidebarCollapsed, setRightPanelCollapsed]);
-
   /** Open settings and close overlay drawers in compact mode. */
   const handleOpenSettings = useCallback(() => {
     setActivePage("SETTINGS");
-
     if (isCompactShell) {
       setLeftSidebarCollapsed(true);
       setRightPanelCollapsed(true);
     }
   }, [isCompactShell, setLeftSidebarCollapsed, setRightPanelCollapsed]);
-
   /** Create and open a new conversation from any surface in the shell. */
   const handleCreateConversation = useCallback(async () => {
     const conversationId = await createConversation();
     setActivePage("WORKSPACE");
     await openConversation(conversationId);
-
     if (isCompactShell) {
       setLeftSidebarCollapsed(true);
       setRightPanelCollapsed(true);
@@ -754,15 +756,12 @@ export function App() {
     setLeftSidebarCollapsed,
     setRightPanelCollapsed,
   ]);
-
   if (bootStatus === "IDLE" || bootStatus === "LOADING") {
     return <BootScreen />;
   }
-
   if (bootStatus === "FAILED") {
     return <BootError error={bootError || "Unknown error"} onRetry={initializeApp} />;
   }
-
   const isSettingsPage = activePage === "SETTINGS";
   const showWorkspaceCompare =
     activePage === "WORKSPACE" && workspaceMode === "COMPARE";
@@ -770,7 +769,6 @@ export function App() {
   const showOverviewRail = showRightRail && !activeSnapshot;
   const showLeftDrawer = isCompactShell && !leftSidebarCollapsed;
   const showRightDrawer = isCompactShell && showRightRail && !rightPanelCollapsed;
-
   const desktopLeftInset = isCompactShell
     ? 0
     : leftSidebarCollapsed
@@ -783,7 +781,6 @@ export function App() {
         ? DESKTOP_COLLAPSED_EDGE_PX
         : DESKTOP_RIGHT_RAIL_WIDTH_PX
       : 24;
-
   return (
     <div className="app-shell relative h-full overflow-hidden">
       {showLeftDrawer ? (
@@ -792,7 +789,6 @@ export function App() {
       {showRightDrawer ? (
         <SidebarBackdrop onClose={() => setRightPanelCollapsed(true)} />
       ) : null}
-
       <ShellHeader
         activePage={activePage}
         desktopLeftInset={desktopLeftInset}
@@ -802,7 +798,6 @@ export function App() {
         onOpenWorkspace={handleOpenWorkspace}
         onOpenSettings={handleOpenSettings}
       />
-
       <div
         className={
           isCompactShell
@@ -826,14 +821,12 @@ export function App() {
           onOpenSettings={handleOpenSettings}
         />
       </div>
-
       {!isCompactShell && leftSidebarCollapsed ? (
         <SidebarEdgeStrip
           side="left"
           onExpand={() => setLeftSidebarCollapsed(false)}
         />
       ) : null}
-
       {showRightRail ? (
         <div
           className={
@@ -864,14 +857,12 @@ export function App() {
           </aside>
         </div>
       ) : null}
-
       {!isCompactShell && showRightRail && rightPanelCollapsed ? (
         <SidebarEdgeStrip
           side="right"
           onExpand={() => setRightPanelCollapsed(false)}
         />
       ) : null}
-
       <div
         className="h-full pt-16"
         style={{
@@ -891,6 +882,8 @@ export function App() {
           )}
         </div>
       </div>
+      <ExportDialog />
+      <BranchRenameDialog />
     </div>
   );
 }
