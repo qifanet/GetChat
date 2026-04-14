@@ -137,7 +137,9 @@
     "continueFromHere": "从这里继续",
     "reEdit": "重新编辑",
     "applyToCurrentBranch": "应用为当前路径",
-    "modelUsed": "模型：{{name}}"
+    "modelUsed": "模型：{{name}}",
+    "variantCount": "{{current}} / {{total}} 个候选",
+    "variantHint": "{{count}} 个候选回答"
   },
   "composer": {
     "label": "输入",
@@ -146,7 +148,9 @@
     "stop": "停止生成",
     "providerRequiredHint": "前往设置启用 AI 服务后即可发送。",
     "modelRequiredHint": "先在设置中选择默认模型后即可发送。",
-    "shortcutHint": "Enter 发送，Shift + Enter 换行。"
+    "shortcutHint": "Enter 发送，Shift + Enter 换行。",
+    "sendAsNewBranch": "作为新分支发送",
+    "branchModeHint": "新分支：原路径保持不变。"
   },
   "onboarding": {
     "badge": "首次配置",
@@ -239,6 +243,21 @@
     "defaultModelSaveFailed": "默认模型保存失败",
     "providerSaved": "Provider 已保存。",
     "providerDeleted": "Provider 已删除。",
-    "defaultModelSaved": "默认模型已更新。"
+    "defaultModelSaved": "默认模型已更新。",
+    "languageTitle": "语言 / Language",
+    "languageHelp": "切换界面语言，更改后立即生效。",
+    "languageChanged": "语言已切换。"
+  },
+  "export": {
+    "title": "导出",
+    "currentPath": "当前路径",
+    "wholeTree": "整个会话",
+    "markdown": "Markdown",
+    "json": "JSON",
+    "cancel": "取消",
+    "download": "下载",
+    "copiedToClipboard": "已复制到剪贴板",
+    "copyContent": "复制内容",
+    "noConversation": "没有打开的会话"
   }
 }

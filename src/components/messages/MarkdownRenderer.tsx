@@ -90,6 +90,13 @@ function resolveCodeLanguage(className?: string): string | null {
  * Shared renderer overrides so completed messages follow the app design system.
  */
 const markdownComponents: Components = {
+  pre({ node: _node, children }) {
+    return (
+      <div className="my-4 overflow-hidden rounded-2xl">
+        {children}
+      </div>
+    );
+  },
   a({ node: _node, href, children, ...props }) {
     const safeHref = typeof href === "string" ? href : undefined;
     return (
@@ -115,13 +122,13 @@ const markdownComponents: Components = {
           PreTag="div"
           customStyle={{
             margin: 0,
-            padding: "1rem",
+            padding: "1rem 1.25rem",
             borderRadius: "1rem",
-            border: "1px solid rgba(199, 202, 213, 0.9)",
-            background: "#f8f9fd",
-            boxShadow: "0 0 0 1px rgba(224, 226, 232, 0.95)",
-            fontSize: "0.9rem",
-            lineHeight: 1.6,
+            border: "1px solid rgba(199, 202, 213, 0.6)",
+            background: "#f6f7fb",
+            boxShadow: "inset 0 1px 2px rgba(17, 48, 105, 0.04)",
+            fontSize: "0.875rem",
+            lineHeight: 1.7,
           }}
           codeTagProps={{
             style: {
@@ -136,7 +143,7 @@ const markdownComponents: Components = {
 
     if (className?.includes("language-")) {
       return (
-        <pre className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <pre className="rounded-2xl border border-miro-border/30 bg-miro-surface-low p-4 text-sm">
           <code className={className} {...props}>
             {children}
           </code>
