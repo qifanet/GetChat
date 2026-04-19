@@ -16,6 +16,7 @@ import {
   listAvailableModelOptions,
 } from "../../features/models/modelUtils";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { UpdateCheckButton } from "../common/UpdateNotification";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
@@ -1028,4 +1029,3 @@ export function ProviderSettingsScreen({
     </section>
   );
 }
-

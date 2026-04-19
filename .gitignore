@@ -161,3 +161,4 @@ src-tauri/icons/
 # Tauri dev cache
 .claude/
 CLAUDE.md
+.tauri/

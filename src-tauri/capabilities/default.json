@@ -11,6 +11,7 @@
     "dialog:default",
     "dialog:allow-save",
     "fs:default",
-    "fs:write-files"
+    "fs:write-files",
+    "updater:default"
   ]
 }

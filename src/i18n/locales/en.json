@@ -284,5 +284,17 @@
     "hint": "Drag to pan · Scroll to zoom · Double-click to navigate",
     "emptyMessage": "(empty)",
     "openGlobalView": "Global View"
+  },
+  "updater": {
+    "checkForUpdates": "Check for Updates",
+    "checking": "Checking...",
+    "upToDate": "You are up to date",
+    "available": "New version v{{version}} available (current: v{{current}})",
+    "availableShort": "Update available",
+    "updateNow": "Update Now",
+    "later": "Later",
+    "installing": "Installing update...",
+    "installingHint": "The app will restart automatically after download",
+    "installFailed": "Update failed. Please try again later."
   }
 }
