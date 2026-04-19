@@ -5,11 +5,10 @@
  * The row emphasizes branch identity first, while hover actions expose the
  * real branch commands without overwhelming the rail.
  */
-
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getBranchDisplayName } from "../../i18n/displayNames";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import type { BranchEntity } from "../../types/conversation";
 import {
   IconArchive,
@@ -18,72 +17,70 @@ import {
   IconRotateCcw,
   IconStarOutline,
 } from "../common/Icon";
-
+const _select_setCurrentBranch = (s: import("../../stores/appStore.types").AppStore) => s.setCurrentBranch;
+const _select_renameBranch = (s: import("../../stores/appStore.types").AppStore) => s.renameBranch;
+const _select_archiveBranch = (s: import("../../stores/appStore.types").AppStore) => s.archiveBranch;
+const _select_unarchiveBranch = (s: import("../../stores/appStore.types").AppStore) => s.unarchiveBranch;
+const _select_setMainlineBranch = (s: import("../../stores/appStore.types").AppStore) => s.setMainlineBranch;
+const _select_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
+const _select_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
+const _select_enterCompare = (s: import("../../stores/appStore.types").AppStore) => s.enterCompare;
 interface BranchListItemProps {
   /** The branch to display. */
   branch: BranchEntity;
-
   /** Whether this is the currently viewed branch. */
   isCurrent: boolean;
 }
-
 /** Render a single branch row with inline actions. */
 export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
   const { t } = useTranslation();
-  const setCurrentBranch = useAppStore((state) => state.setCurrentBranch);
-  const renameBranch = useAppStore((state) => state.renameBranch);
-  const archiveBranch = useAppStore((state) => state.archiveBranch);
-  const unarchiveBranch = useAppStore((state) => state.unarchiveBranch);
-  const setMainlineBranch = useAppStore((state) => state.setMainlineBranch);
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
+  const setCurrentBranch = useAppStore(_select_setCurrentBranch);
+  const renameBranch = useAppStore(_select_renameBranch);
+  const archiveBranch = useAppStore(_select_archiveBranch);
+  const unarchiveBranch = useAppStore(_select_unarchiveBranch);
+  const setMainlineBranch = useAppStore(_select_setMainlineBranch);
+  const currentBranchId = useAppStore(_select_currentBranchId);
   const activeConversationId = useAppStore(
     (state) => state.workspace.activeConversationId
   );
-  const enterCompare = useAppStore((state) => state.enterCompare);
+  const enterCompare = useAppStore(_select_enterCompare);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState(branch.name);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const displayBranchName = getBranchDisplayName(branch.name, t);
   const canCompare = Boolean(currentBranchId && currentBranchId !== branch.id);
-
   useEffect(() => {
     setRenameDraft(branch.name);
   }, [branch.id, branch.name]);
-
   /** Open the branch as the current workspace path. */
   function handleClick(): void {
     if (!isRenaming) {
       setCurrentBranch(branch.id);
     }
   }
-
   /** Start inline branch renaming. */
   function startRenaming(): void {
     setRenameDraft(branch.name);
     setError(null);
     setIsRenaming(true);
   }
-
   /** Cancel inline renaming and restore the committed name. */
   function cancelRenaming(): void {
     setRenameDraft(branch.name);
     setError(null);
     setIsRenaming(false);
   }
-
   /** Persist the inline rename form through the store-backed command. */
   async function handleRenameSubmit(
     event: React.FormEvent<HTMLFormElement>
   ): Promise<void> {
     event.preventDefault();
-
     const trimmedName = renameDraft.trim();
     if (trimmedName.length === 0) {
       setError(t("branch.renameRequired"));
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -99,13 +96,11 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
       setIsSubmitting(false);
     }
   }
-
   /** Promote this branch to the conversation mainline. */
   async function handleSetMainline(): Promise<void> {
     if (!activeConversationId) {
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -120,7 +115,6 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
       setIsSubmitting(false);
     }
   }
-
   /** Archive or restore the branch through the real store action. */
   async function handleToggleArchive(): Promise<void> {
     setIsSubmitting(true);
@@ -143,20 +137,17 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
       setIsSubmitting(false);
     }
   }
-
   /** Compare this branch against the currently opened branch. */
   function handleCompare(): void {
     if (!currentBranchId || currentBranchId === branch.id) {
       return;
     }
-
     setError(null);
     enterCompare({
       leftBranchId: currentBranchId,
       rightBranchId: branch.id,
     });
   }
-
   return (
     <div
       className={`group rounded-[22px] px-3 py-3 transition-colors ${
@@ -222,7 +213,6 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
                   </span>
                 ) : null}
               </div>
-
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-miro-text-secondary">
                 <span>{branch.status === "ARCHIVED" ? t("branch.archivedBranches") : t("branch.panelTitle")}</span>
                 {branch.forkPointMessageId ? (
@@ -234,10 +224,8 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
               </div>
             </>
           )}
-
           {error ? <p className="mt-2 text-[11px] leading-5 text-red-600">{error}</p> : null}
         </div>
-
         {!isRenaming ? (
           <div
             className={`flex items-center gap-1 transition-opacity ${
@@ -247,11 +235,11 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
             <button
               type="button"
               className="app-icon-button h-7 w-7"
+              title={t("branch.rename")}
               onClick={(event) => {
                 event.stopPropagation();
                 startRenaming();
               }}
-              title={t("branch.rename")}
             >
               <IconPencilSquare size={12} />
             </button>
@@ -271,31 +259,31 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
             <button
               type="button"
               className="app-icon-button h-7 w-7 disabled:cursor-not-allowed disabled:text-miro-text-secondary/50 disabled:hover:bg-transparent"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleCompare();
-              }}
-              disabled={!canCompare}
               title={
                 canCompare
                   ? t("branch.compareWithCurrent")
                   : t("branch.compareUnavailable")
               }
+              onClick={(event) => {
+                event.stopPropagation();
+                handleCompare();
+              }}
+              disabled={!canCompare}
             >
               <IconColumns size={12} />
             </button>
             <button
               type="button"
               className="app-icon-button h-7 w-7"
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleToggleArchive();
-              }}
               title={
                 branch.status === "ARCHIVED"
                   ? t("branch.unarchive")
                   : t("branch.archive")
               }
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleToggleArchive();
+              }}
             >
               {branch.status === "ARCHIVED" ? (
                 <IconRotateCcw size={12} />

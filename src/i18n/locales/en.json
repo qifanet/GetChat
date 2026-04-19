@@ -18,7 +18,12 @@
     "workspace": "Workspace",
     "loading": "Loading...",
     "toggleLeftSidebar": "Toggle conversation list",
-    "toggleRightSidebar": "Toggle branch panel"
+    "toggleRightSidebar": "Toggle branch panel",
+    "confirm": "Confirm",
+    "copyCode": "Copy code",
+    "codeCopied": "Code copied",
+    "saving": "Saving...",
+    "saved": "Saved"
   },
   "boot": {
     "initializationFailed": "Initialization failed",
@@ -66,11 +71,19 @@
     "healthDescription": "There are {{activeCount}} active branches with {{siblingCount}} siblings at the same fork point. Consider comparing or archiving before continuing.",
     "goToCompare": "Compare",
     "archiveLowValue": "Archive low-value branches",
-    "healthActionHint": "Compare the mainline or a nearby branch first, then archive low-value routes from the right panel."
+    "healthActionHint": "Compare the mainline or a nearby branch first, then archive low-value routes from the right panel.",
+    "noBranches": "No branches",
+    "otherBranches": "Other branches",
+    "branchCount": "branches",
+    "forkFromMessage": "← forked from message",
+    "mainlineSummary": "{{userCount}} user · {{assistantCount}} assistant messages",
+    "forkFromMessageIndexed": "← forked from message {{index}}",
+    "timelineMessages": "messages"
   },
   "path": {
     "noPathSelected": "No path selected",
-    "forkFromMessage": "← forked from message"
+    "forkFromMessage": "← forked from message",
+    "mainlineSummary": "{{userCount}} user · {{assistantCount}} assistant messages"
   },
   "conversation": {
     "unnamedConversation": "Untitled conversation",
@@ -109,7 +122,9 @@
     "providerShortcutTitle": "Providers later",
     "providerShortcutBody": "Connecting an AI service is no longer required up front. Add it from Settings when you're ready.",
     "cleanLayoutTitle": "Works better on smaller windows",
-    "cleanLayoutBody": "Side panels switch to drawers on tighter viewports so the reading area stays clear."
+    "cleanLayoutBody": "Side panels switch to drawers on tighter viewports so the reading area stays clear.",
+    "editInlineTitle": "Editing message in place",
+    "editInlineDesc": "New AI response will replace the previous one"
   },
   "compare": {
     "noComparePath": "No compare paths selected",
@@ -139,7 +154,9 @@
     "applyToCurrentBranch": "Apply to current path",
     "modelUsed": "Model: {{name}}",
     "variantCount": "{{current}} / {{total}} candidates",
-    "variantHint": "{{count}} candidate answers"
+    "variantHint": "{{count}} candidate answers",
+    "streamingCaret": "Typing...",
+    "codeLanguage": "Language: {{lang}}"
   },
   "composer": {
     "label": "Compose",
@@ -259,5 +276,13 @@
     "copiedToClipboard": "Copied to clipboard",
     "copyContent": "Copy content",
     "noConversation": "No conversation open"
+  },
+  "globalView": {
+    "title": "Global View",
+    "stats": "{{messages}} messages · {{branches}} branches",
+    "fitView": "Fit View",
+    "hint": "Drag to pan · Scroll to zoom · Double-click to navigate",
+    "emptyMessage": "(empty)",
+    "openGlobalView": "Global View"
   }
 }

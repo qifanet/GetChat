@@ -6,10 +6,9 @@
  * Streaming and markdown surfaces must never render at the same time. This is
  * a hard constraint of the message rendering model.
  */
-
 import { useTranslation } from "react-i18next";
 import { memo, useState, type ReactNode } from "react";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { getModelDisplayName } from "../../features/models/modelUtils";
 import { resolveProviderIdForModel } from "../../features/composer/sendMessageAction";
 import { startAssistantVariantStream } from "../../services/streamController";
@@ -19,12 +18,17 @@ import { useStreamingMessage } from "../../hooks/useStreamingMessage";
 import { StreamingAssistantContent } from "./StreamingAssistantContent";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import type { MessageNode } from "../../types/conversation";
-
+const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
+const _sel_workspace_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
+const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
+const _sel_composer_isSending = (s: import("../../stores/appStore.types").AppStore) => s.composer.isSending;
+const _sel_setVariantPreview = (s: import("../../stores/appStore.types").AppStore) => s.setVariantPreview;
+const _sel_startHistoryFork = (s: import("../../stores/appStore.types").AppStore) => s.startHistoryFork;
+const _sel_setBranchHeadMessage = (s: import("../../stores/appStore.types").AppStore) => s.setBranchHeadMessage;
 interface AssistantMessageBubbleProps {
   /** The assistant message to render. */
   message: MessageNode;
 }
-
 /** Format a timestamp into a compact local time string. */
 function formatTime(timestamp: number, locale: string): string {
   return new Intl.DateTimeFormat(locale.startsWith("zh") ? "zh-CN" : "en-US", {
@@ -32,7 +36,6 @@ function formatTime(timestamp: number, locale: string): string {
     minute: "2-digit",
   }).format(new Date(timestamp));
 }
-
 /** Shared shell around the assistant content surface. */
 function AssistantMessageFrame({
   message,
@@ -50,13 +53,12 @@ function AssistantMessageFrame({
   toneClassName?: string;
 }) {
   const { t, i18n } = useTranslation();
-  const providerModels = useAppStore((state) => state.providerModels);
+  const providerModels = useAppStore(_sel_providerModels);
   const modelDisplayName = getModelDisplayName(
     message.generation?.modelId,
     providerModels,
     ""
   );
-
   return (
     <div className="app-message-card flex justify-start">
       <div className="max-w-[min(860px,100%)]">
@@ -79,31 +81,28 @@ function AssistantMessageFrame({
             </span>
           ) : null}
         </div>
-
         <div className={toneClassName ?? "assistant-message-bubble completed"}>{children}</div>
-
         {callout ? <div className="mt-3">{callout}</div> : null}
         {footer ? <div className="mt-3">{footer}</div> : null}
       </div>
     </div>
   );
 }
-
 /** Assistant message bubble with automatic streaming and completed switching. */
 export const AssistantMessageBubble = memo(function AssistantMessageBubble({
   message,
 }: AssistantMessageBubbleProps) {
   const { t } = useTranslation();
   const { isStreaming, requestId, rendererMode } = useStreamingMessage(message);
-  const activeConversationId = useAppStore((state) => state.workspace.activeConversationId);
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
+  const activeConversationId = useAppStore(_sel_workspace_activeConversationId);
+  const currentBranchId = useAppStore(_sel_workspace_currentBranchId);
   const parentMessage = useAppStore((state) =>
     message.parentId ? state.activeSnapshot?.entities.messages[message.parentId] ?? null : null
   );
-  const isSending = useAppStore((state) => state.composer.isSending);
-  const setVariantPreview = useAppStore((state) => state.setVariantPreview);
-  const startHistoryFork = useAppStore((state) => state.startHistoryFork);
-  const setBranchHeadMessage = useAppStore((state) => state.setBranchHeadMessage);
+  const isSending = useAppStore(_sel_composer_isSending);
+  const setVariantPreview = useAppStore(_sel_setVariantPreview);
+  const startHistoryFork = useAppStore(_sel_startHistoryFork);
+  const setBranchHeadMessage = useAppStore(_sel_setBranchHeadMessage);
   const currentBranchHeadMessageId = useAppStore((state) => {
     const branchId = state.workspace.currentBranchId;
     return branchId ? state.activeSnapshot?.entities.branches[branchId]?.headMessageId ?? null : null;
@@ -122,49 +121,41 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
   );
   const canPromoteToCurrentPath =
     Boolean(currentBranchId) && currentBranchHeadMessageId !== message.id;
-
   /** Copy the assistant response to the clipboard. */
   async function handleCopy(): Promise<void> {
     await copyTextToClipboard(message.content.text);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   }
-
   /** Start a non-destructive continuation flow from this assistant message. */
   function handleContinueFromHere(): void {
     if (!currentBranchId) {
       return;
     }
-
     startHistoryFork({
       sourceType: "HISTORY_ASSISTANT",
       sourceBranchId: currentBranchId,
       sourceMessageId: message.id,
     });
   }
-
   /** Promote a preview or historical assistant message to the current branch head. */
   async function handleApplyToCurrentPath(): Promise<void> {
     if (!currentBranchId) {
       return;
     }
-
     await setBranchHeadMessage(currentBranchId, message.id);
     setVariantPreview(null);
   }
-
   /** Regenerate this assistant reply as a variant, preserving history by default. */
   async function handleRegenerate(): Promise<void> {
     if (!activeConversationId || !currentBranchId || parentMessage?.role !== "USER") {
       return;
     }
-
     const state = useAppStore.getState();
     const modelId = state.composer.selectedModelId ?? message.generation?.modelId;
     if (!modelId) {
       return;
     }
-
     const providerId = resolveProviderIdForModel(state, modelId);
     const isCurrentLeaf =
       (state.activeSnapshot?.entities.branches[currentBranchId]?.headMessageId ?? null) ===
@@ -174,7 +165,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       conversationId: activeConversationId,
       upToMessageId: parentMessage.id,
     });
-
     await startAssistantVariantStream({
       conversationId: activeConversationId,
       branchId: currentBranchId,
@@ -191,7 +181,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       rendererMode: "DOM_TEXT",
     });
   }
-
   const footerActions = !isStreaming ? (
     <div className="flex flex-wrap gap-2">
       <button
@@ -230,7 +219,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       ) : null}
     </div>
   ) : null;
-
   if (isStreaming && requestId) {
     return (
       <AssistantMessageFrame
@@ -246,7 +234,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       </AssistantMessageFrame>
     );
   }
-
   if (isUserCancelled) {
     return (
       <AssistantMessageFrame
@@ -259,7 +246,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       </AssistantMessageFrame>
     );
   }
-
   if (message.status === "FAILED") {
     return (
       <AssistantMessageFrame
@@ -284,7 +270,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       </AssistantMessageFrame>
     );
   }
-
   if (message.status === "ABORTED") {
     return (
       <AssistantMessageFrame
@@ -297,7 +282,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       </AssistantMessageFrame>
     );
   }
-
   return (
     <AssistantMessageFrame message={message} footer={footerActions}>
       <MarkdownRenderer content={message.content.text} />

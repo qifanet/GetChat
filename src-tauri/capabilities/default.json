@@ -2,9 +2,15 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema/capability.json",
   "identifier": "default",
   "description": "Default capabilities for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:write-files"
   ]
 }

@@ -71,7 +71,9 @@ export type BrowserDebugCommandName =
   | "complete_assistant_message"
   | "fail_assistant_message"
   | "build_prompt_messages"
-  | "check_db_invariants";
+  | "check_db_invariants"
+  | "delete_message"
+  | "edit_user_message_inline";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {
@@ -507,6 +509,27 @@ function registerForkPointBranch(
     branchIds.push(branchId);
     conversation.indexes.branchIdsByForkPointId[forkPointMessageId] = branchIds;
   }
+}
+
+/** Collect all descendant IDs under a message. */
+function collectDescendantMessageIds(
+  conversation: BrowserDebugConversationRecord,
+  ancestorId: string
+): Set<string> {
+  const descendants = new Set<string>();
+  const stack = [...(conversation.indexes.childMessageIdsByParentId[ancestorId] ?? [])];
+  while (stack.length > 0) {
+    const currentId = stack.pop()!;
+    if (descendants.has(currentId)) {
+      continue;
+    }
+    descendants.add(currentId);
+    const children = conversation.indexes.childMessageIdsByParentId[currentId] ?? [];
+    for (const childId of children) {
+      stack.push(childId);
+    }
+  }
+  return descendants;
 }
 
 /** Create a browser debug provider DTO from a save payload. */
@@ -1497,6 +1520,114 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         }
 
         return promptMessages.reverse();
+      }) as T;
+
+    case "delete_message":
+      return mutateBrowserDebugState((state) => {
+        const messageId = args?.messageId as string | undefined;
+        if (!messageId) {
+          throwBrowserDebugError("INVALID_ARGUMENT", "messageId is required");
+        }
+        const { conversation, message } = requireMessageRecord(state, messageId);
+        if (message.role !== "ASSISTANT") {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Only ASSISTANT messages can be deleted as variants"
+          );
+        }
+        if (message.status === "STREAMING") {
+          throwBrowserDebugError("INVALID_ARGUMENT", "Cannot delete a streaming message");
+        }
+        if (message.childIds.length > 0) {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Cannot delete a message that has child messages"
+          );
+        }
+        const isBranchHead = Object.values(conversation.branches).some(
+          (branch) => branch.headMessageId === messageId
+        );
+        if (isBranchHead) {
+          throwBrowserDebugError(
+            "CONFLICT",
+            "Cannot delete a message that is currently a branch head"
+          );
+        }
+        if (message.parentId) {
+          const parent = conversation.messages[message.parentId];
+          if (parent) {
+            parent.childIds = parent.childIds.filter((id) => id !== messageId);
+          }
+          const siblings = conversation.indexes.childMessageIdsByParentId[message.parentId] ?? [];
+          conversation.indexes.childMessageIdsByParentId[message.parentId] = siblings.filter(
+            (id) => id !== messageId
+          );
+        } else {
+          conversation.indexes.rootMessageIds = conversation.indexes.rootMessageIds.filter(
+            (id) => id !== messageId
+          );
+        }
+        delete conversation.indexes.childMessageIdsByParentId[messageId];
+        delete conversation.indexes.branchIdsByForkPointId[messageId];
+        delete conversation.messages[messageId];
+        syncConversationSummary(conversation, Date.now());
+        return undefined;
+      }) as T;
+
+    case "edit_user_message_inline":
+      return mutateBrowserDebugState((state) => {
+        const messageId = args?.messageId as string | undefined;
+        const newContent = args?.newContent as string | undefined;
+        if (!messageId || typeof newContent !== "string") {
+          throwBrowserDebugError("INVALID_ARGUMENT", "messageId and newContent are required");
+        }
+        const { conversation, message } = requireMessageRecord(state, messageId);
+        if (message.role !== "USER") {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Only USER messages can be edited inline"
+          );
+        }
+        const descendants = collectDescendantMessageIds(conversation, messageId);
+        const hasForkPointReference = Object.values(conversation.branches).some(
+          (branch) =>
+            branch.forkPointMessageId !== null &&
+            descendants.has(branch.forkPointMessageId)
+        );
+        if (hasForkPointReference) {
+          throwBrowserDebugError(
+            "CONFLICT",
+            "Cannot edit inline when downstream messages are fork points of existing branches"
+          );
+        }
+        const now = Date.now();
+        for (const descendantId of descendants) {
+          const descendant = conversation.messages[descendantId];
+          if (descendant?.parentId) {
+            const siblings = conversation.indexes.childMessageIdsByParentId[descendant.parentId] ?? [];
+            conversation.indexes.childMessageIdsByParentId[descendant.parentId] = siblings.filter(
+              (id) => id !== descendantId
+            );
+          }
+          conversation.indexes.rootMessageIds = conversation.indexes.rootMessageIds.filter(
+            (id) => id !== descendantId
+          );
+          delete conversation.indexes.childMessageIdsByParentId[descendantId];
+          delete conversation.indexes.branchIdsByForkPointId[descendantId];
+          delete conversation.messages[descendantId];
+        }
+        Object.values(conversation.branches).forEach((branch) => {
+          if (branch.headMessageId && descendants.has(branch.headMessageId)) {
+            branch.headMessageId = messageId;
+            branch.updatedAt = now;
+          }
+        });
+        message.content = { text: newContent, format: "MARKDOWN" };
+        message.childIds = [];
+        message.updatedAt = now;
+        conversation.indexes.childMessageIdsByParentId[messageId] = [];
+        syncConversationSummary(conversation, now);
+        return message;
       }) as T;
 
     case "check_db_invariants":

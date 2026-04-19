@@ -5,18 +5,18 @@
  * The user message is right-aligned and treated as an authored instruction
  * block within the desktop workspace rather than a consumer chat bubble.
  */
-
 import { useTranslation } from "react-i18next";
 import { memo, useState } from "react";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import type { MessageNode } from "../../types/conversation";
 import { copyTextToClipboard } from "../../utils/clipboard";
-
+const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
+const _sel_setDraft = (s: import("../../stores/appStore.types").AppStore) => s.setDraft;
+const _sel_startEditInline = (s: import("../../stores/appStore.types").AppStore) => s.startEditInline;
 interface UserMessageBubbleProps {
   /** The user message to render. */
   message: MessageNode;
 }
-
 /** Format a timestamp into a compact local time string. */
 function formatTime(timestamp: number, locale: string): string {
   return new Intl.DateTimeFormat(locale.startsWith("zh") ? "zh-CN" : "en-US", {
@@ -24,39 +24,29 @@ function formatTime(timestamp: number, locale: string): string {
     minute: "2-digit",
   }).format(new Date(timestamp));
 }
-
 /** Render a right-aligned user message surface. */
 export const UserMessageBubble = memo(function UserMessageBubble({
   message,
 }: UserMessageBubbleProps) {
   const { t, i18n } = useTranslation();
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
-  const setDraft = useAppStore((state) => state.setDraft);
-  const startEditFork = useAppStore((state) => state.startEditFork);
+  const currentBranchId = useAppStore(_sel_workspace_currentBranchId);
+  const setDraft = useAppStore(_sel_setDraft);
+  const startEditInline = useAppStore(_sel_startEditInline);
   const [copied, setCopied] = useState(false);
-
   /** Copy the current user message text to the clipboard. */
   async function handleCopy(): Promise<void> {
     await copyTextToClipboard(message.content.text);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   }
-
   /** Load the message back into the composer and enter edit-fork mode. */
   function handleReEdit(): void {
     if (!currentBranchId) {
       return;
     }
-
     setDraft(message.content.text);
-    startEditFork({
-      sourceType: "HISTORY_USER_EDIT",
-      sourceBranchId: currentBranchId,
-      sourceMessageId: message.parentId ?? null,
-      originalEditableMessageId: message.id,
-    });
+    startEditInline(message.id);
   }
-
   return (
     <div className="app-message-card flex justify-end">
       <div className="max-w-[min(760px,82%)]">
@@ -73,11 +63,9 @@ export const UserMessageBubble = memo(function UserMessageBubble({
             {t("common.user").slice(0, 1)}
           </span>
         </div>
-
         <div className="rounded-[26px] rounded-tr-[10px] border border-miro-blue/12 bg-miro-blue-light px-5 py-4 text-[15px] leading-7 text-miro-text shadow-ring">
           <p className="whitespace-pre-wrap break-words">{message.content.text}</p>
         </div>
-
         <div className="mt-3 flex justify-end gap-2">
           <button
             type="button"

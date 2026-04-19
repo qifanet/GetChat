@@ -279,3 +279,88 @@ where
 
     Ok(result.rows_affected())
 }
+
+/**
+ * Hard delete a single message by ID.
+ * Caller must ensure the message has no children (leaf node).
+ */
+pub async fn hard_delete_message<'e, E>(executor: E, message_id: &str) -> sqlx::Result<bool>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let result = sqlx::query("DELETE FROM messages WHERE id = ?")
+        .bind(message_id)
+        .execute(executor)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/**
+ * Update the content of an existing user message.
+ * Only updates content_text and updated_at.
+ */
+pub async fn update_content<'e, E>(
+    executor: E,
+    message_id: &str,
+    content_text: &str,
+) -> sqlx::Result<bool>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let result = sqlx::query(
+        "UPDATE messages SET content_text = ?, updated_at = unixepoch() WHERE id = ?",
+    )
+    .bind(content_text)
+    .bind(message_id)
+    .execute(executor)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/**
+ * Delete ALL descendants of a given message (recursive).
+ *
+ * Uses a recursive CTE to collect every descendant ID, then deletes
+ * deepest-first to respect the FK constraint (parent_message_id ON DELETE RESTRICT).
+ * Returns the number of deleted messages.
+ */
+/**
+ * Collect all descendant IDs of a given message using a recursive CTE.
+ * Returns IDs ordered deepest-first (for safe deletion with FK RESTRICT).
+ */
+pub async fn collect_descendant_ids<'e, E>(
+    executor: E,
+    ancestor_id: &str,
+) -> sqlx::Result<Vec<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar(
+        "WITH RECURSIVE descendants(id, depth) AS (
+            SELECT m.id, 1 FROM messages m WHERE m.parent_message_id = ?
+            UNION ALL
+            SELECT m.id, d.depth + 1
+            FROM messages m INNER JOIN descendants d ON m.parent_message_id = d.id
+        )
+        SELECT id FROM descendants ORDER BY depth DESC",
+    )
+    .bind(ancestor_id)
+    .fetch_all(executor)
+    .await
+}
+
+/**
+ * Count children of a given message.
+ */
+pub async fn count_children<'e, E>(executor: E, message_id: &str) -> sqlx::Result<i64>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM messages WHERE parent_message_id = ?",
+    )
+    .bind(message_id)
+    .fetch_one(executor)
+    .await?;
+    Ok(row.0)
+}

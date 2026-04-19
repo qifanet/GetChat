@@ -63,6 +63,8 @@ fn setup_tracing() {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             setup_tracing();
             tracing::info!("GetChat starting...");
@@ -110,6 +112,8 @@ pub fn run() {
             commands::messages::complete_assistant_message,
             commands::messages::fail_assistant_message,
             commands::messages::build_prompt_messages,
+            commands::messages::delete_message,
+            commands::messages::edit_user_message_inline,
             // Streaming runtime (2)
             commands::streaming::start_model_stream,
             commands::streaming::abort_model_stream,

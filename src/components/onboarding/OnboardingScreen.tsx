@@ -7,23 +7,25 @@
  * Tauri command layer, and opens a working conversation so the user can start
  * chatting immediately after setup.
  */
-
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createModelProfileId } from "../../features/models/modelUtils";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import type { ProviderType } from "../../types/settings";
-
+const _sel_summaryOrder = (s: import("../../stores/appStore.types").AppStore) => s.summaryOrder;
+const _sel_workspace_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
+const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
+const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
+const _sel_createConversation = (s: import("../../stores/appStore.types").AppStore) => s.createConversation;
+const _sel_openConversation = (s: import("../../stores/appStore.types").AppStore) => s.openConversation;
 // ============================================================================
 // Presets
 // ============================================================================
-
 interface ProviderPreset {
   name: string;
   baseUrl: string;
   defaultModelId: string;
 }
-
 /** Return the default form preset for the selected provider type. */
 function getProviderPreset(type: ProviderType): ProviderPreset {
   if (type === "OLLAMA") {
@@ -33,28 +35,24 @@ function getProviderPreset(type: ProviderType): ProviderPreset {
       defaultModelId: "llama3.1",
     };
   }
-
   return {
     name: "OpenAI Compatible",
     baseUrl: "https://api.openai.com/v1",
     defaultModelId: "gpt-4.1-mini",
   };
 }
-
 // ============================================================================
 // Component
 // ============================================================================
-
 /** Render the first-run onboarding workflow for provider configuration. */
 export function OnboardingScreen() {
   const { t } = useTranslation();
-  const summaryOrder = useAppStore((s) => s.summaryOrder);
-  const activeConversationId = useAppStore((s) => s.workspace.activeConversationId);
-  const saveProvider = useAppStore((s) => s.saveProvider);
-  const setDefaultModel = useAppStore((s) => s.setDefaultModel);
-  const createConversation = useAppStore((s) => s.createConversation);
-  const openConversation = useAppStore((s) => s.openConversation);
-
+  const summaryOrder = useAppStore(_sel_summaryOrder);
+  const activeConversationId = useAppStore(_sel_workspace_activeConversationId);
+  const saveProvider = useAppStore(_sel_saveProvider);
+  const setDefaultModel = useAppStore(_sel_setDefaultModel);
+  const createConversation = useAppStore(_sel_createConversation);
+  const openConversation = useAppStore(_sel_openConversation);
   const [providerType, setProviderType] =
     useState<ProviderType>("OPENAI_COMPATIBLE");
   const preset = useMemo(() => getProviderPreset(providerType), [providerType]);
@@ -64,7 +62,6 @@ export function OnboardingScreen() {
   const [defaultModelId, setDefaultModelId] = useState(preset.defaultModelId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   /** Apply the provider-type preset without discarding explicit user edits elsewhere. */
   function applyPreset(type: ProviderType): void {
     const nextPreset = getProviderPreset(type);
@@ -73,13 +70,11 @@ export function OnboardingScreen() {
     setBaseUrl(nextPreset.baseUrl);
     setDefaultModelId(nextPreset.defaultModelId);
   }
-
   /** Persist the provider and ensure the user lands in an open conversation. */
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-
     try {
       const initialModelId = createModelProfileId();
       const normalizedModelName = defaultModelId.trim();
@@ -100,18 +95,14 @@ export function OnboardingScreen() {
           : [],
         enabled: true,
       });
-
       await setDefaultModel(savedProvider.defaultModelId ?? null);
-
       if (activeConversationId) {
         return;
       }
-
       if (summaryOrder.length > 0) {
         await openConversation(summaryOrder[0]);
         return;
       }
-
       const conversationId = await createConversation();
       await openConversation(conversationId);
     } catch (submitError) {
@@ -124,7 +115,6 @@ export function OnboardingScreen() {
       setSubmitting(false);
     }
   }
-
   return (
     <div className="app-shell flex h-full gap-4 p-4">
       <section className="app-panel hidden w-[38%] min-w-[360px] flex-col justify-between rounded-shell bg-gradient-to-br from-miro-coral-light via-white to-miro-orange-light px-10 py-12 lg:flex">
@@ -141,7 +131,6 @@ export function OnboardingScreen() {
             </p>
           </div>
         </div>
-
         <div className="space-y-3 rounded-panel border border-white/80 bg-white/80 p-5 shadow-ring backdrop-blur">
           <h2 className="font-display text-base font-semibold text-miro-text">
             {t("onboarding.noteTitle")}
@@ -151,7 +140,6 @@ export function OnboardingScreen() {
           </p>
         </div>
       </section>
-
       <section className="flex flex-1 items-center justify-center px-6 py-8">
         <div className="app-panel w-full max-w-xl rounded-shell bg-white/95 p-8 sm:p-10">
           <div className="mb-8 space-y-2">
@@ -165,7 +153,6 @@ export function OnboardingScreen() {
               {t("onboarding.formSubtitle")}
             </p>
           </div>
-
           <form className="space-y-5" onSubmit={handleSubmit}>
             <div className="grid gap-5 md:grid-cols-2">
               <label className="space-y-2">
@@ -187,7 +174,6 @@ export function OnboardingScreen() {
                   </option>
                 </select>
               </label>
-
               <label className="space-y-2">
                 <span className="text-sm font-medium text-miro-text">
                   {t("onboarding.providerName")}
@@ -201,7 +187,6 @@ export function OnboardingScreen() {
                 />
               </label>
             </div>
-
             <label className="space-y-2">
               <span className="text-sm font-medium text-miro-text">
                 {t("onboarding.baseUrl")}
@@ -214,7 +199,6 @@ export function OnboardingScreen() {
                 required
               />
             </label>
-
             <div className="grid gap-5 md:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-sm font-medium text-miro-text">
@@ -232,7 +216,6 @@ export function OnboardingScreen() {
                   }
                 />
               </label>
-
               <label className="space-y-2">
                 <span className="text-sm font-medium text-miro-text">
                   {t("onboarding.defaultModel")}
@@ -245,17 +228,14 @@ export function OnboardingScreen() {
                 />
               </label>
             </div>
-
             <div className="rounded-panel border border-dashed border-miro-border bg-miro-orange-light px-4 py-3 text-sm leading-6 text-miro-amber">
               {t("onboarding.connectionNotice")}
             </div>
-
             {error ? (
               <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
               </div>
             ) : null}
-
             <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-miro-text-secondary">
                 {t("onboarding.footerHint")}

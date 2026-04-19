@@ -62,6 +62,22 @@ export function buildSendPlan(state: AppStore): SendPlan {
     );
   }
 
+  // --- Rule 1.5: EDIT_INLINE mode ---
+  if (state.workspace.workspaceMode === "EDIT_INLINE" && state.workspace.forkIntent) {
+    const intent = state.workspace.forkIntent;
+    const editMessageId = intent.originalEditableMessageId;
+    if (!editMessageId) {
+      throw new SendPlanError("NO_EDIT_TARGET", "EDIT_INLINE mode but no target message");
+    }
+    return {
+      conversationId,
+      sourceBranchId,
+      targetBranchId: sourceBranchId,
+      targetParentMessageId: editMessageId, // New assistant will be child of edited user msg
+      editInlineMessageId: editMessageId,
+    };
+  }
+
   // --- Rule 2: Fork intent (HISTORY_FORK / EDIT_FORK) ---
   if (state.workspace.forkIntent) {
     const intent = state.workspace.forkIntent;
@@ -160,7 +176,8 @@ export class SendPlanError extends Error {
       | "NO_CURRENT_BRANCH"
       | "NO_SNAPSHOT"
       | "BRANCH_NOT_FOUND"
-      | "COMPARE_MODE_FORBIDDEN",
+      | "COMPARE_MODE_FORBIDDEN"
+      | "NO_EDIT_TARGET",
     message: string
   ) {
     super(message);

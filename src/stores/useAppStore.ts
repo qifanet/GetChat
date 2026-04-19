@@ -1064,6 +1064,106 @@ export const useAppStore = create<AppStore>()(
           );
         },
 
+        deleteMessageHard: async (messageId) => {
+          await tauriCmd.deleteMessage(messageId);
+          set(
+            (s) => {
+              if (!s.activeSnapshot) return;
+              const msg = s.activeSnapshot.entities.messages[messageId];
+              if (!msg) return;
+              const now = Date.now();
+              // Remove from parent childIds
+              if (msg.parentId) {
+                const parent = s.activeSnapshot.entities.messages[msg.parentId];
+                if (parent) {
+                  parent.childIds = parent.childIds.filter((id) => id !== messageId);
+                }
+              }
+              // Remove from childMessageIdsByParentId index
+              if (msg.parentId) {
+                const siblings = s.activeSnapshot.indexes.childMessageIdsByParentId[msg.parentId];
+                if (siblings) {
+                  const idx = siblings.indexOf(messageId);
+                  if (idx >= 0) siblings.splice(idx, 1);
+                }
+              }
+              // Remove from rootMessageIds if root
+              if (!msg.parentId) {
+                s.activeSnapshot.indexes.rootMessageIds = s.activeSnapshot.indexes.rootMessageIds.filter((id) => id !== messageId);
+              }
+              // Delete the message entity
+              delete s.activeSnapshot.entities.messages[messageId];
+              // Clear variant preview if it referenced the deleted message
+              if (s.workspace.variantPreview?.assistantMessageId === messageId) {
+                s.workspace.variantPreview = null;
+              }
+              s.activeSnapshot.summary.totalMessageCount = Math.max(
+                0,
+                s.activeSnapshot.summary.totalMessageCount - 1
+              );
+              s.activeSnapshot.summary.updatedAt = now;
+              s.summariesById[msg.conversationId] = {
+                ...(s.summariesById[msg.conversationId] ?? s.activeSnapshot.summary),
+                ...s.activeSnapshot.summary,
+              };
+            },
+            undefined,
+            "conversation/messageHardDeleted"
+          );
+        },
+
+        editUserMessageInline: async (messageId, newContent) => {
+          const updatedMsg = await tauriCmd.editUserMessageInline(messageId, newContent);
+          set(
+            (s) => {
+              if (!s.activeSnapshot) return;
+              const snap = s.activeSnapshot;
+              const collectDescendantIds = (parentId: string, acc: Set<string>) => {
+                const childIds = snap.indexes.childMessageIdsByParentId[parentId] ?? [];
+                for (const childId of childIds) {
+                  if (acc.has(childId)) continue;
+                  acc.add(childId);
+                  collectDescendantIds(childId, acc);
+                }
+              };
+              const descendantIds = new Set<string>();
+              collectDescendantIds(messageId, descendantIds);
+              const removedCount = descendantIds.size;
+              snap.entities.messages[messageId] = updatedMsg;
+              for (const descendantId of descendantIds) {
+                const descendant = snap.entities.messages[descendantId];
+                if (descendant?.parentId) {
+                  const siblings = snap.indexes.childMessageIdsByParentId[descendant.parentId];
+                  if (siblings) {
+                    snap.indexes.childMessageIdsByParentId[descendant.parentId] = siblings.filter(
+                      (id) => id !== descendantId
+                    );
+                  }
+                }
+                snap.indexes.rootMessageIds = snap.indexes.rootMessageIds.filter(
+                  (id) => id !== descendantId
+                );
+                delete snap.indexes.childMessageIdsByParentId[descendantId];
+                delete snap.indexes.branchIdsByForkPointId[descendantId];
+                delete snap.entities.messages[descendantId];
+              }
+              snap.indexes.childMessageIdsByParentId[messageId] = [];
+              updatedMsg.childIds = [];
+              snap.summary.totalMessageCount = Math.max(
+                0,
+                snap.summary.totalMessageCount - removedCount
+              );
+              snap.summary.updatedAt = updatedMsg.updatedAt;
+              s.summariesById[updatedMsg.conversationId] = {
+                ...(s.summariesById[updatedMsg.conversationId] ?? snap.summary),
+                ...snap.summary,
+              };
+              s.workspace.variantPreview = null;
+            },
+            undefined,
+            "conversation/userMessageEditedInline"
+          );
+        },
         patchBranchLocal: (branchId, patch) => {
           set(
             (s) => {
@@ -1177,6 +1277,22 @@ export const useAppStore = create<AppStore>()(
             },
             undefined,
             "workspace/editForkStarted"
+          );
+
+        },
+        startEditInline: (messageId) => {
+          set(
+            (s) => {
+              s.workspace.forkIntent = {
+                sourceType: "HISTORY_USER_EDIT",
+                sourceBranchId: s.workspace.currentBranchId!,
+                sourceMessageId: null,
+                originalEditableMessageId: messageId,
+              };
+              s.workspace.workspaceMode = "EDIT_INLINE";
+            },
+            undefined,
+            "workspace/editInlineStarted"
           );
         },
 

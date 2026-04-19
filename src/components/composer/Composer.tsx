@@ -16,27 +16,46 @@ import {
   getModelDisplayName,
   listAvailableModelOptions,
 } from "../../features/models/modelUtils";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { sendMessageAction } from "../../features/composer/sendMessageAction";
 import { cancelStream } from "../../services/streamController";
 import type { SendMode } from "../../types/base";
+
+const _sel_workspace_workspaceMode = (s: import("../../stores/appStore.types").AppStore) => s.workspace.workspaceMode;
+
+const _select_draft = (s: import("../../stores/appStore.types").AppStore) => s.composer.draft;
+const _select_isSending = (s: import("../../stores/appStore.types").AppStore) => s.composer.isSending;
+const _select_activeRequestId = (s: import("../../stores/appStore.types").AppStore) => s.composer.activeRequestId;
+const _select_selectedModelId = (s: import("../../stores/appStore.types").AppStore) => s.composer.selectedModelId;
+const _select_sendMode = (s: import("../../stores/appStore.types").AppStore) => s.composer.sendMode;
+const _select_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
+const _select_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
+const _select_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
+const _select_setDraft = (s: import("../../stores/appStore.types").AppStore) => s.setDraft;
+const _select_clearDraft = (s: import("../../stores/appStore.types").AppStore) => s.clearDraft;
+const _select_setSelectedModelId = (s: import("../../stores/appStore.types").AppStore) => s.setSelectedModelId;
+const _select_setSendMode = (s: import("../../stores/appStore.types").AppStore) => s.setSendMode;
+const _select_patchParams = (s: import("../../stores/appStore.types").AppStore) => s.patchParams;
+const _select_setSendingState = (s: import("../../stores/appStore.types").AppStore) => s.setSendingState;
+const _select_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
+
 /** Message composer with textarea, send mode dropdown, and stop controls. */
 export function Composer() {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const draft = useAppStore((state) => state.composer.draft);
-  const isSending = useAppStore((state) => state.composer.isSending);
-  const activeRequestId = useAppStore((state) => state.composer.activeRequestId);
-  const selectedModelId = useAppStore((state) => state.composer.selectedModelId);
-  const sendMode = useAppStore((state) => state.composer.sendMode);
-  const providerOrder = useAppStore((state) => state.providerOrder);
-  const providers = useAppStore((state) => state.providers);
-  const providerModels = useAppStore((state) => state.providerModels);
-  const setDraft = useAppStore((state) => state.setDraft);
-  const setSendMode = useAppStore((state) => state.setSendMode);
-  const workspaceMode = useAppStore((state) => state.workspace.workspaceMode);
+  const draft = useAppStore(_select_draft);
+  const isSending = useAppStore(_select_isSending);
+  const activeRequestId = useAppStore(_select_activeRequestId);
+  const selectedModelId = useAppStore(_select_selectedModelId);
+  const sendMode = useAppStore(_select_sendMode);
+  const providerOrder = useAppStore(_select_providerOrder);
+  const providers = useAppStore(_select_providers);
+  const providerModels = useAppStore(_select_providerModels);
+  const setDraft = useAppStore(_select_setDraft);
+  const setSendMode = useAppStore(_select_setSendMode);
+  const workspaceMode = useAppStore(_sel_workspace_workspaceMode);
   const activeConversationId = useAppStore(
     (state) => state.workspace.activeConversationId
   );

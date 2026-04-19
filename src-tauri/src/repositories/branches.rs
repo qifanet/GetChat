@@ -199,3 +199,60 @@ where
 
     Ok(())
 }
+
+/**
+ * Redirect any branch head that points to a message in the given set.
+ * Used before deleting descendants to avoid FK RESTRICT violations.
+ * Returns the number of branches updated.
+ */
+pub async fn redirect_heads_from_descendants<'e, E>(
+    executor: E,
+    conversation_id: &str,
+    descendant_ids: &[String],
+    new_head_id: &str,
+) -> sqlx::Result<u64>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    if descendant_ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<&str> = descendant_ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "UPDATE branches SET head_message_id = ?, updated_at = unixepoch()          WHERE conversation_id = ? AND head_message_id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query(&sql).bind(new_head_id).bind(conversation_id);
+    for id in descendant_ids {
+        query = query.bind(id);
+    }
+    let result = query.execute(executor).await?;
+    Ok(result.rows_affected())
+}
+
+/**
+ * Count branches whose fork point references one of the provided messages.
+ * Used to prevent deleting messages required by branch FK constraints.
+ */
+pub async fn count_fork_points_in_set<'e, E>(
+    executor: E,
+    conversation_id: &str,
+    message_ids: &[String],
+) -> sqlx::Result<i64>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    if message_ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<&str> = message_ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "SELECT COUNT(*) FROM branches WHERE conversation_id = ? AND fork_point_message_id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(conversation_id);
+    for id in message_ids {
+        query = query.bind(id);
+    }
+    query.fetch_one(executor).await
+}

@@ -308,6 +308,21 @@ export async function buildPromptMessages(
 
 // ============================================================================
 // Runtime Streaming Commands
+/** Hard delete a variant/candidate assistant message */
+export async function deleteMessage(messageId: string): Promise<void> {
+  return executeCommand<void>("delete_message", { messageId });
+}
+
+/** Edit a user message inline — replaces content, deletes assistant children */
+export async function editUserMessageInline(
+  messageId: string,
+  newContent: string
+): Promise<MessageNode> {
+  return executeCommand<MessageNode>("edit_user_message_inline", {
+    messageId,
+    newContent,
+  });
+}
 // ============================================================================
 
 /**

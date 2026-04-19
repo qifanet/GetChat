@@ -77,6 +77,12 @@ export interface SendPlan {
    * the user is continuing from.
    */
   continueFromVariantMessageId?: MessageId;
+
+  /**
+   * For EDIT_INLINE: the user message being edited in place.
+   * When set, no branch is created — the message content is replaced directly.
+   */
+  editInlineMessageId?: MessageId;
 }
 
 // ============================================================================

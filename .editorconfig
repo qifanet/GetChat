@@ -1,0 +1,42 @@
+# =============================================================================
+# EditorConfig — GetChat Project
+# https://editorconfig.org
+# =============================================================================
+# This file enforces consistent coding style across all editors and IDEs.
+# Every contributor MUST use an EditorConfig plugin for their editor.
+# =============================================================================
+
+root = true
+
+# ---- Default (all files) ----
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# ---- Rust ----
+[*.rs]
+indent_size = 4
+
+# ---- TOML (Cargo.toml, etc.) ----
+[*.toml]
+indent_size = 4
+
+# ---- CSS / SCSS ----
+[*.{css,scss}]
+indent_size = 2
+
+# ---- Markdown ----
+[*.md]
+trim_trailing_whitespace = false
+
+# ---- JSON (auto-generated schemas may differ) ----
+[*.json]
+insert_final_newline = false
+
+# ---- Auto-generated files — do not touch ----
+[src-tauri/gen/**]
+generated_code = true

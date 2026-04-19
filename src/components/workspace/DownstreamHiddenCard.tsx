@@ -12,11 +12,9 @@
  *
  * This component only appears when hiddenCount > 0.
  */
-
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { selectHiddenDownstreamCount } from "../../selectors/conversationSelectors";
-
 /**
  * Card showing count of hidden downstream messages during fork.
  * Reinforces: messages are hidden, not deleted.
@@ -24,9 +22,7 @@ import { selectHiddenDownstreamCount } from "../../selectors/conversationSelecto
 export function DownstreamHiddenCard() {
   const { t } = useTranslation();
   const hiddenCount = useAppStore(selectHiddenDownstreamCount);
-
   if (hiddenCount <= 0) return null;
-
   return (
     <div className="mx-3 mb-3 rounded-panel border border-miro-coral-light bg-miro-coral-light/35 px-4 py-3 shadow-ring">
       <p className="app-section-label mb-1">{t("workspace.downstreamLabel")}</p>

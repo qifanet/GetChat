@@ -249,6 +249,19 @@
     @apply whitespace-pre-wrap break-words font-body text-[15px] leading-7 text-miro-text;
   }
 
+  .streaming-caret::after {
+    content: "▊";
+    display: inline-block;
+    margin-left: 2px;
+    color: #3755c3;
+    animation: streaming-blink 0.8s ease-in-out infinite;
+  }
+
+  @keyframes streaming-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
   .markdown-content {
     @apply font-body text-[15px] leading-[1.75] text-miro-text;
     word-break: break-word;

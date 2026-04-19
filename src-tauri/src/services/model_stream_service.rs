@@ -31,6 +31,7 @@ use crate::repositories::{provider_models, providers};
 use crate::state::SecureKeyStore;
 
 const MODEL_CONNECT_TIMEOUT_SECONDS: u64 = 10;
+const MODEL_STREAM_TIMEOUT_SECONDS: u64 = 600;
 const ERROR_BODY_PREVIEW_LIMIT: usize = 256;
 
 /**
@@ -222,12 +223,24 @@ pub async fn stream_model_response(
     channel: &Channel<ModelStreamEventDto>,
     cancel_rx: watch::Receiver<bool>,
 ) -> Result<ModelStreamOutcome, ModelStreamFailure> {
-    if request.provider_type == "OLLAMA" {
-        return stream_ollama_response(request, channel, cancel_rx).await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(MODEL_STREAM_TIMEOUT_SECONDS),
+        async {
+            if request.provider_type == "OLLAMA" {
+                return stream_ollama_response(request, channel, cancel_rx).await;
+            }
+            let endpoint = build_openai_chat_completions_url(&request.base_url);
+            stream_openai_compatible_response(request, &endpoint, channel, cancel_rx).await
+        },
+    )
+    .await;
+    match result {
+        Ok(inner) => inner,
+        Err(_) => Err(ModelStreamFailure::retriable(
+            "MODEL_STREAM_TIMEOUT",
+            format!("Generation timed out after {} seconds", MODEL_STREAM_TIMEOUT_SECONDS),
+        )),
     }
-
-    let endpoint = build_openai_chat_completions_url(&request.base_url);
-    stream_openai_compatible_response(request, &endpoint, channel, cancel_rx).await
 }
 
 /** Normalize a configured base URL so endpoint builders can append paths safely. */
