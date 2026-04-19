@@ -17,8 +17,15 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 let lastCheckTime = 0;
 let cachedUpdate: Update | null = null;
 
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export function isUpdaterSupported(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const tauriWindow = window as Window & {
+    __TAURI_INTERNALS__?: { invoke?: unknown };
+  };
+  return typeof tauriWindow.__TAURI_INTERNALS__?.invoke === "function";
 }
 
 export interface UpdateInfo {
@@ -33,17 +40,17 @@ export interface UpdateInfo {
  * Returns null if no update available, or UpdateInfo if a new version exists.
  */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
-  if (!isTauri()) return null;
+  if (!isUpdaterSupported()) return null;
 
   try {
     const update = await tauriCheck();
+    lastCheckTime = Date.now();
     if (!update) {
       cachedUpdate = null;
       return null;
     }
 
     cachedUpdate = update;
-    lastCheckTime = Date.now();
 
     return {
       currentVersion: update.currentVersion,
@@ -52,6 +59,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
       body: update.body,
     };
   } catch (err) {
+    lastCheckTime = Date.now();
     console.warn("[updater] Check failed:", err);
     return null;
   }
@@ -104,7 +112,8 @@ export async function installUpdateAndRelaunch(): Promise<void> {
  */
 export async function autoCheckForUpdate(): Promise<UpdateInfo | null> {
   const now = Date.now();
-  if (now - lastCheckTime < UPDATE_CHECK_INTERVAL_MS && cachedUpdate) {
+  if (now - lastCheckTime < UPDATE_CHECK_INTERVAL_MS) {
+    if (!cachedUpdate) return null;
     return {
       currentVersion: cachedUpdate.currentVersion,
       latestVersion: cachedUpdate.version,

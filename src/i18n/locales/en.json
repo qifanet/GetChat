@@ -291,6 +291,7 @@
     "upToDate": "You are up to date",
     "available": "New version v{{version}} available (current: v{{current}})",
     "availableShort": "Update available",
+    "unsupported": "Updater is only available in desktop app",
     "updateNow": "Update Now",
     "later": "Later",
     "installing": "Installing update...",

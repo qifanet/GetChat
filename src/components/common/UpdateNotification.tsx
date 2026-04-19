@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import {
   autoCheckForUpdate,
   checkForUpdate,
+  isUpdaterSupported,
   installUpdateAndRelaunch,
   type UpdateInfo,
 } from "../../services/updateChecker";
@@ -39,17 +40,6 @@ export function UpdateNotification() {
       setInstalling(false);
     }
   }, [t]);
-
-  const handleManualCheck = useCallback(async () => {
-    const info = await checkForUpdate();
-    if (info) {
-      setUpdate(info);
-      setDismissed(false);
-    } else {
-      setUpdate(null);
-      setDismissed(false);
-    }
-  }, []);
 
   // Don't render anything when no update, dismissed, or in browser dev mode
   if (!update || dismissed) {
@@ -122,9 +112,16 @@ export function UpdateNotification() {
 export function UpdateCheckButton() {
   const { t } = useTranslation();
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<"up-to-date" | "available" | null>(null);
+  const [result, setResult] = useState<
+    "up-to-date" | "available" | "unsupported" | null
+  >(null);
 
   const handleCheck = useCallback(async () => {
+    if (!isUpdaterSupported()) {
+      setResult("unsupported");
+      return;
+    }
+
     setChecking(true);
     setResult(null);
     const info = await checkForUpdate();
@@ -150,6 +147,11 @@ export function UpdateCheckButton() {
       {result === "available" && (
         <span className="text-xs text-miro-blue">
           {t("updater.availableShort")}
+        </span>
+      )}
+      {result === "unsupported" && (
+        <span className="text-xs text-miro-text-secondary">
+          {t("updater.unsupported")}
         </span>
       )}
     </div>
