@@ -1071,6 +1071,7 @@ export const useAppStore = create<AppStore>()(
               if (!s.activeSnapshot) return;
               const msg = s.activeSnapshot.entities.messages[messageId];
               if (!msg) return;
+              const now = Date.now();
               // Remove from parent childIds
               if (msg.parentId) {
                 const parent = s.activeSnapshot.entities.messages[msg.parentId];
@@ -1096,6 +1097,15 @@ export const useAppStore = create<AppStore>()(
               if (s.workspace.variantPreview?.assistantMessageId === messageId) {
                 s.workspace.variantPreview = null;
               }
+              s.activeSnapshot.summary.totalMessageCount = Math.max(
+                0,
+                s.activeSnapshot.summary.totalMessageCount - 1
+              );
+              s.activeSnapshot.summary.updatedAt = now;
+              s.summariesById[msg.conversationId] = {
+                ...(s.summariesById[msg.conversationId] ?? s.activeSnapshot.summary),
+                ...s.activeSnapshot.summary,
+              };
             },
             undefined,
             "conversation/messageHardDeleted"
@@ -1108,19 +1118,46 @@ export const useAppStore = create<AppStore>()(
             (s) => {
               if (!s.activeSnapshot) return;
               const snap = s.activeSnapshot;
+              const collectDescendantIds = (parentId: string, acc: Set<string>) => {
+                const childIds = snap.indexes.childMessageIdsByParentId[parentId] ?? [];
+                for (const childId of childIds) {
+                  if (acc.has(childId)) continue;
+                  acc.add(childId);
+                  collectDescendantIds(childId, acc);
+                }
+              };
+              const descendantIds = new Set<string>();
+              collectDescendantIds(messageId, descendantIds);
+              const removedCount = descendantIds.size;
               snap.entities.messages[messageId] = updatedMsg;
-              const childIds = snap.indexes.childMessageIdsByParentId[messageId];
-              if (childIds) {
-                for (const childId of [...childIds]) {
-                  const child = snap.entities.messages[childId];
-                  if (child && child.role === "ASSISTANT") {
-                    delete snap.entities.messages[childId];
+              for (const descendantId of descendantIds) {
+                const descendant = snap.entities.messages[descendantId];
+                if (descendant?.parentId) {
+                  const siblings = snap.indexes.childMessageIdsByParentId[descendant.parentId];
+                  if (siblings) {
+                    snap.indexes.childMessageIdsByParentId[descendant.parentId] = siblings.filter(
+                      (id) => id !== descendantId
+                    );
                   }
                 }
-                snap.indexes.childMessageIdsByParentId[messageId] =
-                  childIds.filter((id: string) => snap.entities.messages[id] !== undefined);
+                snap.indexes.rootMessageIds = snap.indexes.rootMessageIds.filter(
+                  (id) => id !== descendantId
+                );
+                delete snap.indexes.childMessageIdsByParentId[descendantId];
+                delete snap.indexes.branchIdsByForkPointId[descendantId];
+                delete snap.entities.messages[descendantId];
               }
-              updatedMsg.childIds = snap.indexes.childMessageIdsByParentId[messageId] || [];
+              snap.indexes.childMessageIdsByParentId[messageId] = [];
+              updatedMsg.childIds = [];
+              snap.summary.totalMessageCount = Math.max(
+                0,
+                snap.summary.totalMessageCount - removedCount
+              );
+              snap.summary.updatedAt = updatedMsg.updatedAt;
+              s.summariesById[updatedMsg.conversationId] = {
+                ...(s.summariesById[updatedMsg.conversationId] ?? snap.summary),
+                ...snap.summary,
+              };
               s.workspace.variantPreview = null;
             },
             undefined,

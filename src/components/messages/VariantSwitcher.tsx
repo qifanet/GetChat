@@ -38,6 +38,14 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
   const currentBranchId = useAppStore(selectCurrentBranchId);
   const variantPreview = useAppStore(selectVariantPreview);
   const pathMessages = useAppStore(selectCurrentPathMessages);
+  const branchHeads = useMemo(() => {
+    if (!activeSnapshot) return new Set<string>();
+    return new Set(
+      Object.values(activeSnapshot.entities.branches)
+        .map((branch) => branch.headMessageId)
+        .filter((id): id is string => Boolean(id))
+    );
+  }, [activeSnapshot]);
   const total = variantGroup.assistantMessageIds.length;
   const currentIndex = useMemo(() => {
     if (!activeSnapshot || !currentBranchId) return 0;
@@ -116,6 +124,8 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
   if (total <= 1) {
     return null;
   }
+  const currentAssistantId = variantGroup.assistantMessageIds[currentIndex];
+  const canDeleteCurrent = !branchHeads.has(currentAssistantId);
   return (
     <div className="app-message-card flex justify-start">
       <div className="flex items-center gap-2 rounded-full border border-miro-border/40 bg-white/88 px-3 py-1.5 shadow-ring">
@@ -146,9 +156,10 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
         {total > 1 && (
           <button
             type="button"
-            onClick={() => handleDelete(variantGroup.assistantMessageIds[currentIndex])}
-            className="flex h-6 w-6 items-center justify-center rounded-full text-miro-text-secondary transition-colors hover:bg-miro-red/10 hover:text-miro-red"
-            title={t("common.delete")}
+            onClick={() => handleDelete(currentAssistantId)}
+            disabled={!canDeleteCurrent}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-miro-text-secondary transition-colors hover:bg-miro-red/10 hover:text-miro-red disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-miro-text-secondary"
+            title={canDeleteCurrent ? t("common.delete") : t("branch.currentPath")}
             aria-label={t("common.delete")}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

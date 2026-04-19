@@ -91,6 +91,7 @@ export async function sendMessageAction(): Promise<void> {
     // Collect all descendant IDs from the frontend snapshot before mutation
     const snapshot = state.activeSnapshot;
     const deletedIds = new Set<string>();
+    const redirectedBranchIds = new Set<string>();
     if (snapshot) {
       const collectDescendants = (parentId: string) => {
         const children = snapshot.indexes.childMessageIdsByParentId[parentId] ?? [];
@@ -100,6 +101,11 @@ export async function sendMessageAction(): Promise<void> {
         }
       };
       collectDescendants(plan.editInlineMessageId);
+      for (const branch of Object.values(snapshot.entities.branches)) {
+        if (branch.headMessageId && deletedIds.has(branch.headMessageId)) {
+          redirectedBranchIds.add(branch.id);
+        }
+      }
     }
     // Single atomic set
     useAppStore.setState(
@@ -116,6 +122,9 @@ export async function sendMessageAction(): Promise<void> {
               if (idx !== -1) siblings.splice(idx, 1);
             }
           }
+          snap.indexes.rootMessageIds = snap.indexes.rootMessageIds.filter((rootId) => rootId !== id);
+          delete snap.indexes.childMessageIdsByParentId[id];
+          delete snap.indexes.branchIdsByForkPointId[id];
           delete snap.entities.messages[id];
         }
         // Update the edited message with fresh DTO (empty childIds)
@@ -125,7 +134,24 @@ export async function sendMessageAction(): Promise<void> {
         const branch = snap.entities.branches[plan.targetBranchId];
         if (branch) {
           branch.headMessageId = updatedMsg.id;
+          branch.updatedAt = updatedMsg.updatedAt;
         }
+        for (const branchId of redirectedBranchIds) {
+          const redirected = snap.entities.branches[branchId];
+          if (redirected) {
+            redirected.headMessageId = updatedMsg.id;
+            redirected.updatedAt = updatedMsg.updatedAt;
+          }
+        }
+        snap.summary.totalMessageCount = Math.max(
+          0,
+          snap.summary.totalMessageCount - deletedIds.size
+        );
+        snap.summary.updatedAt = updatedMsg.updatedAt;
+        s.summariesById[plan.conversationId] = {
+          ...(s.summariesById[plan.conversationId] ?? snap.summary),
+          ...snap.summary,
+        };
         s.composer.draft = "";
         s.workspace.workspaceMode = "NORMAL";
         s.workspace.forkIntent = null;

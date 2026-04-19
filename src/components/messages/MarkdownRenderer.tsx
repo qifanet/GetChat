@@ -30,6 +30,7 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
+import { useTranslation } from "react-i18next";
 import { copyTextToClipboard } from "../../utils/clipboard";
 interface MarkdownRendererProps {
   content: string;
@@ -94,7 +95,17 @@ function extractTextFromChildren(children: ReactNode): string {
   }
   return "";
 }
-function CodeBlockHeader({ language, rawCode }: { language: string | null; rawCode: string }) {
+function CodeBlockHeader({
+  language,
+  rawCode,
+  copyLabel,
+  copiedLabel,
+}: {
+  language: string | null;
+  rawCode: string;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     void copyTextToClipboard(rawCode).then(() => {
@@ -117,18 +128,27 @@ function CodeBlockHeader({ language, rawCode }: { language: string | null; rawCo
         ) : (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
         )}
-        {copied ? "Copied" : "Copy"}
+        {copied ? copiedLabel : copyLabel}
       </button>
     </div>
   );
 }
-const markdownComponents: Components = {
+function buildMarkdownComponents(
+  copyLabel: string,
+  copiedLabel: string
+): Components {
+  return {
   pre({ node: _node, children }) {
     const language = extractLanguageFromChildren(children);
     const rawCode = extractTextFromChildren(children).replace(/\n$/, "");
     return (
       <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
-        <CodeBlockHeader language={language} rawCode={rawCode} />
+        <CodeBlockHeader
+          language={language}
+          rawCode={rawCode}
+          copyLabel={copyLabel}
+          copiedLabel={copiedLabel}
+        />
         <div className="overflow-x-auto">{children}</div>
       </div>
     );
@@ -175,8 +195,14 @@ const markdownComponents: Components = {
     }
     return <code className={className} {...props}>{children}</code>;
   },
-};
+  };
+}
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: MarkdownRendererProps) {
+  const { t } = useTranslation();
+  const markdownComponents = buildMarkdownComponents(
+    t("common.copyCode"),
+    t("common.codeCopied")
+  );
   return (
     <div className="markdown-content max-w-none">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>

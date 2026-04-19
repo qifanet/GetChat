@@ -45,13 +45,14 @@ export function MessageList() {
   }, [activeSnapshot]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const isStreaming = useStreamStore((s) => Object.values(s.sessionsByRequestId).some((ss) => ss.status === "STREAMING"));
   const [autoFollow, setAutoFollow] = useState(true);
   const userScrolledRef = useRef(false);
   const reenableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleScroll = useCallback(() => {
-    const el = scrollContainerRef.current;
+    const el = scrollContainer;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     if (!atBottom && autoFollow) {
@@ -59,14 +60,14 @@ export function MessageList() {
       userScrolledRef.current = true;
       if (reenableTimerRef.current) clearTimeout(reenableTimerRef.current);
     }
-  }, [autoFollow]);
+  }, [autoFollow, scrollContainer]);
 
   useEffect(() => {
-    const el = scrollContainerRef.current;
+    const el = scrollContainer;
     if (!el) return;
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, [handleScroll]);
+  }, [handleScroll, scrollContainer]);
 
   useEffect(() => {
     if (userScrolledRef.current && !autoFollow && isStreaming) {
@@ -95,7 +96,9 @@ export function MessageList() {
       while (el) {
         const style = getComputedStyle(el);
         if (style.overflowY === "auto" || style.overflowY === "scroll") {
-          scrollContainerRef.current = el as HTMLDivElement;
+          const container = el as HTMLDivElement;
+          scrollContainerRef.current = container;
+          setScrollContainer(container);
           break;
         }
         el = el.parentElement;

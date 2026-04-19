@@ -1038,6 +1038,8 @@ pub async fn delete_variant_message(
  * This replaces the content of an existing user message and deletes all
  * its ASSISTANT children. The frontend will then create a new assistant
  * placeholder at the same position for streaming.
+ * Returns CONFLICT when any downstream message is still used as a branch
+ * fork point (fork_point_message_id FK is ON DELETE RESTRICT).
  *
  * Returns the updated MessageDto.
  */
@@ -1062,6 +1064,19 @@ pub async fn edit_user_message_inline(
     // Step 1: collect IDs (deepest-first via CTE)
     let descendant_ids = messages::collect_descendant_ids(&mut *tx, message_id).await
         .map_err(|e| AppError::db_error(&format!("collect descendants: {e}")))?;
+    let fork_point_ref_count = branches::count_fork_points_in_set(
+        &mut *tx,
+        &msg.conversation_id,
+        &descendant_ids,
+    )
+    .await
+    .map_err(|e| AppError::db_error(&format!("count descendant fork-point refs: {e}")))?;
+    if fork_point_ref_count > 0 {
+        return Err(
+            AppError::conflict("Cannot edit message inline because downstream fork points exist")
+                .with_details(format!("fork_point_ref_count={fork_point_ref_count}")),
+        );
+    }
     // Step 2: redirect branch heads that point to any descendant
     //         (branches.head_message_id has ON DELETE RESTRICT)
     if !descendant_ids.is_empty() {

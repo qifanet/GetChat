@@ -11,7 +11,7 @@ import { stableSelector } from "./stable";
 // ============================================================================
 // Data Types
 // ============================================================================
-export type MessageRole = "USER" | "ASSISTANT";
+export type MessageRole = "SYSTEM" | "USER" | "ASSISTANT";
 /** A single node in the global view tree. */
 export interface GlobalViewNode {
   /** Message ID. */
@@ -58,6 +58,13 @@ function getTextPreview(snapshot: ConversationSnapshot, msgId: string): { label:
     preview: text.slice(0, 200),
   };
 }
+
+function normalizeMessageRole(role: string | undefined): MessageRole {
+  if (role === "USER" || role === "ASSISTANT" || role === "SYSTEM") {
+    return role;
+  }
+  return "USER";
+}
 /**
  * Walk the message tree starting from a given message ID,
  * building GlobalViewNode children along the way.
@@ -76,7 +83,7 @@ function buildMessageSubtree(
   const forkBranches = messageToBranches.get(messageId) ?? [];
   const node: GlobalViewNode = {
     id: messageId,
-    role: (msg?.role as MessageRole) ?? "USER",
+    role: normalizeMessageRole(msg?.role),
     label,
     preview,
     branchId,

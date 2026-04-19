@@ -229,3 +229,30 @@ where
     let result = query.execute(executor).await?;
     Ok(result.rows_affected())
 }
+
+/**
+ * Count branches whose fork point references one of the provided messages.
+ * Used to prevent deleting messages required by branch FK constraints.
+ */
+pub async fn count_fork_points_in_set<'e, E>(
+    executor: E,
+    conversation_id: &str,
+    message_ids: &[String],
+) -> sqlx::Result<i64>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    if message_ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<&str> = message_ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "SELECT COUNT(*) FROM branches WHERE conversation_id = ? AND fork_point_message_id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(conversation_id);
+    for id in message_ids {
+        query = query.bind(id);
+    }
+    query.fetch_one(executor).await
+}

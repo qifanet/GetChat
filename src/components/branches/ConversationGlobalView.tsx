@@ -351,8 +351,13 @@ export function ConversationGlobalView({ onClose }: Props) {
           {layouts.map((l) => {
             const n = l.node;
             const isUser = n.role === "USER";
+            const isSystem = n.role === "SYSTEM";
             const isCurrentBranch = n.branchId === currentBranchId;
             const hasForks = n.forkBranches.length > 0;
+            const nodeFill = isUser ? "#eef1ff" : isSystem ? "#fff4e5" : "#edfcf2";
+            const nodeStroke = isUser ? "#c7d2fe" : isSystem ? "#fbcf8b" : "#bbf7d0";
+            const roleColor = isUser ? "#5b76fe" : isSystem ? "#d97706" : "#16a34a";
+            const roleLabel = isUser ? "U" : isSystem ? "S" : "A";
 
             return (
               <g
@@ -368,15 +373,13 @@ export function ConversationGlobalView({ onClose }: Props) {
                   width={NODE_W}
                   height={NODE_H}
                   rx={BORDER_RADIUS}
-                  fill={isUser ? "#eef1ff" : "#edfcf2"}
+                  fill={nodeFill}
                   stroke={
                     isCurrentBranch
                       ? "#5b76fe"
                       : hasForks
                         ? "#5b76fe"
-                        : isUser
-                          ? "#c7d2fe"
-                          : "#bbf7d0"
+                        : nodeStroke
                   }
                   strokeWidth={isCurrentBranch ? 1.5 : 1}
                 />
@@ -388,9 +391,9 @@ export function ConversationGlobalView({ onClose }: Props) {
                   dominantBaseline="central"
                   fontSize={10}
                   fontWeight={600}
-                  fill={isUser ? "#5b76fe" : "#16a34a"}
+                  fill={roleColor}
                 >
-                  {isUser ? "U" : "A"}
+                  {roleLabel}
                 </text>
 
                 {/* Label text with clip to prevent overflow */}

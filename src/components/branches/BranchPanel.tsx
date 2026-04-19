@@ -303,7 +303,7 @@ function flattenTree(root: BranchTreeNode): FlatRow[] {
         node: child,
         depth: childDepth,
         isLast,
-        ancestorLines,
+        ancestorLines: childAncestorLines,
       });
 
       if (childDepth < MAX_RENDER_DEPTH) {

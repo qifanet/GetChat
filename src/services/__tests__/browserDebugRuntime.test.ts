@@ -159,4 +159,75 @@ describe("browserDebugRuntime", () => {
 
     await abortBrowserDebugModelStream("req_debug_stream_ok");
   });
+
+  it("supports inline user edit by removing descendants and redirecting heads", async () => {
+    const snapshotBefore = await invokeBrowserDebugCommand<ConversationSnapshot>(
+      "load_conversation_snapshot",
+      { input: { conversationId: "conv_seed_architecture_review" } }
+    );
+
+    const updated = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
+      "edit_user_message_inline",
+      {
+        messageId: "msg_seed_user_request",
+        newContent: "新的问题描述",
+      }
+    );
+
+    const snapshotAfter = await invokeBrowserDebugCommand<ConversationSnapshot>(
+      "load_conversation_snapshot",
+      { input: { conversationId: "conv_seed_architecture_review" } }
+    );
+
+    expect(updated.content.text).toBe("新的问题描述");
+    expect(Object.keys(snapshotBefore.entities.messages).length).toBe(3);
+    expect(Object.keys(snapshotAfter.entities.messages)).toEqual(["msg_seed_user_request"]);
+    expect(
+      Object.values(snapshotAfter.entities.branches).every(
+        (branch) => branch.headMessageId === "msg_seed_user_request"
+      )
+    ).toBe(true);
+  });
+
+  it("supports delete_message for non-head assistant leaf variants", async () => {
+    const summary = await invokeBrowserDebugCommand<ConversationSummary>("create_conversation", {
+      input: {
+        title: "delete-message-test",
+        initialUserMessage: "hello",
+      },
+    });
+    const snapshot = await invokeBrowserDebugCommand<ConversationSnapshot>(
+      "load_conversation_snapshot",
+      { input: { conversationId: summary.id } }
+    );
+    const userId = snapshot.indexes.rootMessageIds[0];
+
+    const variant = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
+      "create_assistant_variant_placeholder",
+      {
+        input: {
+          conversationId: summary.id,
+          parentMessageId: userId,
+          providerId: "provider.debug",
+          modelId: "model.debug",
+          requestId: "req_delete_variant",
+        },
+      }
+    );
+    await invokeBrowserDebugCommand("complete_assistant_message", {
+      input: {
+        messageId: variant.id,
+        contentText: "done",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+    });
+
+    await invokeBrowserDebugCommand("delete_message", { messageId: variant.id });
+    const afterDelete = await invokeBrowserDebugCommand<ConversationSnapshot>(
+      "load_conversation_snapshot",
+      { input: { conversationId: summary.id } }
+    );
+
+    expect(afterDelete.entities.messages[variant.id]).toBeUndefined();
+  });
 });
