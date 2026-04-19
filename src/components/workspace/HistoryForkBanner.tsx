@@ -13,22 +13,20 @@
  * This component does NOT traverse the message tree.
  * It reads forkIntent from the store and renders static copy.
  */
-
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { IconInfoCircle } from "../common/Icon";
-
+const _sel_workspace_forkIntent = (s: import("../../stores/appStore.types").AppStore) => s.workspace.forkIntent;
+const _sel_clearForkIntent = (s: import("../../stores/appStore.types").AppStore) => s.clearForkIntent;
 /**
  * Banner for HISTORY_FORK workspace mode.
  * Emphasizes: a new branch will be created on send, original path unchanged.
  */
 export function HistoryForkBanner() {
   const { t } = useTranslation();
-  const forkIntent = useAppStore((s) => s.workspace.forkIntent);
-  const clearForkIntent = useAppStore((s) => s.clearForkIntent);
-
+  const forkIntent = useAppStore(_sel_workspace_forkIntent);
+  const clearForkIntent = useAppStore(_sel_clearForkIntent);
   if (!forkIntent) return null;
-
   return (
     <div className="mx-4 mb-3 flex items-center justify-between rounded-[22px] border border-miro-blue/25 bg-miro-blue-light/80 px-4 py-3 shadow-ring">
       <div className="flex items-center gap-2">
@@ -38,7 +36,6 @@ export function HistoryForkBanner() {
           <span className="font-medium">{t("workspace.historyForkEmphasis")}</span>
         </p>
       </div>
-
       <button
         className="shrink-0 rounded-xl px-3 py-1 text-xs font-semibold text-miro-blue transition-colors hover:bg-white/60"
         onClick={clearForkIntent}

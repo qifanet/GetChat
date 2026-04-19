@@ -15,10 +15,21 @@ import {
   getModelDisplayName,
   listAvailableModelOptions,
 } from "../../features/models/modelUtils";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
+import { confirmDialog } from "../common/confirmDialog";
+
+const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
+const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
+const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
+const _sel_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
+const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
+const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
+const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
+const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
+
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -167,14 +178,14 @@ export function ProviderSettingsScreen({
   onClose,
 }: ProviderSettingsScreenProps) {
   const { t, i18n } = useTranslation();
-  const providersById = useAppStore((s) => s.providers);
-  const providerModelsById = useAppStore((s) => s.providerModels);
-  const providerOrder = useAppStore((s) => s.providerOrder);
-  const appDefaultModelId = useAppStore((s) => s.defaultModelId);
-  const saveProvider = useAppStore((s) => s.saveProvider);
-  const removeProvider = useAppStore((s) => s.removeProvider);
-  const setDefaultModel = useAppStore((s) => s.setDefaultModel);
-  const loadSettings = useAppStore((s) => s.loadSettings);
+  const providersById = useAppStore(_sel_providers);
+  const providerModelsById = useAppStore(_sel_providerModels);
+  const providerOrder = useAppStore(_sel_providerOrder);
+  const appDefaultModelId = useAppStore(_sel_defaultModelId);
+  const saveProvider = useAppStore(_sel_saveProvider);
+  const removeProvider = useAppStore(_sel_removeProvider);
+  const setDefaultModel = useAppStore(_sel_setDefaultModel);
+  const loadSettings = useAppStore(_sel_loadSettings);
   const orderedProviders = useMemo(
     () =>
       providerOrder
@@ -414,7 +425,10 @@ export function ProviderSettingsScreen({
     if (selectedProviderId === "new") {
       return;
     }
-    const confirmed = window.confirm(t("settings.confirmDeleteProvider"));
+    const confirmed = await confirmDialog({
+      message: t("settings.confirmDeleteProvider"),
+      destructive: true,
+    });
     if (!confirmed) {
       return;
     }

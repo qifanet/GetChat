@@ -4,30 +4,30 @@
  *
  * Wired to the store's branchRenameDialogOpen state and renameBranch action.
  */
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { IconX } from "../common/Icon";
-
+const _select_dialogOpen = (s: import("../../stores/appStore.types").AppStore) => s.ui.branchRenameDialogOpen;
+const _select_closeDialog = (s: import("../../stores/appStore.types").AppStore) => s.closeBranchRenameDialog;
+const _select_renameBranch = (s: import("../../stores/appStore.types").AppStore) => s.renameBranch;
+const _select_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
+const _select_activeSnapshot = (s: import("../../stores/appStore.types").AppStore) => s.activeSnapshot;
 /** Modal dialog for renaming the currently selected branch. */
 export function BranchRenameDialog() {
   const { t } = useTranslation();
-  const dialogOpen = useAppStore((state) => state.ui.branchRenameDialogOpen);
-  const closeDialog = useAppStore((state) => state.closeBranchRenameDialog);
-  const renameBranch = useAppStore((state) => state.renameBranch);
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
-
+  const dialogOpen = useAppStore(_select_dialogOpen);
+  const closeDialog = useAppStore(_select_closeDialog);
+  const renameBranch = useAppStore(_select_renameBranch);
+  const currentBranchId = useAppStore(_select_currentBranchId);
+  const activeSnapshot = useAppStore(_select_activeSnapshot);
   const currentBranch = currentBranchId && activeSnapshot
     ? activeSnapshot.entities.branches[currentBranchId] ?? null
     : null;
-
   const [name, setName] = useState(currentBranch?.name ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     if (dialogOpen && currentBranch) {
       setName(currentBranch.name);
@@ -36,7 +36,6 @@ export function BranchRenameDialog() {
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [dialogOpen, currentBranch]);
-
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -46,7 +45,6 @@ export function BranchRenameDialog() {
         return;
       }
       if (!currentBranchId) return;
-
       setSubmitting(true);
       setError(null);
       try {
@@ -60,11 +58,9 @@ export function BranchRenameDialog() {
     },
     [closeDialog, currentBranchId, name, renameBranch, t]
   );
-
   if (!dialogOpen || !currentBranch) {
     return null;
   }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <button
@@ -73,7 +69,6 @@ export function BranchRenameDialog() {
         onClick={closeDialog}
         aria-label={t("common.cancel")}
       />
-
       <form
         onSubmit={(e) => void handleSubmit(e)}
         className="relative z-10 w-full max-w-sm rounded-shell bg-white px-7 py-7 shadow-panel"
@@ -86,12 +81,12 @@ export function BranchRenameDialog() {
             type="button"
             onClick={closeDialog}
             className="app-icon-button h-8 w-8"
+            title={t("common.cancel")}
             aria-label={t("common.cancel")}
           >
             <IconX size={16} />
           </button>
         </div>
-
         <input
           ref={inputRef}
           value={name}
@@ -99,11 +94,9 @@ export function BranchRenameDialog() {
           placeholder={t("branch.renamePlaceholder")}
           className="app-input mb-4 w-full"
         />
-
         {error ? (
           <p className="mb-3 text-xs leading-5 text-red-600">{error}</p>
         ) : null}
-
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"

@@ -94,6 +94,19 @@ const useMockStore = create(() => ({
   ...mockStoreActions,
 }));
 
+const _getStore = () => useMockStore;
+
+vi.mock("../../../stores/useAppStoreSelector", () => ({
+  useAppStore: Object.assign(
+    (selector: any) => selector(_getStore().getState()),
+    {
+      getState: () => _getStore().getState(),
+      setState: (s: any) => _getStore().setState(s),
+      subscribe: (listener: any) => _getStore().subscribe(listener),
+    }
+  ),
+}));
+
 vi.mock("../../../stores/useAppStore", () => ({
   useAppStore: Object.assign(
     (selector: any) => selector(useMockStore.getState()),

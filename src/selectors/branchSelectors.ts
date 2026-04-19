@@ -9,7 +9,7 @@
 
 import type { AppStore } from "../stores/appStore.types";
 import type { BranchId, MessageId } from "../types/base";
-import type { BranchEntity, ConversationSnapshot } from "../types/conversation";
+import type { BranchEntity, ConversationSnapshot, MessageNode } from "../types/conversation";
 import { stableSelector } from "./stable";
 
 // ============================================================================
@@ -332,3 +332,100 @@ export function selectIsCurrentBranchMainline(state: AppStore): boolean {
   if (!branchId || !state.activeSnapshot) return false;
   return state.activeSnapshot.entities.branches[branchId]?.isMainline ?? false;
 }
+
+// ============================================================================
+// Branch Tree (recursive tree using sourceBranchId)
+// ============================================================================
+
+/** A node in the recursive branch tree. */
+export interface BranchTreeNode {
+  branch: BranchEntity;
+  /** Depth from root (mainline = 0). */
+  depth: number;
+  /** First 200 chars of head message content for tooltip. */
+  headPreview: string;
+  /** Children: branches whose sourceBranchId points to this branch. */
+  children: BranchTreeNode[];
+}
+
+/** The complete branch tree structure rendered by BranchPanel. */
+export interface BranchTreeData {
+  /** Root of the tree (mainline). */
+  root: BranchTreeNode | null;
+  /** All archived branches. */
+  archived: BranchEntity[];
+}
+
+const EMPTY_TREE: BranchTreeData = Object.freeze({
+  root: null,
+  archived: [],
+});
+
+function getHeadPreview(snapshot: ConversationSnapshot, headMessageId: string | null): string {
+  if (!headMessageId) return "";
+  const msg = snapshot.entities.messages[headMessageId];
+  const rawContent = msg?.content;
+  return rawContent?.text ? rawContent.text.slice(0, 200) : "";
+}
+
+const MAX_BRANCH_DEPTH = 8;
+
+function buildTreeNode(
+  branch: BranchEntity,
+  snapshot: ConversationSnapshot,
+  childMap: Map<string, BranchEntity[]>,
+  depth: number,
+  visited: Set<string>,
+): BranchTreeNode {
+  // Cycle guard: if this branch was already seen, skip it
+  if (visited.has(branch.id)) {
+    return { branch, depth, headPreview: getHeadPreview(snapshot, branch.headMessageId), children: [] };
+  }
+  visited.add(branch.id);
+
+  // Depth cap: beyond MAX_BRANCH_DEPTH, stop recursing
+  let children: BranchTreeNode[] = [];
+  if (depth < MAX_BRANCH_DEPTH) {
+    children = (childMap.get(branch.id) ?? []).map((child) =>
+      buildTreeNode(child, snapshot, childMap, depth + 1, visited)
+    );
+  }
+
+  return {
+    branch,
+    depth,
+    headPreview: getHeadPreview(snapshot, branch.headMessageId),
+    children,
+  };
+}
+
+function selectBranchTreeImpl(state: AppStore): BranchTreeData {
+  const snapshot = state.activeSnapshot;
+  if (!snapshot) return EMPTY_TREE;
+
+  const allBranches = Object.values(snapshot.entities.branches);
+  const activeBranches = allBranches.filter((b) => b.status === "ACTIVE");
+  const archivedBranches = allBranches.filter((b) => b.status === "ARCHIVED");
+  const mainline = activeBranches.find((b) => b.isMainline) ?? null;
+
+  if (!mainline) {
+    return { root: null, archived: archivedBranches };
+  }
+
+  // Build child map: sourceBranchId -> list of branches that forked from it
+  const childMap = new Map<string, BranchEntity[]>();
+  for (const branch of activeBranches) {
+    if (branch.id === mainline.id) continue;
+    const parentId = branch.sourceBranchId ?? mainline.id;
+    if (!childMap.has(parentId)) childMap.set(parentId, []);
+    childMap.get(parentId)!.push(branch);
+  }
+
+  const visited = new Set<string>();
+  const root = buildTreeNode(mainline, snapshot, childMap, 0, visited);
+
+  return { root, archived: archivedBranches };
+}
+
+export const selectBranchTree = stableSelector(selectBranchTreeImpl, EMPTY_TREE);
+

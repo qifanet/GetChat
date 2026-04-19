@@ -65,6 +65,7 @@ export type WorkspaceMode =
   | "NORMAL"
   | "HISTORY_FORK"
   | "EDIT_FORK"
+  | "EDIT_INLINE"
   | "COMPARE";
 
 /** How the composer sends the message */

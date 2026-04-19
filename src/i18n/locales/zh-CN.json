@@ -18,7 +18,12 @@
     "workspace": "工作区",
     "loading": "加载中...",
     "toggleLeftSidebar": "切换会话列表",
-    "toggleRightSidebar": "切换分支面板"
+    "toggleRightSidebar": "切换分支面板",
+    "confirm": "确认",
+    "copyCode": "复制代码",
+    "codeCopied": "已复制代码",
+    "saving": "保存中...",
+    "saved": "已保存"
   },
   "boot": {
     "initializationFailed": "初始化失败",
@@ -66,11 +71,19 @@
     "healthDescription": "当前共有 {{activeCount}} 条活跃路线，同分叉点有 {{siblingCount}} 条同级路线。建议先对比或归档后再继续探索。",
     "goToCompare": "去对比",
     "archiveLowValue": "归档低价值路线",
-    "healthActionHint": "优先对比主线或相邻路线，低价值路线可直接在右侧分支列表中归档。"
+    "healthActionHint": "优先对比主线或相邻路线，低价值路线可直接在右侧分支列表中归档。",
+    "noBranches": "暂无分支",
+    "otherBranches": "其他路线",
+    "branchCount": "条路线",
+    "forkFromMessage": "← 分叉自消息",
+    "mainlineSummary": "{{userCount}} 条用户消息 · {{assistantCount}} 条助手回复",
+    "forkFromMessageIndexed": "← 分叉自消息[{{index}}]",
+    "timelineMessages": "条消息"
   },
   "path": {
     "noPathSelected": "未选择路径",
-    "forkFromMessage": "← 分叉自消息"
+    "forkFromMessage": "← 分叉自消息",
+    "mainlineSummary": "{{userCount}} 条用户消息 · {{assistantCount}} 条助手回复"
   },
   "conversation": {
     "unnamedConversation": "未命名会话",
@@ -109,7 +122,9 @@
     "providerShortcutTitle": "服务后配",
     "providerShortcutBody": "AI 服务不再是首屏前置条件，准备好后在设置中添加即可。",
     "cleanLayoutTitle": "更适合窄屏",
-    "cleanLayoutBody": "侧栏会在紧凑窗口里改为抽屉显示，避免把中间阅读区挤压变形。"
+    "cleanLayoutBody": "侧栏会在紧凑窗口里改为抽屉显示，避免把中间阅读区挤压变形。",
+    "editInlineTitle": "正在就地编辑消息",
+    "editInlineDesc": "新的AI回复将替换原有回复"
   },
   "compare": {
     "noComparePath": "未选择对比路径",
@@ -139,7 +154,9 @@
     "applyToCurrentBranch": "应用为当前路径",
     "modelUsed": "模型：{{name}}",
     "variantCount": "{{current}} / {{total}} 个候选",
-    "variantHint": "{{count}} 个候选回答"
+    "variantHint": "{{count}} 个候选回答",
+    "streamingCaret": "正在输入...",
+    "codeLanguage": "语言：{{lang}}"
   },
   "composer": {
     "label": "输入",
@@ -259,5 +276,13 @@
     "copiedToClipboard": "已复制到剪贴板",
     "copyContent": "复制内容",
     "noConversation": "没有打开的会话"
+  },
+  "globalView": {
+    "title": "全局视图",
+    "stats": "{{messages}} 条消息 · {{branches}} 条分支",
+    "fitView": "适应画面",
+    "hint": "拖拽平移 · 滚轮缩放 · 双击节点进入对话",
+    "emptyMessage": "（空消息）",
+    "openGlobalView": "全局视图"
   }
 }

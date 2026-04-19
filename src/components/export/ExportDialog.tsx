@@ -10,26 +10,28 @@
  *   - Markdown: human-readable text with message roles
  *   - JSON: structured data including full snapshot metadata
  */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import {
   selectCurrentPathMessages,
   selectCurrentConversationSummary,
 } from "../../selectors/conversationSelectors";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { IconX } from "../common/Icon";
 import type { ExportFormat, ExportScope } from "../../types/base";
 import type { MessageNode, ConversationSnapshot } from "../../types/conversation";
-
+const _sel_ui_exportDialogOpen = (s: import("../../stores/appStore.types").AppStore) => s.ui.exportDialogOpen;
+const _sel_closeExportDialog = (s: import("../../stores/appStore.types").AppStore) => s.closeExportDialog;
+const _sel_activeSnapshot = (s: import("../../stores/appStore.types").AppStore) => s.activeSnapshot;
 /** Build a Markdown string from an ordered list of messages. */
 function buildMarkdownFromMessages(
   messages: readonly MessageNode[],
   title: string
 ): string {
   const lines: string[] = [`# ${title}`, ""];
-
   for (const msg of messages) {
     const role = msg.role === "USER" ? "## User" : "## Assistant";
     lines.push(role);
@@ -37,10 +39,8 @@ function buildMarkdownFromMessages(
     lines.push(msg.content.text);
     lines.push("");
   }
-
   return lines.join("\n");
 }
-
 /** Build a JSON string from the full conversation snapshot. */
 function buildJsonFromSnapshot(snapshot: ConversationSnapshot): string {
   return JSON.stringify(
@@ -80,32 +80,41 @@ function buildJsonFromSnapshot(snapshot: ConversationSnapshot): string {
     2
   );
 }
-
 /** Trigger a file download with the given content. */
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+async function saveFile(content: string, filename: string): Promise<boolean> {
+  try {
+    const filePath = await save({
+      defaultPath: filename,
+      filters: [{ name: "Documents", extensions: [filename.endsWith(".json") ? "json" : "md"] }],
+    });
+    if (!filePath) return false;
+    const encoder = new TextEncoder();
+    await writeFile(filePath, encoder.encode(content));
+    return true;
+  } catch (err) {
+    console.warn("[export] Tauri save failed, falling back to browser download", err);
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    return true;
+  }
 }
-
 /** Modal dialog for exporting conversation content as Markdown or JSON. */
 export function ExportDialog() {
   const { t } = useTranslation();
-  const exportDialogOpen = useAppStore((state) => state.ui.exportDialogOpen);
-  const closeExportDialog = useAppStore((state) => state.closeExportDialog);
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
+  const exportDialogOpen = useAppStore(_sel_ui_exportDialogOpen);
+  const closeExportDialog = useAppStore(_sel_closeExportDialog);
+  const activeSnapshot = useAppStore(_sel_activeSnapshot);
   const summary = useAppStore(selectCurrentConversationSummary);
   const currentPathMessages = useAppStore(selectCurrentPathMessages);
-
   const [scope, setScope] = useState<ExportScope>("CURRENT_PATH");
   const [format, setFormat] = useState<ExportFormat>("MARKDOWN");
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current !== null) {
@@ -113,34 +122,42 @@ export function ExportDialog() {
       }
     };
   }, []);
-
   const exportContent = useMemo(() => {
     if (!activeSnapshot) return null;
-
     if (format === "JSON") {
       return buildJsonFromSnapshot(activeSnapshot);
     }
-
     const title = summary?.title || t("conversation.unnamedConversation");
+    if (scope === "WHOLE_TREE") {
+      const allMessages = Object.values(activeSnapshot.entities.messages)
+        .filter((m) => m.status !== "STREAMING")
+        .sort((a, b) => a.createdAt - b.createdAt);
+      return buildMarkdownFromMessages(allMessages, title);
+    }
     return buildMarkdownFromMessages(currentPathMessages, title);
-  }, [activeSnapshot, currentPathMessages, format, summary, t]);
-
+  }, [activeSnapshot, currentPathMessages, format, scope, summary, t]);
   const filename = useMemo(() => {
     const base = (summary?.title || "conversation").replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_");
     const ext = format === "JSON" ? "json" : "md";
     return `${base}.${ext}`;
   }, [summary, format]);
-
-  const handleDownload = useCallback(() => {
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const handleDownload = useCallback(async () => {
     if (!exportContent) return;
-
-    const mimeType = format === "JSON" ? "application/json" : "text/markdown";
-    downloadFile(exportContent, filename, mimeType);
-  }, [exportContent, filename, format]);
-
+    setSaving(true);
+    try {
+      const ok = await saveFile(exportContent, filename);
+      if (ok) {
+        setSaveSuccess(true);
+        setTimeout(() => { closeExportDialog(); }, 800);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [exportContent, filename, closeExportDialog]);
   const handleCopy = useCallback(async () => {
     if (!exportContent) return;
-
     await copyTextToClipboard(exportContent);
     setCopied(true);
     if (copiedTimerRef.current !== null) {
@@ -151,11 +168,9 @@ export function ExportDialog() {
       copiedTimerRef.current = null;
     }, 1500);
   }, [exportContent]);
-
   if (!exportDialogOpen || !activeSnapshot) {
     return null;
   }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <button
@@ -164,7 +179,6 @@ export function ExportDialog() {
         onClick={closeExportDialog}
         aria-label={t("common.cancel")}
       />
-
       <div className="relative z-10 w-full max-w-lg rounded-shell bg-white px-7 py-7 shadow-panel">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
@@ -174,12 +188,12 @@ export function ExportDialog() {
             type="button"
             onClick={closeExportDialog}
             className="app-icon-button h-8 w-8"
+            title={t("common.cancel")}
             aria-label={t("common.cancel")}
           >
             <IconX size={16} />
           </button>
         </div>
-
         <div className="space-y-5">
           <div className="space-y-2">
             <p className="text-sm font-medium text-miro-text">{t("export.currentPath")}</p>
@@ -210,7 +224,6 @@ export function ExportDialog() {
               </button>
             </div>
           </div>
-
           <div className="space-y-2">
             <p className="text-sm font-medium text-miro-text">{t("export.markdown")}</p>
             <div className="flex gap-2">
@@ -240,13 +253,11 @@ export function ExportDialog() {
               </button>
             </div>
           </div>
-
           {scope === "WHOLE_TREE" && format === "MARKDOWN" ? (
             <div className="rounded-panel border border-miro-border/30 bg-miro-surface-high px-4 py-3 text-xs leading-5 text-miro-text-secondary">
               {t("export.markdown")} — {t("export.currentPath")}
             </div>
           ) : null}
-
           <div className="flex items-center justify-end gap-2 pt-1">
             <button
               type="button"
@@ -258,9 +269,10 @@ export function ExportDialog() {
             <button
               type="button"
               onClick={handleDownload}
-              className="app-primary-button px-4 py-2 text-sm"
+              className="app-primary-button px-4 py-2 text-sm disabled:opacity-50"
+              disabled={saving || saveSuccess}
             >
-              {t("export.download")}
+              {saveSuccess ? t("common.saved") : saving ? t("common.saving") : t("export.download")}
             </button>
           </div>
         </div>
@@ -268,3 +280,4 @@ export function ExportDialog() {
     </div>
   );
 }
+

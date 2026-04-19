@@ -71,7 +71,9 @@ export type BrowserDebugCommandName =
   | "complete_assistant_message"
   | "fail_assistant_message"
   | "build_prompt_messages"
-  | "check_db_invariants";
+  | "check_db_invariants"
+  | "delete_message"
+  | "edit_user_message_inline";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {

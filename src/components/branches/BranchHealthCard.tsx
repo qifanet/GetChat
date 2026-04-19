@@ -5,33 +5,32 @@
  * The card stays advisory: it exposes compare as the next best action when the
  * branch tree starts to expand too quickly, but it never blocks editing.
  */
-
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import {
   selectBranchHealth,
   selectSuggestedCompareTargetBranchId,
 } from "../../selectors/branchSelectors";
 import { IconColumns, IconX } from "../common/Icon";
 
+const _select_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
+const _select_enterCompare = (s: import("../../stores/appStore.types").AppStore) => s.enterCompare;
+
 /** Render a non-blocking health card when the branch graph becomes dense. */
 export function BranchHealthCard() {
   const { t } = useTranslation();
   const health = useAppStore(selectBranchHealth);
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
-  const enterCompare = useAppStore((state) => state.enterCompare);
+  const currentBranchId = useAppStore(_select_currentBranchId);
+  const enterCompare = useAppStore(_select_enterCompare);
   const suggestedCompareTargetBranchId = useAppStore(
     selectSuggestedCompareTargetBranchId
   );
   const [dismissed, setDismissed] = useState(false);
-
   if (!health.needsWarning || dismissed) {
     return null;
   }
-
   const isStrong = health.level === "STRONG";
-
   return (
     <div
       className={`rounded-panel px-4 py-4 shadow-ring ${
@@ -60,11 +59,9 @@ export function BranchHealthCard() {
           <IconX size={12} />
         </button>
       </div>
-
       <p className="mb-3 text-xs leading-5 text-miro-text-secondary">
         {t("branch.healthActionHint")}
       </p>
-
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -73,7 +70,6 @@ export function BranchHealthCard() {
             if (!currentBranchId || !suggestedCompareTargetBranchId) {
               return;
             }
-
             enterCompare({
               leftBranchId: currentBranchId,
               rightBranchId: suggestedCompareTargetBranchId,

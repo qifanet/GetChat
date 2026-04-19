@@ -259,12 +259,12 @@ describe("findForkPoint", () => {
     expect(findForkPoint(snapshot, "m4a", "m4b")).toBe("m3");
   });
 
-  it("returns root when paths are identical (walks all ancestors to root)", () => {
+  it("returns the shared head when paths are identical", () => {
     const messages = createMessagePath(["m1", "m2", "m3"]);
     const snapshot = createSnapshot(messages, []);
 
-    // Both heads point to the same node — no divergence, walk reaches root
-    expect(findForkPoint(snapshot, "m3", "m3")).toBe("m1");
+    // Both heads point to the same node — LCA is that node itself
+    expect(findForkPoint(snapshot, "m3", "m3")).toBe("m3");
   });
 
   it("handles one path being a prefix of the other", () => {
@@ -275,9 +275,9 @@ describe("findForkPoint", () => {
     const snapshot = createSnapshot([m1, m2, m3], []);
 
     // Left head = m3 (longer), Right head = m2 (shorter, prefix)
-    // The shorter path is entirely shared; function walks to root
+    // LCA is m2 because it is the deepest node common to both paths
     const result = findForkPoint(snapshot, "m3", "m2");
-    expect(result).toBe("m1");
+    expect(result).toBe("m2");
   });
 });
 

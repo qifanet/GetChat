@@ -13,22 +13,20 @@
  *
  * This component does NOT traverse the message tree.
  */
-
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import { IconPencilSquare } from "../common/Icon";
-
+const _sel_workspace_forkIntent = (s: import("../../stores/appStore.types").AppStore) => s.workspace.forkIntent;
+const _sel_clearForkIntent = (s: import("../../stores/appStore.types").AppStore) => s.clearForkIntent;
 /**
  * Banner for EDIT_FORK workspace mode.
  * Emphasizes: a new branch will be created on save, original path unchanged.
  */
 export function EditForkBanner() {
   const { t } = useTranslation();
-  const forkIntent = useAppStore((s) => s.workspace.forkIntent);
-  const clearForkIntent = useAppStore((s) => s.clearForkIntent);
-
+  const forkIntent = useAppStore(_sel_workspace_forkIntent);
+  const clearForkIntent = useAppStore(_sel_clearForkIntent);
   if (!forkIntent) return null;
-
   return (
     <div className="mx-4 mb-3 flex items-center justify-between rounded-[22px] border border-miro-violet/25 bg-miro-violet-light/75 px-4 py-3 shadow-ring">
       <div className="flex items-center gap-2">
@@ -38,7 +36,6 @@ export function EditForkBanner() {
           <span className="font-medium">{t("workspace.editForkEmphasis")}</span>
         </p>
       </div>
-
       <button
         className="shrink-0 rounded-xl px-3 py-1 text-xs font-semibold text-miro-violet transition-colors hover:bg-white/50"
         onClick={clearForkIntent}

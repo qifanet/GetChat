@@ -198,3 +198,49 @@ pub async fn build_prompt_messages(
     }
     result
 }
+
+/** Hard delete a variant/candidate assistant message. */
+#[tauri::command]
+pub async fn delete_message(
+    state: State<'_, AppState>,
+    message_id: String,
+) -> Result<(), AppError> {
+    let start = std::time::Instant::now();
+    let result = snapshot_service::delete_variant_message(&state.db, &message_id).await;
+    match &result {
+        Ok(()) => tracing::info!(
+            cmd = "delete_message", msg_id = %message_id,
+            duration_ms = start.elapsed().as_millis() as u64, "ok"
+        ),
+        Err(e) => tracing::warn!(
+            cmd = "delete_message", msg_id = %message_id,
+            error_code = %e.code, message = %e.message,
+            duration_ms = start.elapsed().as_millis() as u64, "error"
+        ),
+    }
+    result
+}
+
+/** Edit a user message inline — replaces content and deletes assistant children. */
+#[tauri::command]
+pub async fn edit_user_message_inline(
+    state: State<'_, AppState>,
+    message_id: String,
+    new_content: String,
+) -> Result<MessageDto, AppError> {
+    let start = std::time::Instant::now();
+    let result = snapshot_service::edit_user_message_inline(&state.db, &message_id, &new_content).await;
+    match &result {
+        Ok(msg) => tracing::info!(
+            cmd = "edit_user_message_inline", msg_id = %message_id,
+            content_length = new_content.len(),
+            duration_ms = start.elapsed().as_millis() as u64, "ok"
+        ),
+        Err(e) => tracing::warn!(
+            cmd = "edit_user_message_inline", msg_id = %message_id,
+            error_code = %e.code, message = %e.message,
+            duration_ms = start.elapsed().as_millis() as u64, "error"
+        ),
+    }
+    result
+}

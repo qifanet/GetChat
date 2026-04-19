@@ -1064,6 +1064,69 @@ export const useAppStore = create<AppStore>()(
           );
         },
 
+        deleteMessageHard: async (messageId) => {
+          await tauriCmd.deleteMessage(messageId);
+          set(
+            (s) => {
+              if (!s.activeSnapshot) return;
+              const msg = s.activeSnapshot.entities.messages[messageId];
+              if (!msg) return;
+              // Remove from parent childIds
+              if (msg.parentId) {
+                const parent = s.activeSnapshot.entities.messages[msg.parentId];
+                if (parent) {
+                  parent.childIds = parent.childIds.filter((id) => id !== messageId);
+                }
+              }
+              // Remove from childMessageIdsByParentId index
+              if (msg.parentId) {
+                const siblings = s.activeSnapshot.indexes.childMessageIdsByParentId[msg.parentId];
+                if (siblings) {
+                  const idx = siblings.indexOf(messageId);
+                  if (idx >= 0) siblings.splice(idx, 1);
+                }
+              }
+              // Remove from rootMessageIds if root
+              if (!msg.parentId) {
+                s.activeSnapshot.indexes.rootMessageIds = s.activeSnapshot.indexes.rootMessageIds.filter((id) => id !== messageId);
+              }
+              // Delete the message entity
+              delete s.activeSnapshot.entities.messages[messageId];
+              // Clear variant preview if it referenced the deleted message
+              if (s.workspace.variantPreview?.assistantMessageId === messageId) {
+                s.workspace.variantPreview = null;
+              }
+            },
+            undefined,
+            "conversation/messageHardDeleted"
+          );
+        },
+
+        editUserMessageInline: async (messageId, newContent) => {
+          const updatedMsg = await tauriCmd.editUserMessageInline(messageId, newContent);
+          set(
+            (s) => {
+              if (!s.activeSnapshot) return;
+              const snap = s.activeSnapshot;
+              snap.entities.messages[messageId] = updatedMsg;
+              const childIds = snap.indexes.childMessageIdsByParentId[messageId];
+              if (childIds) {
+                for (const childId of [...childIds]) {
+                  const child = snap.entities.messages[childId];
+                  if (child && child.role === "ASSISTANT") {
+                    delete snap.entities.messages[childId];
+                  }
+                }
+                snap.indexes.childMessageIdsByParentId[messageId] =
+                  childIds.filter((id: string) => snap.entities.messages[id] !== undefined);
+              }
+              updatedMsg.childIds = snap.indexes.childMessageIdsByParentId[messageId] || [];
+              s.workspace.variantPreview = null;
+            },
+            undefined,
+            "conversation/userMessageEditedInline"
+          );
+        },
         patchBranchLocal: (branchId, patch) => {
           set(
             (s) => {
@@ -1177,6 +1240,22 @@ export const useAppStore = create<AppStore>()(
             },
             undefined,
             "workspace/editForkStarted"
+          );
+
+        },
+        startEditInline: (messageId) => {
+          set(
+            (s) => {
+              s.workspace.forkIntent = {
+                sourceType: "HISTORY_USER_EDIT",
+                sourceBranchId: s.workspace.currentBranchId!,
+                sourceMessageId: null,
+                originalEditableMessageId: messageId,
+              };
+              s.workspace.workspaceMode = "EDIT_INLINE";
+            },
+            undefined,
+            "workspace/editInlineStarted"
           );
         },
 

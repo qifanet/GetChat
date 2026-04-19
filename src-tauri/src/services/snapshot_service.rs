@@ -988,3 +988,120 @@ pub async fn create_branch(
         archived_at: None,
     })
 }
+
+// ============================================================================
+// Hard Delete & Inline Edit
+// ============================================================================
+
+/**
+ * Hard delete a variant/candidate assistant message.
+ *
+ * Rules:
+ *   - Message must exist and be ASSISTANT role
+ *   - Message must not have children (must be a leaf node)
+ *   - If the deleted message is a branch's head, the branch head is NOT changed
+ *     (the frontend handles this by refreshing the snapshot)
+ */
+pub async fn delete_variant_message(
+    pool: &SqlitePool,
+    message_id: &str,
+) -> Result<(), AppError> {
+    let mut tx = pool.begin().await.map_err(|e| AppError::db_error(&format!("tx begin: {e}")))?;
+
+    let msg = messages::find_by_id(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("find message: {e}")))?
+        .ok_or_else(|| AppError::not_found(format!("message {} not found", message_id)))?;
+
+    if msg.role != "ASSISTANT" {
+        return Err(AppError::invalid_argument("Only ASSISTANT messages can be deleted as variants"));
+    }
+    if msg.status == "STREAMING" {
+        return Err(AppError::invalid_argument("Cannot delete a streaming message"));
+    }
+
+    let child_count = messages::count_children(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("count children: {e}")))?;
+    if child_count > 0 {
+        return Err(AppError::invalid_argument("Cannot delete a message that has child messages"));
+    }
+
+    messages::hard_delete_message(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("hard delete: {e}")))?;
+
+    tx.commit().await.map_err(|e| AppError::db_error(&format!("tx commit: {e}")))?;
+    Ok(())
+}
+
+/**
+ * Edit a user message inline (no branch creation).
+ *
+ * This replaces the content of an existing user message and deletes all
+ * its ASSISTANT children. The frontend will then create a new assistant
+ * placeholder at the same position for streaming.
+ *
+ * Returns the updated MessageDto.
+ */
+pub async fn edit_user_message_inline(
+    pool: &SqlitePool,
+    message_id: &str,
+    new_content: &str,
+) -> Result<MessageDto, AppError> {
+    let mut tx = pool.begin().await.map_err(|e| AppError::db_error(&format!("tx begin: {e}")))?;
+
+    let msg = messages::find_by_id(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("find message: {e}")))?
+        .ok_or_else(|| AppError::not_found(format!("message {} not found", message_id)))?;
+
+    if msg.role != "USER" {
+        return Err(AppError::invalid_argument("Only USER messages can be edited inline"));
+    }
+
+    // Delete ALL descendants of this user message (not just direct ASSISTANT children).
+    // This handles the case where the conversation continued past the edited message
+    // (User → Assistant → User → Assistant → ...) — all downstream messages must go.
+    // Step 1: collect IDs (deepest-first via CTE)
+    let descendant_ids = messages::collect_descendant_ids(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("collect descendants: {e}")))?;
+    // Step 2: redirect branch heads that point to any descendant
+    //         (branches.head_message_id has ON DELETE RESTRICT)
+    if !descendant_ids.is_empty() {
+        branches::redirect_heads_from_descendants(
+            &mut *tx, &msg.conversation_id, &descendant_ids, message_id,
+        ).await.map_err(|e| AppError::db_error(&format!("redirect branch heads: {e}")))?;
+    }
+    // Step 3: delete each one deepest-first to respect ON DELETE RESTRICT
+    for desc_id in &descendant_ids {
+        messages::hard_delete_message(&mut *tx, desc_id).await
+            .map_err(|e| AppError::db_error(&format!("delete descendant: {e}")))?;
+    }
+
+    // Update the user message content
+    messages::update_content(&mut *tx, message_id, new_content).await
+        .map_err(|e| AppError::db_error(&format!("update content: {e}")))?;
+
+    // Reload the updated message
+    let updated = messages::find_by_id(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("reload message: {e}")))?
+        .ok_or_else(|| AppError::not_found(format!("message {} not found", message_id)))?;
+
+    tx.commit().await.map_err(|e| AppError::db_error(&format!("tx commit: {e}")))?;
+
+    Ok(MessageDto {
+        id: updated.id,
+        conversation_id: updated.conversation_id,
+        role: parse_role(&updated.role),
+        status: parse_status(&updated.status),
+        parent_id: updated.parent_message_id,
+        depth: updated.depth,
+        content: MessageContentDto {
+            text: updated.content_text,
+            format: ContentFormat::Markdown,
+        },
+        child_ids: Vec::new(), // Children were just deleted
+        generation: None,
+        error: None,
+        edited_from_message_id: updated.edited_from_message_id,
+        created_at: updated.created_at * 1000,
+        updated_at: updated.updated_at * 1000,
+    })
+}

@@ -5,26 +5,21 @@
  * The item is designed as a compact desktop list row: one primary title line,
  * one metadata line, and hover-revealed management actions.
  */
-
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getConversationDisplayTitle } from "../../i18n/displayNames";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import type { ConversationSummary } from "../../types/conversation";
 import { IconArchive, IconPencilSquare, IconTrash } from "../common/Icon";
-
+import { confirmDialog } from "../common/confirmDialog";
+const _sel_renameConversation = (s: import("../../stores/appStore.types").AppStore) => s.renameConversation;
+const _sel_archiveConversation = (s: import("../../stores/appStore.types").AppStore) => s.archiveConversation;
+const _sel_deleteConversation = (s: import("../../stores/appStore.types").AppStore) => s.deleteConversation;
 interface ConversationListItemProps {
-  /** Sidebar summary DTO for the conversation. */
   summary: ConversationSummary;
-
-  /** Whether this conversation is the current active workspace. */
   isActive: boolean;
-
-  /** Open the conversation in the workspace shell. */
   onOpen: () => void;
 }
-
-/** Format the updated timestamp into a compact sidebar-friendly value. */
 function formatUpdatedAt(timestamp: number, locale: string): string {
   return new Intl.DateTimeFormat(locale.startsWith("zh") ? "zh-CN" : "en-US", {
     month: "numeric",
@@ -33,53 +28,42 @@ function formatUpdatedAt(timestamp: number, locale: string): string {
     minute: "2-digit",
   }).format(new Date(timestamp));
 }
-
-/** Render a conversation entry with inline management actions. */
 export function ConversationListItem({
   summary,
   isActive,
   onOpen,
 }: ConversationListItemProps) {
   const { t, i18n } = useTranslation();
-  const renameConversation = useAppStore((state) => state.renameConversation);
-  const archiveConversation = useAppStore((state) => state.archiveConversation);
-  const deleteConversation = useAppStore((state) => state.deleteConversation);
+  const renameConversation = useAppStore(_sel_renameConversation);
+  const archiveConversation = useAppStore(_sel_archiveConversation);
+  const deleteConversation = useAppStore(_sel_deleteConversation);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(summary.title);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const displayTitle = getConversationDisplayTitle(summary.title, t);
-
   useEffect(() => {
     setTitleDraft(summary.title);
   }, [summary.id, summary.title]);
-
-  /** Enter inline rename mode with the latest committed title. */
   function startRenaming(): void {
     setTitleDraft(summary.title);
     setError(null);
     setIsRenaming(true);
   }
-
-  /** Leave inline rename mode without persisting changes. */
   function cancelRenaming(): void {
     setTitleDraft(summary.title);
     setError(null);
     setIsRenaming(false);
   }
-
-  /** Save the updated conversation title through the store-backed action. */
   async function handleRenameSubmit(
     event: React.FormEvent<HTMLFormElement>
   ): Promise<void> {
     event.preventDefault();
-
     const trimmedTitle = titleDraft.trim();
     if (trimmedTitle.length === 0) {
       setError(t("conversation.renameRequired"));
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -95,13 +79,12 @@ export function ConversationListItem({
       setIsSubmitting(false);
     }
   }
-
-  /** Archive the conversation after an explicit user confirmation. */
   async function handleArchive(): Promise<void> {
-    if (!window.confirm(t("conversation.confirmArchive"))) {
+    if (!(await confirmDialog({
+      message: t("conversation.confirmArchive"),
+    }))) {
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -116,13 +99,13 @@ export function ConversationListItem({
       setIsSubmitting(false);
     }
   }
-
-  /** Delete the conversation permanently after an explicit confirmation. */
   async function handleDelete(): Promise<void> {
-    if (!window.confirm(t("conversation.confirmDelete"))) {
+    if (!(await confirmDialog({
+      message: t("conversation.confirmDelete"),
+      destructive: true,
+    }))) {
       return;
     }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -137,7 +120,6 @@ export function ConversationListItem({
       setIsSubmitting(false);
     }
   }
-
   return (
     <div
       className={`group rounded-[18px] px-3 py-2.5 text-sm transition-colors ${
@@ -191,7 +173,6 @@ export function ConversationListItem({
               <span>{formatUpdatedAt(summary.updatedAt, i18n.language)}</span>
             </div>
           </button>
-
           <div
             className={`flex shrink-0 items-center gap-1 pt-0.5 transition-opacity ${
               isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
@@ -224,7 +205,6 @@ export function ConversationListItem({
           </div>
         </div>
       )}
-
       {error ? <p className="mt-2 text-[11px] leading-5 text-red-600">{error}</p> : null}
     </div>
   );

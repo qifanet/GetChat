@@ -125,6 +125,8 @@ export interface ConversationSlice {
   upsertMessageLocal: (message: MessageNode) => void;
   upsertBranchLocal: (branch: BranchEntity) => void;
   patchMessageLocal: (messageId: MessageId, patch: Partial<MessageNode>) => void;
+  deleteMessageHard: (messageId: MessageId) => Promise<void>;
+  editUserMessageInline: (messageId: MessageId, newContent: string) => Promise<void>;
   patchBranchLocal: (branchId: BranchId, patch: Partial<BranchEntity>) => void;
   replaceActiveSnapshot: (snapshot: ConversationSnapshot) => void;
 }
@@ -145,6 +147,9 @@ export interface WorkspaceSlice {
 
   /** Enter EDIT_FORK mode with a fork intent */
   startEditFork: (intent: ForkIntent) => void;
+
+  /** Enter EDIT_INLINE mode — edit a user message without creating a branch */
+  startEditInline: (messageId: MessageId) => void;
 
   /** Clear fork intent and return to NORMAL mode */
   clearForkIntent: () => void;

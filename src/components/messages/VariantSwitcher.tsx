@@ -10,49 +10,45 @@
  * message bubble in the MessageList. It reads the variant group from the
  * snapshot indexes and updates the variantPreview on the workspace state.
  */
-
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
 import {
   selectVariantGroupByUserMessageId,
   selectCurrentPathMessages,
 } from "../../selectors/conversationSelectors";
 import { IconChevronLeft, IconChevronRight } from "../common/Icon";
 import type { MessageId } from "../../types/base";
-
+const selectActiveSnapshot = (s: import('../../stores/appStore.types').AppStore) => s.activeSnapshot;
+const selectSetVariantPreview = (s: import('../../stores/appStore.types').AppStore) => s.setVariantPreview;
+const selectCurrentBranchId = (s: import('../../stores/appStore.types').AppStore) => s.workspace.currentBranchId;
+const selectVariantPreview = (s: import('../../stores/appStore.types').AppStore) => s.workspace.variantPreview;
 interface VariantSwitcherProps {
   userMessageId: MessageId;
 }
-
 /** Compact candidate answer pager displayed above an assistant message with siblings. */
 export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
   const { t } = useTranslation();
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
+  const activeSnapshot = useAppStore(selectActiveSnapshot);
   const variantGroup = useMemo(() => {
     const state = useAppStore.getState();
     return selectVariantGroupByUserMessageId(state, userMessageId);
   }, [activeSnapshot, userMessageId]);
-  const setVariantPreview = useAppStore((state) => state.setVariantPreview);
-  const currentBranchId = useAppStore((state) => state.workspace.currentBranchId);
-  const variantPreview = useAppStore((state) => state.workspace.variantPreview);
+  const setVariantPreview = useAppStore(selectSetVariantPreview);
+  const currentBranchId = useAppStore(selectCurrentBranchId);
+  const variantPreview = useAppStore(selectVariantPreview);
   const pathMessages = useAppStore(selectCurrentPathMessages);
-
   const total = variantGroup.assistantMessageIds.length;
-
   const currentIndex = useMemo(() => {
     if (!activeSnapshot || !currentBranchId) return 0;
-
     if (variantPreview?.userMessageId === userMessageId) {
       const idx = variantGroup.assistantMessageIds.indexOf(
         variantPreview.assistantMessageId
       );
       if (idx >= 0) return idx;
     }
-
     const branch = activeSnapshot.entities.branches[currentBranchId];
     if (!branch) return 0;
-
     const messagesAfterUser = pathMessages.filter(
       (m) =>
         m.parentId === userMessageId &&
@@ -64,7 +60,6 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
       const idx = variantGroup.assistantMessageIds.indexOf(pathAssistantId);
       if (idx >= 0) return idx;
     }
-
     return 0;
   }, [
     activeSnapshot,
@@ -74,26 +69,20 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
     variantGroup.assistantMessageIds,
     variantPreview,
   ]);
-
   const handleSwitch = useCallback(
     (direction: 1 | -1) => {
       if (!activeSnapshot || total <= 1) return;
-
       const nextIndex = (currentIndex + direction + total) % total;
       const nextAssistantId = variantGroup.assistantMessageIds[nextIndex];
       const nextAssistant =
         activeSnapshot.entities.messages[nextAssistantId] ?? null;
-
       if (!nextAssistant) return;
-
       const branch = currentBranchId
         ? activeSnapshot.entities.branches[currentBranchId]
         : null;
-
       const isCurrentLeaf = branch?.headMessageId === nextAssistantId;
       const hasDownstream = nextAssistant.childIds.length > 0;
       const hasDownstreamConflict = !isCurrentLeaf || hasDownstream;
-
       setVariantPreview({
         userMessageId,
         assistantMessageId: nextAssistantId,
@@ -110,11 +99,23 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
       setVariantPreview,
     ]
   );
+  const handleDelete = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeSnapshot) return;
+      const msg = activeSnapshot.entities.messages[messageId];
+      if (!msg || msg.status === "STREAMING") return;
+      try {
+        await useAppStore.getState().deleteMessageHard(messageId);
+      } catch (err) {
+        console.error("[variant] Hard delete failed:", err);
+      }
+    },
+    [activeSnapshot]
+  );
 
   if (total <= 1) {
     return null;
   }
-
   return (
     <div className="app-message-card flex justify-start">
       <div className="flex items-center gap-2 rounded-full border border-miro-border/40 bg-white/88 px-3 py-1.5 shadow-ring">
@@ -127,14 +128,12 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
         >
           <IconChevronLeft size={12} />
         </button>
-
         <span className="min-w-[80px] text-center text-[11px] font-medium text-miro-text-secondary">
           {t("message.variantCount", {
             current: currentIndex + 1,
             total,
           })}
         </span>
-
         <button
           type="button"
           onClick={() => handleSwitch(1)}
@@ -144,6 +143,19 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
         >
           <IconChevronRight size={12} />
         </button>
+        {total > 1 && (
+          <button
+            type="button"
+            onClick={() => handleDelete(variantGroup.assistantMessageIds[currentIndex])}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-miro-text-secondary transition-colors hover:bg-miro-red/10 hover:text-miro-red"
+            title={t("common.delete")}
+            aria-label={t("common.delete")}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

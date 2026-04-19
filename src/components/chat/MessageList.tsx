@@ -9,27 +9,25 @@
  * VariantSwitcher is inserted between user and assistant messages when the
  * user message has multiple assistant children (candidate answers).
  */
-
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore } from "../../stores/useAppStoreSelector";
+import { useStreamStore } from "../../stores/useStreamStore";
 import {
   selectVisibleMessagesForWorkspace,
   selectVariantGroupByUserMessageId,
 } from "../../selectors/conversationSelectors";
+const selectActiveSnapshot = (s: import('../../stores/appStore.types').AppStore) => s.activeSnapshot;
 import { UserMessageBubble } from "../messages/UserMessageBubble";
 import { AssistantMessageBubble } from "../messages/AssistantMessageBubble";
 import { VariantSwitcher } from "../messages/VariantSwitcher";
-
-
-
 /** Scrollable message list for the current branch path. */
 export function MessageList() {
   const { t } = useTranslation();
   const messages = useAppStore(selectVisibleMessagesForWorkspace);
   // Subscribe to the raw data that drives the variant computation,
   // then derive the Set via useMemo to keep the reference stable.
-  const activeSnapshot = useAppStore((s) => s.activeSnapshot);
+  const activeSnapshot = useAppStore(selectActiveSnapshot);
   const userMessageIdsWithVariants = useMemo(() => {
     if (!activeSnapshot) return new Set<string>();
     const result = new Set<string>();
@@ -46,11 +44,64 @@ export function MessageList() {
     return result;
   }, [activeSnapshot]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const isStreaming = useStreamStore((s) => Object.values(s.sessionsByRequestId).some((ss) => ss.status === "STREAMING"));
+  const [autoFollow, setAutoFollow] = useState(true);
+  const userScrolledRef = useRef(false);
+  const reenableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (!atBottom && autoFollow) {
+      setAutoFollow(false);
+      userScrolledRef.current = true;
+      if (reenableTimerRef.current) clearTimeout(reenableTimerRef.current);
+    }
+  }, [autoFollow]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
 
+  useEffect(() => {
+    if (userScrolledRef.current && !autoFollow && isStreaming) {
+      if (reenableTimerRef.current) clearTimeout(reenableTimerRef.current);
+      reenableTimerRef.current = setTimeout(() => {
+        userScrolledRef.current = false;
+        setAutoFollow(true);
+      }, 3000);
+    }
+    return () => { if (reenableTimerRef.current) clearTimeout(reenableTimerRef.current); };
+  }, [autoFollow, isStreaming, messages.length]);
+
+  useEffect(() => {
+    if (autoFollow && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
+    }
+  }, [autoFollow, messages.length, isStreaming]);
+
+  useEffect(() => {
+    if (isStreaming) { setAutoFollow(true); userScrolledRef.current = false; }
+  }, [isStreaming]);
+
+  useEffect(() => {
+    if (bottomRef.current && !scrollContainerRef.current) {
+      let el: HTMLElement | null = bottomRef.current.parentElement;
+      while (el) {
+        const style = getComputedStyle(el);
+        if (style.overflowY === "auto" || style.overflowY === "scroll") {
+          scrollContainerRef.current = el as HTMLDivElement;
+          break;
+        }
+        el = el.parentElement;
+      }
+    }
+  }, []);
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 py-10">
@@ -60,21 +111,18 @@ export function MessageList() {
       </div>
     );
   }
-
   return (
     <div className="mx-auto flex max-w-5xl flex-col px-5 py-6 sm:px-6">
       <div className="mb-6 flex items-center gap-3">
         <span className="app-section-label">{t("branch.currentPath")}</span>
         <span className="h-px flex-1 bg-miro-border/15" />
       </div>
-
       <div className="space-y-7">
         {messages.map((message, index) => {
           if (message.role === "USER") {
             const nextMessage = messages[index + 1];
             const hasVariants = userMessageIdsWithVariants.has(message.id);
             const showVariantSwitcher = nextMessage?.role === "ASSISTANT" && hasVariants;
-
             return (
               <div key={message.id} className="space-y-3">
                 <UserMessageBubble message={message} />
@@ -84,15 +132,12 @@ export function MessageList() {
               </div>
             );
           }
-
           if (message.role === "ASSISTANT") {
             return <AssistantMessageBubble key={message.id} message={message} />;
           }
-
           return null;
         })}
       </div>
-
       <div ref={bottomRef} />
     </div>
   );

@@ -8,10 +8,10 @@
  *   3. Workspace-first entry even when no provider is configured.
  *   4. Compare mode and settings remain first-class surfaces in the same app.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelDisplayName } from "./features/models/modelUtils";
-import { useAppStore } from "./stores/useAppStore";
+import { useAppStore } from "./stores/useAppStoreSelector";
 import { useCompactAppShell } from "./hooks/useCompactAppShell";
 import { getConversationDisplayTitle } from "./i18n/displayNames";
 import { TopContextBar } from "./components/layout/TopContextBar";
@@ -33,6 +33,36 @@ import {
 import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsScreen";
 import { ExportDialog } from "./components/export/ExportDialog";
 import { BranchRenameDialog } from "./components/branches/BranchRenameDialog";
+import { ConfirmDialogPortal } from "./components/common/confirmDialog";
+// ============================================================================
+// Module-level selectors (stable references for React 19 useSyncExternalStore)
+//
+// Each arrow function is created once at module load time so Zustand 5's
+// internal `useCallback(() => selector(api.getState()), [api, selector])`
+// receives a stable `selector` every render.  Without this, inline closures
+// like `(state) => state.summaryOrder` create a new function per render,
+// which causes a new `getSnapshot` callback, which React 19's
+// useSyncExternalStore must re-evaluate.
+// ============================================================================
+const selectBootStatus = (s: import("./stores/appStore.types").AppStore) => s.bootStatus;
+const selectBootError = (s: import("./stores/appStore.types").AppStore) => s.bootError;
+const selectInitializeApp = (s: import("./stores/appStore.types").AppStore) => s.initializeApp;
+const selectLeftSidebarCollapsed = (s: import("./stores/appStore.types").AppStore) => s.ui.leftSidebarCollapsed;
+const selectRightPanelCollapsed = (s: import("./stores/appStore.types").AppStore) => s.ui.rightPanelCollapsed;
+const selectProviders = (s: import("./stores/appStore.types").AppStore) => s.providers;
+const selectProviderOrder = (s: import("./stores/appStore.types").AppStore) => s.providerOrder;
+const selectProviderModels = (s: import("./stores/appStore.types").AppStore) => s.providerModels;
+const selectDefaultModelId = (s: import("./stores/appStore.types").AppStore) => s.defaultModelId;
+const selectActiveSnapshot = (s: import("./stores/appStore.types").AppStore) => s.activeSnapshot;
+const selectWorkspaceMode = (s: import("./stores/appStore.types").AppStore) => s.workspace.workspaceMode;
+const selectSetLeftSidebarCollapsed = (s: import("./stores/appStore.types").AppStore) => s.setLeftSidebarCollapsed;
+const selectSetRightPanelCollapsed = (s: import("./stores/appStore.types").AppStore) => s.setRightPanelCollapsed;
+const selectCreateConversation = (s: import("./stores/appStore.types").AppStore) => s.createConversation;
+const selectOpenConversation = (s: import("./stores/appStore.types").AppStore) => s.openConversation;
+const selectOpenExportDialog = (s: import("./stores/appStore.types").AppStore) => s.openExportDialog;
+const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
+const selectSummariesById = (s: import("./stores/appStore.types").AppStore) => s.summariesById;
+const selectActiveConversationId = (s: import("./stores/appStore.types").AppStore) => s.workspace.activeConversationId;
 type AppPage = "WORKSPACE" | "SETTINGS";
 interface ConversationSidebarProps {
   activePage: AppPage;
@@ -151,9 +181,9 @@ function ShellHeader({
   onOpenSettings,
 }: ShellHeaderProps) {
   const { t } = useTranslation();
-  const workspaceMode = useAppStore((state) => state.workspace.workspaceMode);
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
-  const openExportDialog = useAppStore((state) => state.openExportDialog);
+  const workspaceMode = useAppStore(selectWorkspaceMode);
+  const activeSnapshot = useAppStore(selectActiveSnapshot);
+  const openExportDialog = useAppStore(selectOpenExportDialog);
   const compareActive = activePage === "WORKSPACE" && workspaceMode === "COMPARE";
   const conversationTitle = getConversationDisplayTitle(
     activeSnapshot?.summary.title,
@@ -330,14 +360,12 @@ function WorkspaceEmptyState({
  */
 function ArchivedSection() {
   const { t } = useTranslation();
-  const summaryOrder = useAppStore((state) => state.summaryOrder);
-  const summariesById = useAppStore((state) => state.summariesById);
-  const activeConversationId = useAppStore(
-    (state) => state.workspace.activeConversationId
-  );
-  const openConversation = useAppStore((state) => state.openConversation);
+  const summaryOrder = useAppStore(selectSummaryOrder);
+  const summariesById = useAppStore(selectSummariesById);
+  const activeConversationId = useAppStore(selectActiveConversationId);
+  const openConversation = useAppStore(selectOpenConversation);
   const isCompactShell = useCompactAppShell();
-  const collapseSidebar = useAppStore((state) => state.setLeftSidebarCollapsed);
+  const collapseSidebar = useAppStore(selectSetLeftSidebarCollapsed);
   const archived = useMemo(
     () =>
       summaryOrder
@@ -391,17 +419,15 @@ function ConversationSidebar({
 }: ConversationSidebarProps) {
   const { t } = useTranslation();
   const isCompactShell = useCompactAppShell();
-  const summaryOrder = useAppStore((state) => state.summaryOrder);
-  const summariesById = useAppStore((state) => state.summariesById);
-  const activeConversationId = useAppStore(
-    (state) => state.workspace.activeConversationId
-  );
-  const openConversation = useAppStore((state) => state.openConversation);
-  const collapseSidebar = useAppStore((state) => state.setLeftSidebarCollapsed);
-  const providers = useAppStore((state) => state.providers);
-  const providerOrder = useAppStore((state) => state.providerOrder);
-  const providerModels = useAppStore((state) => state.providerModels);
-  const defaultModelId = useAppStore((state) => state.defaultModelId);
+  const summaryOrder = useAppStore(selectSummaryOrder);
+  const summariesById = useAppStore(selectSummariesById);
+  const activeConversationId = useAppStore(selectActiveConversationId);
+  const openConversation = useAppStore(selectOpenConversation);
+  const collapseSidebar = useAppStore(selectSetLeftSidebarCollapsed);
+  const providers = useAppStore(selectProviders);
+  const providerOrder = useAppStore(selectProviderOrder);
+  const providerModels = useAppStore(selectProviderModels);
+  const defaultModelId = useAppStore(selectDefaultModelId);
   const connectedProviderCount = providerOrder.filter(
     (providerId) => providers[providerId]?.enabled
   ).length;
@@ -548,7 +574,7 @@ function WorkspaceOverviewRail({
   defaultModelName,
 }: OverviewRailProps) {
   const { t } = useTranslation();
-  const summaryOrder = useAppStore((state) => state.summaryOrder);
+  const summaryOrder = useAppStore(selectSummaryOrder);
   return (
     <aside className="app-sidebar-surface flex h-full flex-col px-6 py-6">
       <div>
@@ -614,8 +640,8 @@ function WorkspaceCenter({
   onCreateConversation,
   onOpenSettings,
 }: WorkspaceCenterProps) {
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
-  const workspaceMode = useAppStore((state) => state.workspace.workspaceMode);
+  const activeSnapshot = useAppStore(selectActiveSnapshot);
+  const workspaceMode = useAppStore(selectWorkspaceMode);
   if (workspaceMode === "COMPARE") {
     return (
       <main className="app-panel h-full min-w-0 overflow-hidden rounded-shell bg-white/90">
@@ -680,29 +706,21 @@ export function App() {
   const { t } = useTranslation();
   const [activePage, setActivePage] = useState<AppPage>("WORKSPACE");
   const isCompactShell = useCompactAppShell();
-  const bootStatus = useAppStore((state) => state.bootStatus);
-  const bootError = useAppStore((state) => state.bootError);
-  const initializeApp = useAppStore((state) => state.initializeApp);
-  const leftSidebarCollapsed = useAppStore(
-    (state) => state.ui.leftSidebarCollapsed
-  );
-  const rightPanelCollapsed = useAppStore(
-    (state) => state.ui.rightPanelCollapsed
-  );
-  const providers = useAppStore((state) => state.providers);
-  const providerOrder = useAppStore((state) => state.providerOrder);
-  const providerModels = useAppStore((state) => state.providerModels);
-  const defaultModelId = useAppStore((state) => state.defaultModelId);
-  const activeSnapshot = useAppStore((state) => state.activeSnapshot);
-  const workspaceMode = useAppStore((state) => state.workspace.workspaceMode);
-  const setLeftSidebarCollapsed = useAppStore(
-    (state) => state.setLeftSidebarCollapsed
-  );
-  const setRightPanelCollapsed = useAppStore(
-    (state) => state.setRightPanelCollapsed
-  );
-  const createConversation = useAppStore((state) => state.createConversation);
-  const openConversation = useAppStore((state) => state.openConversation);
+  const bootStatus = useAppStore(selectBootStatus);
+  const bootError = useAppStore(selectBootError);
+  const initializeApp = useAppStore(selectInitializeApp);
+  const leftSidebarCollapsed = useAppStore(selectLeftSidebarCollapsed);
+  const rightPanelCollapsed = useAppStore(selectRightPanelCollapsed);
+  const providers = useAppStore(selectProviders);
+  const providerOrder = useAppStore(selectProviderOrder);
+  const providerModels = useAppStore(selectProviderModels);
+  const defaultModelId = useAppStore(selectDefaultModelId);
+  const activeSnapshot = useAppStore(selectActiveSnapshot);
+  const workspaceMode = useAppStore(selectWorkspaceMode);
+  const setLeftSidebarCollapsed = useAppStore(selectSetLeftSidebarCollapsed);
+  const setRightPanelCollapsed = useAppStore(selectSetRightPanelCollapsed);
+  const createConversation = useAppStore(selectCreateConversation);
+  const openConversation = useAppStore(selectOpenConversation);
   const connectedProviderCount = useMemo(
     () =>
       providerOrder.filter((providerId) => providers[providerId]?.enabled).length,
@@ -884,6 +902,7 @@ export function App() {
       </div>
       <ExportDialog />
       <BranchRenameDialog />
+      <ConfirmDialogPortal />
     </div>
   );
 }

@@ -19,18 +19,15 @@
  *   - Branch creation always creates a NEW entity
  *   - editedFromMessageId links to the original without changing it
  */
-
 import { useAppStore } from "../../stores/useAppStore";
 import { buildSendPlan, SendPlanError } from "./buildSendPlan";
 import { startAssistantStream } from "../../services/streamController";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { AppStore } from "../../stores/appStore.types";
 import type { BranchEntity, MessageNode } from "../../types/conversation";
-
 // ============================================================================
 // Helpers
 // ============================================================================
-
 /** Resolve the provider that should serve the currently selected model. */
 export function resolveProviderIdForModel(state: AppStore, modelId: string): string {
   const selectedModel = state.providerModels[modelId];
@@ -40,25 +37,20 @@ export function resolveProviderIdForModel(state: AppStore, modelId: string): str
   ) {
     return selectedModel.providerId;
   }
-
   const fallbackProviderId = state.providerOrder.find((providerId) => {
     const provider = state.providers[providerId];
     if (!provider?.enabled) {
       return false;
     }
-
     return provider.modelIds.some(
       (providerModelId) => state.providerModels[providerModelId]
     );
   });
-
   if (!fallbackProviderId) {
     throw new Error("No enabled provider available for the selected model");
   }
-
   return fallbackProviderId;
 }
-
 /**
  * Execute the unified send action.
  *
@@ -75,29 +67,91 @@ export function resolveProviderIdForModel(state: AppStore, modelId: string): str
  */
 export async function sendMessageAction(): Promise<void> {
   const state = useAppStore.getState();
-
   // --- Validation ---
   const draft = state.composer.draft.trim();
   if (!draft) {
     throw new Error("Cannot send empty message");
   }
-
   const modelId = state.composer.selectedModelId;
   if (!modelId) {
     throw new Error("No model selected");
   }
-
   // --- Build plan (pure computation) ---
   const plan = buildSendPlan(state);
-
   // --- Determine provider ---
   const providerId = resolveProviderIdForModel(state, modelId);
+  // --- EDIT_INLINE: special fast path ---
+  if (plan.editInlineMessageId) {
+    // Edit user message in place, delete all downstream messages
+    const updatedMsg = await tauriCmd.editUserMessageInline(plan.editInlineMessageId, draft);
+    const promptMessages = await tauriCmd.buildPromptMessages({
+      conversationId: plan.conversationId,
+      upToMessageId: updatedMsg.id,
+    });
+    // Collect all descendant IDs from the frontend snapshot before mutation
+    const snapshot = state.activeSnapshot;
+    const deletedIds = new Set<string>();
+    if (snapshot) {
+      const collectDescendants = (parentId: string) => {
+        const children = snapshot.indexes.childMessageIdsByParentId[parentId] ?? [];
+        for (const childId of children) {
+          deletedIds.add(childId);
+          collectDescendants(childId);
+        }
+      };
+      collectDescendants(plan.editInlineMessageId);
+    }
+    // Single atomic set
+    useAppStore.setState(
+      (s) => {
+        if (!s.activeSnapshot) return;
+        const snap = s.activeSnapshot;
+        // Remove all deleted descendants from entities and indexes
+        for (const id of deletedIds) {
+          const msg = snap.entities.messages[id];
+          if (msg?.parentId) {
+            const siblings = snap.indexes.childMessageIdsByParentId[msg.parentId];
+            if (siblings) {
+              const idx = siblings.indexOf(id);
+              if (idx !== -1) siblings.splice(idx, 1);
+            }
+          }
+          delete snap.entities.messages[id];
+        }
+        // Update the edited message with fresh DTO (empty childIds)
+        snap.entities.messages[updatedMsg.id] = updatedMsg;
+        snap.indexes.childMessageIdsByParentId[updatedMsg.id] = [];
+        // Update branch head to point to the edited message
+        const branch = snap.entities.branches[plan.targetBranchId];
+        if (branch) {
+          branch.headMessageId = updatedMsg.id;
+        }
+        s.composer.draft = "";
+        s.workspace.workspaceMode = "NORMAL";
+        s.workspace.forkIntent = null;
+        s.workspace.variantPreview = null;
+      },
+      undefined,
+      "conversation/messageEditedInline"
+    );
+    await startAssistantStream({
+      conversationId: plan.conversationId,
+      branchId: plan.targetBranchId,
+      parentMessageId: updatedMsg.id,
+      providerId,
+      modelId,
+      promptMessages,
+      generationParams: { ...state.composer.params },
+      rendererMode: "DOM_TEXT",
+    });
+    return;
+  }
 
   // --- Persist branch/message entities via Tauri BEFORE local store sync ---
   let newBranch: BranchEntity | null = null;
   let targetBranchId = plan.targetBranchId;
-
   if (plan.createBranch) {
+    const autoName = draft.length > 10 ? draft.slice(0, 10) + '...' : draft;
     newBranch = await tauriCmd.createBranch({
       conversationId: plan.conversationId,
       sourceBranchId: plan.sourceBranchId,
@@ -105,10 +159,10 @@ export async function sendMessageAction(): Promise<void> {
       forkSourceType: plan.createBranch.sourceType,
       forkSourceMessageId: plan.createBranch.forkSourceMessageId ?? undefined,
       preferredModelId: modelId,
+      name: autoName,
     });
     targetBranchId = newBranch.id;
   }
-
   const userMessage: MessageNode = await tauriCmd.createUserMessage({
     conversationId: plan.conversationId,
     branchId: targetBranchId,
@@ -116,21 +170,17 @@ export async function sendMessageAction(): Promise<void> {
     parentMessageId: plan.targetParentMessageId ?? undefined,
     editedFromMessageId: plan.editedFromMessageId ?? undefined,
   });
-
   const promptMessages = await tauriCmd.buildPromptMessages({
     conversationId: plan.conversationId,
     upToMessageId: userMessage.id,
   });
-
   // --- SINGLE ATOMIC SET: all mutations in one immer transaction ---
   useAppStore.setState(
     (s) => {
       if (!s.activeSnapshot) return;
-
       // 1. Upsert new branch + update indexes + update currentBranchId
       if (newBranch) {
         s.activeSnapshot.entities.branches[newBranch.id] = newBranch;
-
         // Update branch index by fork point
         if (newBranch.forkPointMessageId) {
           const ids =
@@ -145,10 +195,8 @@ export async function sendMessageAction(): Promise<void> {
           }
         }
       }
-
       // 2. Upsert user message + update indexes
       s.activeSnapshot.entities.messages[userMessage.id] = userMessage;
-
       if (userMessage.parentId) {
         const children =
           s.activeSnapshot.indexes.childMessageIdsByParentId[
@@ -165,14 +213,12 @@ export async function sendMessageAction(): Promise<void> {
           s.activeSnapshot.indexes.rootMessageIds.push(userMessage.id);
         }
       }
-
       // 3. Update branch headMessageId (for existing branches too, not just new ones)
       const targetBranch = s.activeSnapshot.entities.branches[targetBranchId];
       if (targetBranch) {
         targetBranch.headMessageId = userMessage.id;
         targetBranch.updatedAt = userMessage.updatedAt;
       }
-
       if (newBranch) {
         s.activeSnapshot.summary.activeBranchCount += 1;
       }
@@ -183,7 +229,6 @@ export async function sendMessageAction(): Promise<void> {
         ...s.activeSnapshot.summary,
       };
       s.workspace.currentBranchId = targetBranchId;
-
       // 4. Clear all transient state after confirmed persistence
       s.composer.draft = "";
       s.workspace.workspaceMode = "NORMAL";
@@ -193,7 +238,6 @@ export async function sendMessageAction(): Promise<void> {
     undefined,
     "conversation/messageSent"
   );
-
   // --- Step 5: Start assistant streaming (async, outside the atomic set) ---
   await startAssistantStream({
     conversationId: plan.conversationId,
