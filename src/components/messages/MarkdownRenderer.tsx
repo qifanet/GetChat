@@ -10,7 +10,7 @@
  *
  * Raw HTML remains disabled so assistant output cannot inject arbitrary DOM.
  */
-import { memo, useState, useCallback, type ReactNode } from "react";
+import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -199,9 +199,13 @@ function buildMarkdownComponents(
 }
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const { t } = useTranslation();
-  const markdownComponents = buildMarkdownComponents(
-    t("common.copyCode"),
-    t("common.codeCopied")
+  const markdownComponents = useMemo(
+    () =>
+      buildMarkdownComponents(
+        t("common.copyCode"),
+        t("common.codeCopied")
+      ),
+    [t]
   );
   return (
     <div className="markdown-content max-w-none">
