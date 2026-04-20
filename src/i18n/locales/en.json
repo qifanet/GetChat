@@ -263,7 +263,10 @@
     "defaultModelSaved": "Default model updated.",
     "languageTitle": "Language / 语言",
     "languageHelp": "Switch the interface language. Changes take effect immediately.",
-    "languageChanged": "Language switched."
+    "languageChanged": "Language switched.",
+    "settings.about": "About",
+    "settings.version": "Version {{version}}",
+    "settings.aboutDescription": "A local-first AI exploration workbench with branching conversations, multi-model management and auto-updates."
   },
   "export": {
     "title": "Export",

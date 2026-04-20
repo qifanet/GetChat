@@ -16,11 +16,11 @@ import {
   listAvailableModelOptions,
 } from "../../features/models/modelUtils";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { getName, getVersion } from "@tauri-apps/api/app";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
-
 const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
@@ -29,7 +29,6 @@ const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) =>
 const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
 const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
 const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
-
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -827,7 +826,6 @@ export function ProviderSettingsScreen({
                               </button>
                             </div>
                           </div>
- 
                           <div className="mt-4 grid gap-4 lg:grid-cols-2">
                             <label className="space-y-2">
                               <span className="text-sm font-medium text-miro-text">
