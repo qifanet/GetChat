@@ -65,6 +65,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             setup_tracing();
             tracing::info!("GetChat starting...");
@@ -97,7 +99,7 @@ pub fn run() {
             commands::conversations::archive_conversation,
             commands::conversations::unarchive_conversation,
             commands::conversations::delete_conversation,
-            // Branches (5)
+            // Branches (5+2)
             commands::branches::create_branch,
             commands::branches::rename_branch,
             commands::branches::set_branch_preferred_model,
@@ -105,7 +107,7 @@ pub fn run() {
             commands::branches::archive_branch,
             commands::branches::unarchive_branch,
             commands::branches::set_mainline_branch,
-            // Messages (6)
+            // Messages (6+2)
             commands::messages::create_user_message,
             commands::messages::create_assistant_placeholder_for_branch,
             commands::messages::create_assistant_variant_placeholder,

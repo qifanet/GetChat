@@ -34,6 +34,7 @@ import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsSc
 import { ExportDialog } from "./components/export/ExportDialog";
 import { BranchRenameDialog } from "./components/branches/BranchRenameDialog";
 import { ConfirmDialogPortal } from "./components/common/confirmDialog";
+import { UpdateNotification } from "./components/common/UpdateNotification";
 // ============================================================================
 // Module-level selectors (stable references for React 19 useSyncExternalStore)
 //
@@ -903,6 +904,7 @@ export function App() {
       <ExportDialog />
       <BranchRenameDialog />
       <ConfirmDialogPortal />
+      <UpdateNotification />
     </div>
   );
 }

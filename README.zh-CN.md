@@ -1,178 +1,170 @@
 <div align="center">
 
+<img src="src/assets/brand/getchat-logo.svg" width="64" height="64" alt="GetChat Logo" />
+
 # GetChat
 
-**桌面优先、本地优先的 AI 对话工作台，支持分支式会话**
+**Get inspiration, get creativity, get infinite possibilities.**
 
-[![TypeScript][badge-ts]][link-ts]
-[![React 19][badge-react]][link-react]
-[![Tauri v2][badge-tauri]][link-tauri]
-[![SQLite][badge-sqlite]][link-sqlite]
-[![Vitest][badge-vitest]][link-vitest]
-[![MIT License][badge-license]][link-license]
+本地优先的桌面端 AI 对话应用，支持分支式会话与并排对比。
+
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D4?logo=windows11&logoColor=white)](#)
+[![macOS](https://img.shields.io/badge/macOS-Intel%20%2F%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#)
+[![Linux](https://img.shields.io/badge/Linux-x64-FCC624?logo=linux&logoColor=black)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Tauri v2](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri&logoColor=black)](https://tauri.app/)
+[![MIT License](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
 
 [English](./README.md) · [简体中文](./README.zh-CN.md)
 
 </div>
 
-## 项目概览
+---
 
-GetChat 是一个基于 Tauri 的桌面应用，不是简单的聊天套壳。
+## 为什么选择 GetChat？
 
-它把对话保存为可分叉的消息树，支持路径比较、主线收敛和本地工作区持久化。当前产品形态已经切换为 **workspace-first**：即使用户还没有配置任何 AI Provider，主工作区依然可用；Provider 的接入放在 **Settings** 页面完成，不再阻塞首次进入。
+大多数 AI 对话工具把会话当作一条时间线。一旦你点击"重新生成"或换一个提示词，之前的回答就没了。GetChat 不一样：**每一段对话都是一棵树，而不是一条线。**
 
-## 当前能力
+- **任意分叉** — 从历史中的任意一条消息创建分支，尝试不同的提示词、模型或方案，原路径始终保留。
+- **并排对比** — 将两条分支并排放在一起，直观比较哪个回答更好。
+- **数据留在本地** — 所有对话、分支和设置都存储在本地 SQLite 数据库中，除了你配置的 AI API 调用外，没有任何数据被发送到服务器。
 
-| 能力 | 当前实现 |
+## 功能特性
+
+### 分支式对话
+
+每条消息都可以成为新分支的起点。编辑重发、重新生成、手动分叉 — 原始路径始终保留。在侧边栏中可以自由浏览完整的对话树。
+
+### 并排对比
+
+选择任意两条分支，在分屏视图中进行对比。共享上下文高亮显示，让你专注于实际差异。
+
+### 多 Provider 支持
+
+接入 OpenAI、DeepSeek、Ollama 或任何兼容 OpenAI 协议的 API。可以配置多个 Provider，在不同分支间切换使用，也可以设置全局默认模型方便快速调用。
+
+### 本地优先 & 隐私安全
+
+- 所有数据存储在本地 SQLite 数据库中。
+- 无遥测、无分析、无云同步。
+- 只有你明确配置的 AI API 调用会连接外部服务。
+
+### 跨平台桌面应用
+
+基于 Tauri v2 构建，在 Windows、macOS 和 Linux 上提供轻量原生的体验。不使用 Electron，不捆绑浏览器。
+
+### 自动更新
+
+应用在后台检查新版本，发现更新后会通知你。你可以自主决定何时下载安装。
+
+### 国际化
+
+支持中文和英文，可随时在设置中切换。
+
+## 技术栈
+
+| 层级 | 技术 |
 | --- | --- |
-| 工作区优先 | 首屏直接进入可用工作区，无需先强制配置 Provider |
-| 分支式对话 | 支持从历史消息分叉、编辑后重发、重新生成，且不会破坏原路径 |
-| Compare 模式 | 支持两条分支并排比较，并识别共享上下文 |
-| Provider 配置 | 在 Settings 页面集中管理 Provider 与默认模型 |
-| 模型展示 | UI 统一显示模型 `displayName`，稳定 ID 与请求名保留在内部链路 |
-| 流式性能 | 长消息通过 runtime registry 与 imperative text surface 渲染，减少高频 React 重渲染 |
-| 本地优先持久化 | SQLite 作为工作区、会话、分支、消息的事实来源 |
-| 品牌统一 | 应用 Logo、favicon 与 Tauri 打包图标已统一到同一品牌资源体系 |
-
-## 架构说明
-
-### 前端
-
-- 使用 React 19 + TypeScript 构建桌面壳层。
-- 使用 Zustand 管理应用状态、工作区状态和流式会话元数据。
-- 工作区、Compare、Settings、对话侧栏和顶部上下文栏运行在同一个桌面应用壳层中。
-- 模型显示名通过统一的 display helper 解析，避免界面泄露模型 ID 或请求名。
-
-### 后端
-
-- 使用 Rust + Tauri v2 提供桌面运行时和 IPC。
-- 命令按领域拆分为 bootstrap、settings、conversations、branches、messages、streaming、debug。
-- repository 与 service 分层明确，便于测试和维护。
-
-### 持久化与流式输出
-
-- SQLite 负责保存完整的会话树和工作区状态。
-- 流式文本缓冲不直接进入 React 状态，而是在运行时注册表中累积，完成后再稳定提交。
-- 后端流服务负责把不同 Provider 的输出统一成一致的桌面流式事件。
-
-## 项目结构
-
-```text
-GetChat/
-├── src/
-│   ├── components/
-│   │   ├── brand/          # 品牌 Logo 与锁定版标识
-│   │   ├── chat/           # 对话消息列表与工作区消息视图
-│   │   ├── composer/       # 消息发送区
-│   │   ├── compare/        # Compare 对比工作区
-│   │   ├── conversations/  # 左侧会话列表项
-│   │   ├── layout/         # 顶部上下文栏与桌面壳层
-│   │   ├── settings/       # Provider 设置页
-│   │   └── workspace/      # 分叉/编辑工作区提示区
-│   ├── features/
-│   │   ├── composer/       # 发送计划与发送流程
-│   │   └── models/         # 模型显示与选择辅助逻辑
-│   ├── services/           # Tauri 命令、流式运行时、浏览器调试运行时
-│   ├── stores/             # Zustand 状态仓库
-│   ├── i18n/               # 中英文资源与显示名辅助函数
-│   └── assets/brand/       # 共用品牌 SVG 资源
-├── public/                 # favicon 与静态资源
-├── src-tauri/
-│   ├── src/
-│   │   ├── commands/
-│   │   ├── services/
-│   │   ├── repositories/
-│   │   ├── db/migrations/
-│   │   └── dto/
-│   └── icons/              # 桌面与移动端打包图标
-├── docs/                   # PRD、接口设计、stitch 设计输出、审计记录
-└── README*.md
-```
+| 前端 | React 19、TypeScript、Tailwind CSS |
+| 状态管理 | Zustand v5 + Immer |
+| 桌面运行时 | Tauri v2 (Rust) |
+| 数据库 | SQLite (WAL 模式，本地优先) |
+| 流式输出 | 基于 Rust 的流式管道 + 命令式文本渲染 |
+| 国际化 | i18next |
+| 测试 | Vitest (前端)、Cargo test (后端) |
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js 18+
-- Rust stable
-- Tauri CLI
-- 当前机器上可用的 Windows Tauri 编译工具链
+- [Node.js](https://nodejs.org/) 18+
+- [Rust](https://www.rust-lang.org/tools/install) 稳定版工具链
+- [Tauri v2](https://tauri.app/start/prerequisites/) 所需的平台依赖
 
-### 安装依赖
+### 安装与运行
 
 ```bash
+# 克隆仓库
 git clone https://github.com/qifanet/GetChat.git
 cd GetChat
+
+# 安装前端依赖
 npm install
-```
 
-### 启动桌面开发模式
-
-```bash
+# 启动开发模式（前后端热重载）
 npx tauri dev
 ```
 
-### 运行测试
-
-```bash
-npm test
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-### 构建发布版本
+### 生产构建
 
 ```bash
 npx tauri build
 ```
 
-## 测试状态
+安装包将生成在 `src-tauri/target/release/bundle/` 目录下。
 
-当前仓库内的自动化测试覆盖包括：
+### 运行测试
 
-| 测试范围 | 数量 |
-| --- | ---: |
-| 前端自动化测试 | 115 |
-| Rust 不变量测试 | 11 |
+```bash
+# 前端测试
+npm test
 
-前端测试当前覆盖如下：
+# 后端测试
+cargo test --manifest-path src-tauri/Cargo.toml
+```
 
-| 模块 | 数量 |
-| --- | ---: |
-| `buildSendPlan` | 11 |
-| `branchSelectors` | 23 |
-| `conversationSelectors` | 20 |
-| `streamController` | 12 |
-| `tauriCommands` | 28 |
-| `browserDebugRuntime` | 4 |
-| `AssistantMessageBubble` | 6 |
-| `MarkdownRenderer` | 3 |
-| `CompareWorkspace` | 8 |
+## 项目结构
 
-## 文档目录
+```
+GetChat/
+├── src/                          # 前端源码 (React + TypeScript)
+│   ├── components/               # UI 组件
+│   │   ├── chat/                 # 消息列表与对话视图
+│   │   ├── composer/             # 消息输入区
+│   │   ├── compare/              # 并排对比工作区
+│   │   ├── conversations/        # 会话侧边栏
+│   │   ├── settings/             # Provider 与应用设置
+│   │   └── ...
+│   ├── features/                 # 功能模块 (发送逻辑、模型管理)
+│   ├── services/                 # Tauri IPC 通信、流式运行时
+│   ├── stores/                   # Zustand 状态仓库
+│   └── i18n/                     # 国际化资源
+├── src-tauri/                    # 后端源码 (Rust + Tauri)
+│   ├── src/
+│   │   ├── commands/             # Tauri IPC 命令处理
+│   │   ├── services/             # 业务逻辑服务
+│   │   ├── repositories/         # 数据库访问层
+│   │   └── db/migrations/        # SQLite 迁移脚本
+│   └── icons/                    # 各平台应用图标
+├── docs/                         # 设计文档与技术规格
+└── scripts/                      # 构建与 lint 脚本
+```
 
-主要文档位于 [`docs/`](./docs/)：
+## 文档
 
-- `PRD-v1.md`
-- `SQLiteSchema+TauriCommand接口设计.md`
-- `TypeScript核心类型定义+ZustandStore设计草案.md`
+设计文档和技术规格位于 [`docs/`](./docs/) 目录：
+
+- **PRD-v1.md** — 产品需求文档
+- **SQLiteSchema + TauriCommand 接口设计** — 数据库结构与 IPC API
+- **TypeScript 核心类型 + Zustand Store 设计** — 前端架构设计
 
 ## 参与贡献
 
-开发流程、提交规范和 PR 要求见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+欢迎贡献代码！请阅读 [贡献指南](./CONTRIBUTING.md) 了解：
+
+- 分支命名规范
+- 提交信息格式（`feat:`、`fix:`、`docs:` 等）
+- Pull Request 工作流程与审查规范
 
 ## 许可证
 
-本项目基于 MIT License，详见 [LICENSE](./LICENSE)。
+[MIT License](./LICENSE) — 可自由使用、修改和分发。
 
-[badge-ts]: https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white
-[badge-react]: https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black
-[badge-tauri]: https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri&logoColor=black
-[badge-sqlite]: https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white
-[badge-vitest]: https://img.shields.io/badge/Vitest-3-6E9F18?logo=vitest&logoColor=white
-[badge-license]: https://img.shields.io/badge/License-MIT-green
-[link-ts]: https://www.typescriptlang.org/
-[link-react]: https://react.dev/
-[link-tauri]: https://tauri.app/
-[link-sqlite]: https://www.sqlite.org/
-[link-vitest]: https://vitest.dev/
-[link-license]: ./LICENSE
+---
+
+<div align="center">
+
+Built with care by [QiFans](https://github.com/qifanet)
+
+</div>

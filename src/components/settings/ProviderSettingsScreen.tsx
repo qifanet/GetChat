@@ -20,7 +20,6 @@ import * as tauriCmd from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
-
 const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
@@ -29,7 +28,6 @@ const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) =>
 const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
 const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
 const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
-
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -618,6 +616,7 @@ export function ProviderSettingsScreen({
             })}
           </div>
         </div>
+        <AboutSection />
       </aside>
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid max-w-6xl gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -827,7 +826,6 @@ export function ProviderSettingsScreen({
                               </button>
                             </div>
                           </div>
- 
                           <div className="mt-4 grid gap-4 lg:grid-cols-2">
                             <label className="space-y-2">
                               <span className="text-sm font-medium text-miro-text">
@@ -1029,3 +1027,36 @@ export function ProviderSettingsScreen({
   );
 }
 
+function AboutSection() {
+  const { t } = useTranslation();
+  const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    import("../../services/updateChecker").then(({ checkForUpdate, isUpdaterSupported }) => {
+      if (!isUpdaterSupported()) return;
+      checkForUpdate().then((info) => {
+        if (!cancelled && info) setUpdateInfo(info);
+      }).catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div className="mx-4 mb-4 mt-auto border-t border-miro-border/10 pt-3">
+      <p className="text-[11px] text-miro-text-secondary/60">
+        {t("settings.version", { version: __APP_VERSION__ })}  ·  © 2026 QiFans
+      </p>
+      {updateInfo && (
+        <a
+          href="https://github.com/qifanet/GetChat/releases"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1.5 block rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-100"
+        >
+          {t("settings.updateAvailable", { version: updateInfo.latestVersion })}
+        </a>
+      )}
+    </div>
+  );
+}
