@@ -150,8 +150,9 @@ src-tauri/WixTools/
 *.rs.bk
 Cargo.lock
 
-# Tauri generated icons (rebuild from source)
-src-tauri/icons/
+# Tauri generated icons - keep platform bundle icons, ignore mobile
+src-tauri/icons/android/
+src-tauri/icons/ios/
 
 # SQLite database files (local runtime data)
 *.db
