@@ -264,9 +264,8 @@
     "languageTitle": "Language / 语言",
     "languageHelp": "Switch the interface language. Changes take effect immediately.",
     "languageChanged": "Language switched.",
-    "settings.about": "About",
-    "settings.version": "Version {{version}}",
-    "settings.aboutDescription": "A local-first AI exploration workbench with branching conversations, multi-model management and auto-updates."
+    "version": "Version {{version}}",
+    "updateAvailable": "New v{{version}} available — click to download"
   },
   "export": {
     "title": "Export",

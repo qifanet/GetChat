@@ -10,6 +10,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import pkg from "./package.json";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -66,6 +67,9 @@ function resolveVendorChunk(id: string): string | undefined {
 }
 
 export default defineConfig(async () => ({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [react()],
   resolve: {
     alias: {

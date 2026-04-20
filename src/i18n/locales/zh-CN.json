@@ -264,9 +264,8 @@
     "languageTitle": "语言 / Language",
     "languageHelp": "切换界面语言，更改后立即生效。",
     "languageChanged": "语言已切换。",
-    "settings.about": "关于",
-    "settings.version": "版本 {{version}}",
-    "settings.aboutDescription": "本地优先的 AI 探索工作台，支持分支对话、多模型管理和自动更新。"
+    "version": "版本 {{version}}",
+    "updateAvailable": "发现新版本 v{{version}}，点击前往下载"
   },
   "export": {
     "title": "导出",

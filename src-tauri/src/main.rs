@@ -1,6 +1,6 @@
 // Hide the console window in release builds unless -dev is passed.
 // In debug builds (cargo build / tauri dev) the console is always visible.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 /**
  * @file main.rs
@@ -15,12 +15,12 @@
 
 fn main() {
     // In release mode, re-attach console when -dev flag is present
-    #[cfg(not(debug_assertions))]
+    #[cfg(all(windows, not(debug_assertions)))]
     {
         let args: Vec<String> = std::env::args().collect();
         if args.iter().any(|a| a == "-dev" || a == "--dev") {
             unsafe {
-                windows::Win32::System::Console::AllocConsole();
+                let _ = windows::Win32::System::Console::AllocConsole();
             }
         }
     }

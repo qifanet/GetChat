@@ -11,8 +11,6 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   autoCheckForUpdate,
-  checkForUpdate,
-  isUpdaterSupported,
   installUpdateAndRelaunch,
   type UpdateInfo,
 } from "../../services/updateChecker";
@@ -49,7 +47,7 @@ export function UpdateNotification() {
   // Full-screen overlay during install
   if (installing) {
     return (
-      <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div role="dialog" aria-modal="true" aria-label={t("updater.installing")} className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm">
         <div className="mx-4 max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-miro-border border-t-miro-blue" />
           <p className="text-sm font-medium text-miro-text">
@@ -101,58 +99,6 @@ export function UpdateNotification() {
       </button>
       {error && (
         <span className="ml-1 text-[11px] text-miro-red">{error}</span>
-      )}
-    </div>
-  );
-}
-
-/**
- * Manual update check button — can be placed in settings or about page.
- */
-export function UpdateCheckButton() {
-  const { t } = useTranslation();
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<
-    "up-to-date" | "available" | "unsupported" | null
-  >(null);
-
-  const handleCheck = useCallback(async () => {
-    if (!isUpdaterSupported()) {
-      setResult("unsupported");
-      return;
-    }
-
-    setChecking(true);
-    setResult(null);
-    const info = await checkForUpdate();
-    setChecking(false);
-    setResult(info ? "available" : "up-to-date");
-  }, []);
-
-  return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={handleCheck}
-        disabled={checking}
-        className="rounded-lg bg-miro-surface-high px-3 py-1.5 text-xs font-medium text-miro-text transition-colors hover:bg-miro-border/20 disabled:opacity-50"
-      >
-        {checking ? t("updater.checking") : t("updater.checkForUpdates")}
-      </button>
-      {result === "up-to-date" && (
-        <span className="text-xs text-miro-text-secondary">
-          {t("updater.upToDate")}
-        </span>
-      )}
-      {result === "available" && (
-        <span className="text-xs text-miro-blue">
-          {t("updater.availableShort")}
-        </span>
-      )}
-      {result === "unsupported" && (
-        <span className="text-xs text-miro-text-secondary">
-          {t("updater.unsupported")}
-        </span>
       )}
     </div>
   );

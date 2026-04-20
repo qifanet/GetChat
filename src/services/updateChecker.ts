@@ -37,7 +37,8 @@ export interface UpdateInfo {
 
 /**
  * Check for updates via the Tauri updater plugin.
- * Returns null if no update available, or UpdateInfo if a new version exists.
+ * Returns UpdateInfo when an update is available, or null when the app is
+ * up-to-date, the updater is unsupported, or the check fails.
  */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   if (!isUpdaterSupported()) return null;
