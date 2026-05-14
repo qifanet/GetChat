@@ -5,7 +5,7 @@
  * Features:
  *   - Debounced search (300ms) across all conversations
  *   - Results grouped by conversation with snippet display
- *   - Click result to navigate to conversation
+ *   - Click result to navigate to the correct branch and scroll to message
  *   - Recent conversations shown when query is empty
  */
 
@@ -17,10 +17,10 @@ import { getConversationDisplayTitle } from "../../i18n/displayNames";
 
 interface SearchDialogProps {
   onClose: () => void;
-  onSelectConversation: (conversationId: string) => void;
+  onNavigate: (conversationId: string, messageId?: string) => void;
 }
 
-export function SearchDialog({ onClose, onSelectConversation }: SearchDialogProps) {
+export function SearchDialog({ onClose, onNavigate }: SearchDialogProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultItem[]>([]);
@@ -75,12 +75,20 @@ export function SearchDialog({ onClose, onSelectConversation }: SearchDialogProp
       .filter(Boolean);
   }, [summaryOrder, summariesById]);
 
-  const handleSelect = useCallback(
-    (conversationId: string) => {
-      onSelectConversation(conversationId);
+  const handleSelectResult = useCallback(
+    (conversationId: string, messageId: string) => {
+      onNavigate(conversationId, messageId);
       onClose();
     },
-    [onSelectConversation, onClose]
+    [onNavigate, onClose]
+  );
+
+  const handleSelectConversation = useCallback(
+    (conversationId: string) => {
+      onNavigate(conversationId);
+      onClose();
+    },
+    [onNavigate, onClose]
   );
 
   return (
@@ -150,7 +158,7 @@ export function SearchDialog({ onClose, onSelectConversation }: SearchDialogProp
                       <button
                         key={item.messageId}
                         type="button"
-                        onClick={() => handleSelect(conversationId)}
+                        onClick={() => handleSelectResult(conversationId, item.messageId)}
                         className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-miro-blue-light/40"
                       >
                         <div className="flex items-center gap-2">
@@ -187,7 +195,7 @@ export function SearchDialog({ onClose, onSelectConversation }: SearchDialogProp
                   <button
                     key={summary.id}
                     type="button"
-                    onClick={() => handleSelect(summary.id)}
+                    onClick={() => handleSelectConversation(summary.id)}
                     className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-miro-blue-light/40"
                   >
                     <span className="text-sm text-miro-text">

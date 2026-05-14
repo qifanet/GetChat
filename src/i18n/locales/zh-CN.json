@@ -141,7 +141,11 @@
     "sharedContextHint": "这些消息在两条路线中完全一致，展开后可以快速复核分叉前的上下文。",
     "aiSummary": "AI 差异总结",
     "summarizing": "正在生成总结...",
-    "helperModelRequired": "请在设置中配置辅助模型以启用 AI 总结"
+    "helperModelRequired": "请在设置中配置辅助模型以启用 AI 总结",
+    "returnBtn": "切换",
+    "setMainlineBtn": "设为主线",
+    "mainlineBadge": "主线",
+    "returnToBranch": "切换到 {{name}}"
   },
   "message": {
     "edited": "已编辑",

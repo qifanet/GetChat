@@ -11,7 +11,6 @@ import { memo, useState } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import { IconCopy, IconCheck, IconPencilSquare, IconBranch } from "../common/Icon";
 import {
-  MessageActionToolbar,
   MessageActionButton,
   MessageActionMoreMenu,
 } from "./MessageActionToolbar";
@@ -80,7 +79,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
     : [];
 
   return (
-    <div className="app-message-card group/message flex justify-end">
+    <div className="app-message-card group/message flex flex-col items-end" data-message-id={message.id}>
       <div className="max-w-[min(760px,82%)]">
         <div className="mb-2 flex items-center justify-end gap-2">
           {message.editedFromMessageId ? (
@@ -98,19 +97,19 @@ export const UserMessageBubble = memo(function UserMessageBubble({
         <div className="rounded-[26px] rounded-tr-[10px] border border-miro-blue/12 bg-miro-blue-light px-5 py-4 text-[15px] leading-7 text-miro-text shadow-ring">
           <p className="whitespace-pre-wrap break-words">{message.content.text}</p>
         </div>
-        <MessageActionToolbar align="right">
-          <MessageActionButton
-            icon={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-            label={copied ? t("message.copied") : t("message.copy")}
-            onClick={() => void handleCopy()}
-          />
-          <MessageActionButton
-            icon={<IconPencilSquare size={14} />}
-            label={t("message.reEdit")}
-            onClick={handleReEdit}
-          />
-          <MessageActionMoreMenu items={moreMenuItems} />
-        </MessageActionToolbar>
+      </div>
+      <div className="mt-1.5 flex max-w-[min(760px,82%)] items-center gap-0.5 justify-end opacity-0 transition-opacity duration-150 group-hover/message:opacity-100">
+        <MessageActionButton
+          icon={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+          label={copied ? t("message.copied") : t("message.copy")}
+          onClick={() => void handleCopy()}
+        />
+        <MessageActionButton
+          icon={<IconPencilSquare size={14} />}
+          label={t("message.reEdit")}
+          onClick={handleReEdit}
+        />
+        <MessageActionMoreMenu items={moreMenuItems} />
       </div>
     </div>
   );

@@ -69,7 +69,7 @@ function AssistantMessageFrame({
   );
 
   return (
-    <div className="app-message-card group/message flex justify-start">
+    <div className="app-message-card group/message flex flex-col items-start" data-message-id={message.id}>
       <div className="max-w-[min(860px,100%)]">
         <div className="mb-2 flex items-center gap-2">
           <span className="app-message-avatar app-message-avatar-assistant">AI</span>
@@ -92,8 +92,12 @@ function AssistantMessageFrame({
         </div>
         <div className={toneClassName ?? "assistant-message-bubble completed"}>{children}</div>
         {callout ? <div className="mt-3">{callout}</div> : null}
-        {footer ? <div className="mt-1.5">{footer}</div> : null}
       </div>
+      {footer ? (
+        <div className="mt-1.5 max-w-[min(860px,100%)]">
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }

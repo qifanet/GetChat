@@ -7,12 +7,13 @@
  *
  * Usage:
  *   <MessageActionToolbar align="right">
- *     <MessageActionTooltipButton icon={<IconCopy />} label="Copy" onClick={handleCopy} />
+ *     <MessageActionButton icon={<IconCopy />} label="Copy" onClick={handleCopy} />
  *     <MessageActionMoreMenu items={[{ label: "Delete", onClick: handleDelete }]} />
  *   </MessageActionToolbar>
  */
 
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 // ============================================================================
 // Toolbar Container
@@ -107,27 +108,18 @@ interface MessageActionMoreMenuProps {
 
 /**
  * "More" overflow button that opens a floating dropdown menu.
- * Uses fixed positioning to avoid clipping by overflow-hidden ancestors.
+ * Uses a portal to document.body with fixed positioning to guarantee
+ * the menu is never clipped by any ancestor's overflow/contain.
+ * The menu appears directly above the trigger button.
  * Closes on outside click or Escape.
  */
 export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const handleToggle = useCallback(() => {
-    setOpen((prev) => {
-      if (!prev && triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        setMenuStyle({
-          position: "fixed",
-          bottom: `calc(100vh - ${rect.top}px + 4px)`,
-          left: rect.left,
-          minWidth: 140,
-        });
-      }
-      return !prev;
-    });
+    setOpen((prev) => !prev);
   }, []);
 
   const handleClose = useCallback(() => setOpen(false), []);
@@ -137,9 +129,14 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
     if (!open) return;
 
     function handleMouseDown(e: MouseEvent) {
-      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const target = e.target as Node;
+      if (
+        triggerRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
     }
 
     document.addEventListener("mousedown", handleMouseDown);
@@ -166,41 +163,94 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
         ref={triggerRef}
         type="button"
         onClick={handleToggle}
-        className={`relative flex h-7 w-7 items-center justify-center rounded-md text-miro-text-secondary transition-colors hover:bg-miro-border/15 hover:text-miro-text`}
+        className="relative flex h-7 w-7 items-center justify-center rounded-md text-miro-text-secondary transition-colors hover:bg-miro-border/15 hover:text-miro-text"
         title="More"
       >
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <circle cx="5" cy="12" r="1" fill="currentColor" />
           <circle cx="12" cy="12" r="1" fill="currentColor" />
           <circle cx="19" cy="12" r="1" fill="currentColor" />
         </svg>
       </button>
       {open ? (
-        <div
-          className="z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-white py-1 shadow-lg"
-          style={menuStyle}
-          role="menu"
-        >
-          {items.map((item, i) => (
-            <button
-              key={i}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              onClick={() => {
-                item.onClick();
-                handleClose();
-              }}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors
-                ${item.disabled ? "cursor-not-allowed opacity-40" : ""}
-                ${item.danger ? "text-miro-red hover:bg-miro-red-light/40" : "text-miro-text hover:bg-miro-border/10"}`}
-            >
-              {item.icon ? <span className="flex-shrink-0">{item.icon}</span> : null}
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <MoreMenuPortal
+          triggerRef={triggerRef}
+          menuRef={menuRef}
+          items={items}
+          onClose={handleClose}
+        />
       ) : null}
     </>
   );
+}
+
+// ============================================================================
+// Portal Dropdown
+// ============================================================================
+
+interface MoreMenuPortalProps {
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  items: MoreMenuItem[];
+  onClose: () => void;
+}
+
+/**
+ * Renders the dropdown menu via a React portal to document.body.
+ * Positions itself above the trigger button using fixed coordinates
+ * recalculated on every render to stay in sync with scroll/layout changes.
+ */
+function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalProps) {
+  const [coords, setCoords] = useState<{ left: number; bottom: number }>({
+    left: 0,
+    bottom: 0,
+  });
+
+  useEffect(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setCoords({
+      left: rect.left,
+      bottom: window.innerHeight - rect.top + 4,
+    });
+  }, [triggerRef]);
+
+  const menu = (
+    <div
+      ref={menuRef}
+      className="fixed z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-white py-1 shadow-lg"
+      style={{ left: coords.left, bottom: coords.bottom }}
+      role="menu"
+    >
+      {items.map((item, i) => (
+        <button
+          key={i}
+          type="button"
+          role="menuitem"
+          disabled={item.disabled}
+          onClick={() => {
+            item.onClick();
+            onClose();
+          }}
+          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors
+            ${item.disabled ? "cursor-not-allowed opacity-40" : ""}
+            ${item.danger ? "text-miro-red hover:bg-miro-red-light/40" : "text-miro-text hover:bg-miro-border/10"}`}
+        >
+          {item.icon ? <span className="flex-shrink-0">{item.icon}</span> : null}
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  return createPortal(menu, document.body);
 }

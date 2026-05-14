@@ -919,9 +919,21 @@ export function App() {
       {searchOpen ? (
         <SearchDialog
           onClose={() => setSearchOpen(false)}
-          onSelectConversation={async (conversationId) => {
+          onNavigate={async (conversationId, messageId) => {
             setActivePage("WORKSPACE");
             await openConversation(conversationId);
+            if (messageId) {
+              const snapshot = useAppStore.getState().activeSnapshot;
+              if (snapshot) {
+                const { findBranchContainingMessage } = await import("./selectors/conversationSelectors");
+                const branchId = findBranchContainingMessage(snapshot, messageId);
+                if (branchId) {
+                  const setCurrentBranch = useAppStore.getState().setCurrentBranch;
+                  setCurrentBranch(branchId);
+                }
+              }
+              useAppStore.setState((s) => { s.ui.scrollToMessageId = messageId; });
+            }
           }}
         />
       ) : null}

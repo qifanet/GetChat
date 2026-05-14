@@ -324,25 +324,33 @@ pub async fn search_messages(
 }
 
 /// Extract a short snippet around the first keyword occurrence.
-fn extract_snippet(text: &str, keyword: &str, max_len: usize) -> String {
+/// Uses char-boundary-safe slicing to avoid panics on multi-byte UTF-8 (CJK, emoji, etc.).
+fn extract_snippet(text: &str, keyword: &str, max_chars: usize) -> String {
     let text_lower = text.to_lowercase();
-    let pos = text_lower.find(keyword).unwrap_or(0);
+    let byte_pos = text_lower.find(keyword).unwrap_or(0);
 
-    let start = if pos > max_len / 2 {
-        pos - max_len / 2
-    } else {
-        0
-    };
+    // Convert byte position → char index
+    let char_pos = text[..byte_pos].chars().count();
+    let total_chars = text.chars().count();
 
-    let end = (start + max_len).min(text.len());
-    let mut snippet = text[start..end].to_string();
+    let half = max_chars / 2;
+    let char_start = char_pos.saturating_sub(half);
+    let char_end = (char_start + max_chars).min(total_chars);
 
-    if start > 0 {
-        snippet = format!("...{}", snippet);
+    // Slice by char indices (always on char boundaries)
+    let snippet: String = text
+        .chars()
+        .skip(char_start)
+        .take(char_end - char_start)
+        .collect();
+
+    let mut result = String::with_capacity(snippet.len() + 8);
+    if char_start > 0 {
+        result.push_str("...");
     }
-    if end < text.len() {
-        snippet = format!("{}...", snippet);
+    result.push_str(&snippet);
+    if char_end < total_chars {
+        result.push_str("...");
     }
-
-    snippet
+    result
 }

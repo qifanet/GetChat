@@ -141,7 +141,11 @@
     "sharedContextHint": "These messages are identical on both paths. Expand them to quickly review the pre-fork context.",
     "aiSummary": "AI Summary",
     "summarizing": "Summarizing...",
-    "helperModelRequired": "Configure a helper model in Settings to enable AI summaries"
+    "helperModelRequired": "Configure a helper model in Settings to enable AI summaries",
+    "returnBtn": "Switch",
+    "setMainlineBtn": "Set Mainline",
+    "mainlineBadge": "Mainline",
+    "returnToBranch": "Switch to {{name}}"
   },
   "message": {
     "edited": "Edited",
