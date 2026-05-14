@@ -286,6 +286,7 @@ async fn call_ollama(
         "messages": messages,
         "stream": false,
         "think": false,
+        // Keep the helper context window aligned with streaming to avoid unexpected truncation.
         "options": { "num_ctx": 32768 }
     });
 
