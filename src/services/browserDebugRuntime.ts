@@ -77,7 +77,9 @@ export type BrowserDebugCommandName =
   | "build_prompt_messages"
   | "check_db_invariants"
   | "delete_message"
-  | "edit_user_message_inline";
+  | "edit_user_message_inline"
+  | "search_messages"
+  | "generate_branch_diff_summary";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {
@@ -1667,6 +1669,45 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
           },
         ],
       })) as T;
+
+    case "search_messages":
+      return readBrowserDebugCommand((state): T => {
+        const input = args?.input as { query: string; conversationId?: string; limit?: number } | undefined;
+        if (!input?.query) return [] as T;
+        const keyword = input.query.toLowerCase();
+        const limit = input.limit ?? 50;
+        const results: Array<{
+          messageId: string;
+          conversationId: string;
+          role: string;
+          snippet: string;
+          createdAt: number;
+        }> = [];
+        for (const conv of Object.values(state.conversationsById)) {
+          if (input.conversationId && conv.summary.id !== input.conversationId) continue;
+          for (const msg of Object.values(conv.messages)) {
+            if (msg.content.text.toLowerCase().includes(keyword)) {
+              const idx = msg.content.text.toLowerCase().indexOf(keyword);
+              const start = Math.max(0, idx - 30);
+              const end = Math.min(msg.content.text.length, idx + input.query.length + 30);
+              results.push({
+                messageId: msg.id,
+                conversationId: conv.summary.id,
+                role: msg.role,
+                snippet: (start > 0 ? "..." : "") + msg.content.text.slice(start, end) + (end < msg.content.text.length ? "..." : ""),
+                createdAt: msg.createdAt,
+              });
+              if (results.length >= limit) return results as T;
+            }
+          }
+        }
+        return results as T;
+      });
+
+    case "generate_branch_diff_summary":
+      return readBrowserDebugCommand((_state): T => {
+        return { summary: "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。" } as T;
+      });
 
     default:
       throwBrowserDebugError(

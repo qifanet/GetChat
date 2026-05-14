@@ -257,3 +257,92 @@ pub async fn edit_user_message_inline(
     }
     result
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesInput {
+    pub query: String,
+    pub conversation_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultItem {
+    pub message_id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub snippet: String,
+    pub created_at: i64,
+}
+
+/// Search messages by keyword. Returns results grouped by conversation.
+#[tauri::command]
+pub async fn search_messages(
+    state: State<'_, AppState>,
+    input: SearchMessagesInput,
+) -> Result<Vec<SearchResultItem>, AppError> {
+    let start = std::time::Instant::now();
+    let query_len = input.query.len();
+    let limit = input.limit.unwrap_or(50);
+
+    let rows = crate::repositories::messages::search_messages(
+        &state.db,
+        &input.query,
+        input.conversation_id.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| AppError::db_error(&format!("Search failed: {}", e)))?;
+
+    let keyword = input.query.to_lowercase();
+    let snippet_len = 80;
+
+    let results: Vec<SearchResultItem> = rows
+        .into_iter()
+        .map(|row| {
+            let snippet = extract_snippet(&row.content_text, &keyword, snippet_len);
+            SearchResultItem {
+                message_id: row.id,
+                conversation_id: row.conversation_id,
+                role: row.role,
+                snippet,
+                created_at: row.created_at * 1000,
+            }
+        })
+        .collect();
+
+    tracing::info!(
+        cmd = "search_messages",
+        query_len,
+        result_count = results.len(),
+        duration_ms = start.elapsed().as_millis() as u64,
+        "ok"
+    );
+
+    Ok(results)
+}
+
+/// Extract a short snippet around the first keyword occurrence.
+fn extract_snippet(text: &str, keyword: &str, max_len: usize) -> String {
+    let text_lower = text.to_lowercase();
+    let pos = text_lower.find(keyword).unwrap_or(0);
+
+    let start = if pos > max_len / 2 {
+        pos - max_len / 2
+    } else {
+        0
+    };
+
+    let end = (start + max_len).min(text.len());
+    let mut snippet = text[start..end].to_string();
+
+    if start > 0 {
+        snippet = format!("...{}", snippet);
+    }
+    if end < text.len() {
+        snippet = format!("{}...", snippet);
+    }
+
+    snippet
+}

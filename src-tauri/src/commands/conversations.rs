@@ -232,3 +232,26 @@ pub async fn generate_conversation_title(
     tracing::info!(conv_id = %conversation_id, "cmd: generate_conversation_title invoked");
     crate::services::helper_ai_service::generate_conversation_title(&state, &conversation_id).await
 }
+
+/// Generate an AI summary of the differences between two branches.
+#[tauri::command]
+pub async fn generate_branch_diff_summary(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    left_branch_id: String,
+    right_branch_id: String,
+) -> Result<Option<crate::services::helper_ai_service::DiffSummaryResult>, AppError> {
+    tracing::info!(
+        conv_id = %conversation_id,
+        left = %left_branch_id,
+        right = %right_branch_id,
+        "cmd: generate_branch_diff_summary invoked"
+    );
+    crate::services::helper_ai_service::generate_branch_diff_summary(
+        &state,
+        &conversation_id,
+        &left_branch_id,
+        &right_branch_id,
+    )
+    .await
+}

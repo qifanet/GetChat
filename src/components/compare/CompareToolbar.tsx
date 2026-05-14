@@ -10,6 +10,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getBranchDisplayName } from "../../i18n/displayNames";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { generateBranchDiffSummary } from "../../services/tauriCommands";
+import { MarkdownRenderer } from "../messages/MarkdownRenderer";
 import type { BranchEntity } from "../../types/conversation";
 const _select_openExportDialog = (s: import("../../stores/appStore.types").AppStore) => s.openExportDialog;
 const _select_exitCompare = (s: import("../../stores/appStore.types").AppStore) => s.exitCompare;
@@ -32,6 +34,9 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
   );
   const setMainlineBranch = useAppStore(_select_setMainlineBranch);
   const [error, setError] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
+  const helperModelId = useAppStore((s) => s.helperModelId);
   const leftName = getBranchDisplayName(leftBranch.name, t);
   const rightName = getBranchDisplayName(rightBranch.name, t);
   /** Persist the mainline switch through the store-backed command. */
@@ -91,6 +96,31 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
           >
             {t("common.export")}
           </button>
+          <button
+            type="button"
+            disabled={!helperModelId || summaryLoading}
+            onClick={async () => {
+              if (!activeConversationId) return;
+              setSummaryLoading(true);
+              setSummaryText(null);
+              try {
+                const result = await generateBranchDiffSummary(
+                  activeConversationId,
+                  leftBranch.id,
+                  rightBranch.id
+                );
+                setSummaryText(result?.summary ?? null);
+              } catch {
+                setSummaryText(null);
+              } finally {
+                setSummaryLoading(false);
+              }
+            }}
+            className="app-secondary-button px-4 py-2 text-xs text-miro-blue"
+            title={!helperModelId ? t("compare.helperModelRequired") : undefined}
+          >
+            {summaryLoading ? t("compare.summarizing") : t("compare.aiSummary")}
+          </button>
           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
             <button
               type="button"
@@ -111,6 +141,16 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
           </div>
         </div>
       </div>
+      {summaryText ? (
+        <div className="mt-4 rounded-lg border border-miro-blue/15 bg-miro-blue-light/20 p-4">
+          <div className="mb-2 text-xs font-semibold text-miro-blue">
+            {t("compare.aiSummary")}
+          </div>
+          <div className="prose prose-sm max-w-none text-sm text-miro-text">
+            <MarkdownRenderer content={summaryText} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

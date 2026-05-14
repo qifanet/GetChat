@@ -102,6 +102,7 @@ pub fn run() {
             commands::conversations::unarchive_conversation,
             commands::conversations::delete_conversation,
             commands::conversations::generate_conversation_title,
+            commands::conversations::generate_branch_diff_summary,
             // Branches (5+2)
             commands::branches::create_branch,
             commands::branches::rename_branch,
@@ -119,6 +120,7 @@ pub fn run() {
             commands::messages::build_prompt_messages,
             commands::messages::delete_message,
             commands::messages::edit_user_message_inline,
+            commands::messages::search_messages,
             // Streaming runtime (2)
             commands::streaming::start_model_stream,
             commands::streaming::abort_model_stream,

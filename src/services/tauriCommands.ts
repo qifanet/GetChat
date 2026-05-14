@@ -353,6 +353,45 @@ export async function editUserMessageInline(
     newContent,
   });
 }
+
+export interface SearchMessagesInput {
+  query: string;
+  conversationId?: string;
+  limit?: number;
+}
+
+export interface SearchResultItem {
+  messageId: string;
+  conversationId: string;
+  role: string;
+  snippet: string;
+  createdAt: number;
+}
+
+/** Search messages by keyword across all conversations or a specific one. */
+export async function searchMessages(
+  input: SearchMessagesInput
+): Promise<SearchResultItem[]> {
+  return executeCommand<SearchResultItem[]>("search_messages", { input });
+}
+
+export interface DiffSummaryResult {
+  summary: string;
+}
+
+/** Generate an AI summary of the differences between two branches. */
+export async function generateBranchDiffSummary(
+  conversationId: string,
+  leftBranchId: string,
+  rightBranchId: string
+): Promise<DiffSummaryResult | null> {
+  return executeCommand<DiffSummaryResult | null>("generate_branch_diff_summary", {
+    conversationId,
+    leftBranchId,
+    rightBranchId,
+  });
+}
+
 // ============================================================================
 
 /**
