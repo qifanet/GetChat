@@ -73,11 +73,13 @@ export interface SettingsSlice {
   providerModels: Record<ModelId, ModelProfile>;
   providerOrder: string[];
   defaultModelId: ModelId | null;
+  helperModelId: ModelId | null;
 
   loadSettings: () => Promise<void>;
   saveProvider: (input: ProviderSaveInput) => Promise<ProviderConfig>;
   removeProvider: (providerId: string) => Promise<void>;
   setDefaultModel: (modelId: ModelId | null) => Promise<void>;
+  setHelperModel: (modelId: ModelId | null) => Promise<void>;
 }
 
 // ============================================================================
@@ -105,6 +107,7 @@ export interface ConversationSlice {
   renameConversation: (conversationId: ConversationId, title: string) => Promise<ConversationSummary>;
   archiveConversation: (conversationId: ConversationId) => Promise<ConversationSummary>;
   deleteConversation: (conversationId: ConversationId) => Promise<void>;
+  autoGenerateTitle: (conversationId: ConversationId) => Promise<void>;
   renameBranch: (branchId: BranchId, name: string) => Promise<BranchEntity>;
   setBranchPreferredModel: (
     branchId: BranchId,

@@ -202,6 +202,10 @@
     "defaultModelHelp": "Leave this empty to prefer each provider's own default model.",
     "defaultModelPlaceholder": "For example: gpt-4.1-mini",
     "saveDefaultModel": "Save default model",
+    "helperModelTitle": "Helper AI Model",
+    "helperModelHelp": "Used for auto-generating titles, summarizing branches, and other background tasks. A local Ollama model is recommended to reduce costs.",
+    "helperModelPlaceholder": "Select a helper model...",
+    "helperModelNotConfigured": "No helper model configured. Some AI features will be unavailable.",
     "createProviderTitle": "Create a new provider",
     "editProviderTitle": "Edit provider",
     "providerFormHelp": "Use this form to adjust connection details, default models, and enabled state after saving.",
@@ -265,7 +269,11 @@
     "languageHelp": "Switch the interface language. Changes take effect immediately.",
     "languageChanged": "Language switched.",
     "version": "Version {{version}}",
-    "updateAvailable": "New v{{version}} available — click to download"
+    "updateAvailable": "New v{{version}} available — click to download",
+    "fetchModels": "Fetch models from Ollama",
+    "fetchingModels": "Fetching models...",
+    "noModelsFound": "No models found. Make sure Ollama is running.",
+    "modelsFetched": "Fetched {{count}} models"
   },
   "export": {
     "title": "Export",

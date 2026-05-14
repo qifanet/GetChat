@@ -17,6 +17,7 @@ import {
 } from "../../features/models/modelUtils";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import * as tauriCmd from "../../services/tauriCommands";
+import { fetchOllamaModels, type OllamaModelInfo } from "../../services/tauriCommands";
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
@@ -24,9 +25,11 @@ const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
 const _sel_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
+const _sel_helperModelId = (s: import("../../stores/appStore.types").AppStore) => s.helperModelId;
 const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
 const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
 const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
+const _sel_setHelperModel = (s: import("../../stores/appStore.types").AppStore) => s.setHelperModel;
 const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
@@ -180,9 +183,11 @@ export function ProviderSettingsScreen({
   const providerModelsById = useAppStore(_sel_providerModels);
   const providerOrder = useAppStore(_sel_providerOrder);
   const appDefaultModelId = useAppStore(_sel_defaultModelId);
+  const appHelperModelId = useAppStore(_sel_helperModelId);
   const saveProvider = useAppStore(_sel_saveProvider);
   const removeProvider = useAppStore(_sel_removeProvider);
   const setDefaultModel = useAppStore(_sel_setDefaultModel);
+  const setHelperModel = useAppStore(_sel_setHelperModel);
   const loadSettings = useAppStore(_sel_loadSettings);
   const orderedProviders = useMemo(
     () =>
@@ -208,6 +213,7 @@ export function ProviderSettingsScreen({
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<SettingsFeedbackState | null>(null);
   const selectedSavedProvider =
@@ -310,6 +316,33 @@ export function ProviderSettingsScreen({
       ),
     }));
   }
+  /** Fetch available models from a running Ollama instance and add them to the form. */
+  async function handleFetchOllamaModels(): Promise<void> {
+    setIsFetchingModels(true);
+    try {
+      const models = await fetchOllamaModels(form.baseUrl);
+      if (models.length === 0) {
+        setFeedback({ tone: "info", message: t("settings.noModelsFound") });
+        return;
+      }
+      const newModels = models.map((m: OllamaModelInfo) => ({
+        id: createModelProfileId(),
+        requestName: m.name,
+        displayName: m.name.split(":")[0],
+      }));
+      setForm((current) => ({
+        ...current,
+        models: newModels,
+        defaultModelId: newModels[0]?.id ?? "",
+      }));
+      setFeedback({ tone: "success", message: t("settings.modelsFetched", { count: newModels.length }) });
+    } catch (err) {
+      setFeedback({ tone: "error", message: String(err instanceof Error ? err.message : err) });
+    } finally {
+      setIsFetchingModels(false);
+    }
+  }
+
   /** Apply a provider-type preset while keeping user-entered values when possible. */
   function applyProviderType(type: ProviderType): void {
     const preset = getProviderPreset(type);
@@ -459,6 +492,34 @@ export function ProviderSettingsScreen({
     setError(null);
     try {
       await setDefaultModel(defaultModelDraft.trim() || null);
+      setFeedback({
+        tone: "success",
+        message: t("settings.defaultModelSaved"),
+      });
+    } catch (modelError) {
+      setError(
+        modelError instanceof Error
+          ? modelError.message
+          : t("settings.defaultModelSaveFailed")
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const [helperModelDraft, setHelperModelDraft] = useState(
+    appHelperModelId ?? ""
+  );
+
+  useEffect(() => {
+    setHelperModelDraft(appHelperModelId ?? "");
+  }, [appHelperModelId]);
+
+  async function handleSaveHelperModel(): Promise<void> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await setHelperModel(helperModelDraft.trim() || null);
       setFeedback({
         tone: "success",
         message: t("settings.defaultModelSaved"),
@@ -682,6 +743,45 @@ export function ProviderSettingsScreen({
               </div>
             </section>
             <section className="app-panel rounded-shell bg-white/95 p-6">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div>
+                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
+                    {t("settings.helperModelTitle")}
+                  </h3>
+                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
+                    {t("settings.helperModelHelp")}
+                  </p>
+                </div>
+                <div className="flex w-full max-w-xl flex-col gap-3 sm:flex-row">
+                  <select
+                    value={helperModelDraft}
+                    onChange={(event) => setHelperModelDraft(event.target.value)}
+                    className="app-input flex-1"
+                  >
+                    <option value="">{t("settings.helperModelPlaceholder")}</option>
+                    {availableModelOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.providerName} / {option.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveHelperModel()}
+                    disabled={isSubmitting}
+                    className="app-primary-button"
+                  >
+                    {t("common.save")}
+                  </button>
+                </div>
+              </div>
+              {!appHelperModelId && (
+                <p className="mt-3 text-xs text-amber-600">
+                  {t("settings.helperModelNotConfigured")}
+                </p>
+              )}
+            </section>
+            <section className="app-panel rounded-shell bg-white/95 p-6">
               <div className="mb-6 flex flex-col gap-2">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
                   {selectedProviderId === "new"
@@ -745,6 +845,7 @@ export function ProviderSettingsScreen({
                   />
                   <span>{t("settings.enabledProvider")}</span>
                 </label>
+                {form.type !== "OLLAMA" && (
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-miro-text">
                     {t("settings.apiKey")}
@@ -758,6 +859,17 @@ export function ProviderSettingsScreen({
                     className="app-input"
                   />
                 </label>
+                )}
+                {form.type === "OLLAMA" && (
+                <button
+                  type="button"
+                  onClick={handleFetchOllamaModels}
+                  disabled={isFetchingModels}
+                  className="app-secondary-button px-4 py-2 text-sm"
+                >
+                  {isFetchingModels ? t("settings.fetchingModels") : t("settings.fetchModels")}
+                </button>
+                )}
                 <section className="rounded-[28px] border border-miro-border/70 bg-miro-bg/70 p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>

@@ -132,6 +132,16 @@ export async function setDefaultModel(modelId: string | null): Promise<void> {
   return executeCommand<void>("set_default_model", { modelId });
 }
 
+/** Get the helper model ID (used for AI title generation, summaries, etc.) */
+export async function getHelperModel(): Promise<string | null> {
+  return executeCommand<string | null>("get_helper_model");
+}
+
+/** Set the helper model ID. Pass null to clear. */
+export async function setHelperModel(modelId: string | null): Promise<void> {
+  return executeCommand<void>("set_helper_model", { modelId });
+}
+
 // ============================================================================
 // Provider Commands
 // ============================================================================
@@ -154,6 +164,17 @@ export async function deleteProvider(providerId: string): Promise<void> {
 /** Test a saved provider's live API connection through the backend probe path. */
 export async function testProviderConnection(providerId: string): Promise<void> {
   return executeCommand<void>("test_provider_connection", { providerId });
+}
+
+export interface OllamaModelInfo {
+  name: string;
+  size: number | null;
+  quantization: string | null;
+}
+
+/** Fetch available models from a running Ollama instance. */
+export async function fetchOllamaModels(baseUrl: string): Promise<OllamaModelInfo[]> {
+  return executeCommand<OllamaModelInfo[]>("fetch_ollama_models", { baseUrl });
 }
 
 // ============================================================================
@@ -209,6 +230,15 @@ export async function unarchiveConversation(conversationId: string): Promise<Con
 /** Delete a conversation and all its data (CASCADE) */
 export async function deleteConversation(conversationId: string): Promise<void> {
   return executeCommand<void>("delete_conversation", { conversationId });
+}
+
+/** Auto-generate a conversation title using the helper AI model */
+export async function generateConversationTitle(
+  conversationId: string
+): Promise<{ title: string } | null> {
+  return executeCommand<{ title: string } | null>("generate_conversation_title", {
+    conversationId,
+  });
 }
 
 // ============================================================================

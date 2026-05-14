@@ -110,7 +110,8 @@ pub async fn rename_conversation(
         .await?
         .ok_or_else(|| AppError::not_found("Conversation not found"))?;
 
-    conversations::update_title(&state.db, &conversation_id, &title).await?;
+    // User manual rename → set title_source to USER_SET
+    conversations::update_title_user_set(&state.db, &conversation_id, &title).await?;
 
     tracing::info!(
         cmd = "rename_conversation", conv_id = %conversation_id,
@@ -216,4 +217,18 @@ pub async fn delete_conversation(
     );
 
     Ok(())
+}
+
+/**
+ * Auto-generate a conversation title using the helper AI model.
+ * Called from the frontend after the first assistant reply completes.
+ * Returns the generated title, or null if generation was skipped.
+ */
+#[tauri::command]
+pub async fn generate_conversation_title(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Option<crate::services::helper_ai_service::TitleGenerationResult>, AppError> {
+    tracing::info!(conv_id = %conversation_id, "cmd: generate_conversation_title invoked");
+    crate::services::helper_ai_service::generate_conversation_title(&state, &conversation_id).await
 }

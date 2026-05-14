@@ -36,6 +36,7 @@ pub struct BootstrapResult {
     pub last_workspace: Option<LastWorkspaceSelection>,
     pub providers: Vec<ProviderDto>,
     pub default_model_id: Option<String>,
+    pub helper_model_id: Option<String>,
 }
 
 // ============================================================================
@@ -130,12 +131,20 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
         .flatten()
         .and_then(|v| serde_json::from_str::<String>(&v).ok());
 
+    // Load helper model (used for AI title generation, summaries, etc.)
+    let helper_model_id = app_kv::get(&state.db, "helper_model_id")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_str::<String>(&v).ok());
+
     let duration_ms = start.elapsed().as_millis() as u64;
     tracing::info!(
         cmd = "bootstrap_app",
         has_last_workspace = last_workspace.is_some(),
         providers_count = provider_dtos.len(),
         has_default_model = default_model_id.is_some(),
+        has_helper_model = helper_model_id.is_some(),
         repaired_count = repair_result.repaired_count,
         duration_ms,
         "ok"
@@ -145,6 +154,7 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
         last_workspace,
         providers: provider_dtos,
         default_model_id,
+        helper_model_id,
     })
 }
 
@@ -190,6 +200,35 @@ pub async fn set_default_model(
                 .map_err(AppError::from)
         }
         None => app_kv::delete(&state.db, "default_model_id")
+            .await
+            .map_err(AppError::from),
+    }
+}
+
+/** Get the helper model ID (used for AI title generation, summaries, etc.). */
+#[tauri::command]
+pub async fn get_helper_model(state: State<'_, AppState>) -> Result<Option<String>, AppError> {
+    let raw = app_kv::get(&state.db, "helper_model_id")
+        .await
+        .map_err(AppError::from)?;
+    Ok(raw.and_then(|v| serde_json::from_str::<String>(&v).ok()))
+}
+
+/** Set the helper model ID. Pass None to clear. */
+#[tauri::command]
+pub async fn set_helper_model(
+    state: State<'_, AppState>,
+    model_id: Option<String>,
+) -> Result<(), AppError> {
+    match model_id {
+        Some(id) => {
+            let json_str = serde_json::to_string(&id)
+                .map_err(|e| AppError::invalid_argument(format!("Failed to serialize model_id: {e}")))?;
+            app_kv::set(&state.db, "helper_model_id", &json_str)
+                .await
+                .map_err(AppError::from)
+        }
+        None => app_kv::delete(&state.db, "helper_model_id")
             .await
             .map_err(AppError::from),
     }

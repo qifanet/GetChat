@@ -108,6 +108,10 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0003: Provider model normalization + branch model preference
     let sql_0003 = include_str!("migrations/0003_provider_models_and_branch_preferences.sql");
     execute_migration_sql(pool, sql_0003, "Migration 0003").await;
+
+    // 0004: Add title_source to conversations (DEFAULT / AI_GENERATED / USER_SET)
+    let sql_0004 = include_str!("migrations/0004_title_source.sql");
+    execute_migration_sql(pool, sql_0004, "Migration 0004").await;
 }
 
 /**

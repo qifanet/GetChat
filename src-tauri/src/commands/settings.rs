@@ -653,6 +653,111 @@ async fn test_provider_connection_impl(
 // Tests
 // ============================================================================
 
+/**
+ * Fetch available models from a running Ollama instance.
+ *
+ * Probes `/api/tags` on the given base URL and returns a list of model names.
+ * Used by the frontend to auto-populate model profiles when adding an Ollama provider.
+ */
+
+#[derive(serde::Serialize)]
+pub struct OllamaModelInfo {
+    pub name: String,
+    pub size: Option<u64>,
+    pub quantization: Option<String>,
+}
+
+#[tauri::command]
+pub async fn fetch_ollama_models(base_url: String) -> Result<Vec<OllamaModelInfo>, AppError> {
+    let normalized = normalize_base_url(&base_url);
+    if normalized.is_empty() {
+        return Err(AppError::invalid_argument("Base URL is required"));
+    }
+
+    let probe_url = if normalized.ends_with("/v1") {
+        let legacy = normalized.trim_end_matches("/v1").trim_end_matches('/');
+        format!("{legacy}/api/tags")
+    } else {
+        format!("{normalized}/api/tags")
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| {
+            AppError::db_error("Failed to build HTTP client").with_details(error.to_string())
+        })?;
+
+    let response = client.get(&probe_url).send().await.map_err(|error| {
+        AppError::db_error("Failed to connect to Ollama").with_details(format!(
+            "GET {probe_url}: {error}. Make sure Ollama is running."
+        ))
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let fallback_url = format!("{normalized}/v1/models");
+        let fallback = client.get(&fallback_url).send().await.map_err(|_| {
+            AppError::db_error("Ollama returned an error").with_details(format!(
+                "GET {probe_url} -> HTTP {status}"
+            ))
+        })?;
+
+        if !fallback.status().is_success() {
+            return Err(AppError::db_error("Ollama returned an error").with_details(format!(
+                "GET {probe_url} -> HTTP {status}"
+            )));
+        }
+
+        let body: serde_json::Value = fallback.json().await.map_err(|error| {
+            AppError::db_error("Failed to parse Ollama response").with_details(error.to_string())
+        })?;
+
+        let models = body["data"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        item["id"].as_str().map(|name| OllamaModelInfo {
+                            name: name.to_string(),
+                            size: None,
+                            quantization: None,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        return Ok(models);
+    }
+
+    let body: serde_json::Value = response.json().await.map_err(|error| {
+        AppError::db_error("Failed to parse Ollama response").with_details(error.to_string())
+    })?;
+
+    let models = body["models"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let name = item["name"].as_str()?.to_string();
+                    let size = item["size"].as_u64();
+                    let quantization = item["details"]["quantization_level"]
+                        .as_str()
+                        .map(String::from);
+                    Some(OllamaModelInfo {
+                        name,
+                        size,
+                        quantization,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

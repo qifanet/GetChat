@@ -185,11 +185,25 @@ pub async fn build_prompt_messages(
     let up_to_msg_id = input.up_to_message_id.clone();
     let result = prompt_service::build_prompt_messages(&state.db, &input).await;
     match &result {
-        Ok(msgs) => tracing::debug!(
-            cmd = "build_prompt_messages", conv_id = %conv_id,
-            up_to_msg_id = %up_to_msg_id, prompt_count = msgs.len(),
-            duration_ms = start.elapsed().as_millis() as u64
-        ),
+        Ok(msgs) => {
+            tracing::info!(
+                cmd = "build_prompt_messages",
+                conv_id = %conv_id,
+                up_to_msg_id = %up_to_msg_id,
+                prompt_count = msgs.len(),
+                duration_ms = start.elapsed().as_millis() as u64,
+                "prompt_messages_built"
+            );
+            for (i, msg) in msgs.iter().enumerate() {
+                tracing::info!(
+                    index = i,
+                    role = %msg.role,
+                    content_len = msg.content.len(),
+                    content_preview = %msg.content.chars().take(60).collect::<String>(),
+                    "prompt_entry"
+                );
+            }
+        }
         Err(e) => tracing::warn!(
             cmd = "build_prompt_messages", conv_id = %conv_id,
             error_code = %e.code, message = %e.message, details = ?e.details,
@@ -231,7 +245,7 @@ pub async fn edit_user_message_inline(
     let start = std::time::Instant::now();
     let result = snapshot_service::edit_user_message_inline(&state.db, &message_id, &new_content).await;
     match &result {
-        Ok(msg) => tracing::info!(
+        Ok(_) => tracing::info!(
             cmd = "edit_user_message_inline", msg_id = %message_id,
             content_length = new_content.len(),
             duration_ms = start.elapsed().as_millis() as u64, "ok"

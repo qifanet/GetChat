@@ -92,6 +92,7 @@ export interface AppSettings {
   providerModels: Record<ModelId, ModelProfile>;
   providerOrder: ProviderId[];
   defaultModelId: ModelId | null;
+  helperModelId: ModelId | null;
   lastOpenedConversationId: string | null;
   lastOpenedBranchId: string | null;
 }
