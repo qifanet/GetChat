@@ -72,6 +72,7 @@ export interface BootstrapResult {
   lastWorkspace: LastWorkspaceSelection | null;
   providers: ProviderDto[];
   defaultModelId: string | null;
+  helperModelId: string | null;
 }
 
 // ============================================================================

@@ -525,7 +525,24 @@ export async function completeStream(
     `[stream] complete request=${requestId} chars=${finalText.length} chunks=${runtime.chunks.length} duration=${Date.now() - session.startedAt}ms`
   );
 
-  // 6) Delayed cleanup of stream store metadata
+  // 6) Trigger auto title generation for new conversations
+  if (session.completionMode === "BRANCH_HEAD") {
+    const { workspace, summariesById } = useAppStore.getState();
+    const conversationId = workspace?.activeConversationId;
+    if (conversationId) {
+      const summary = summariesById[conversationId];
+      const title = summary?.title ?? "";
+      const hasDefaultTitle =
+        title === "" ||
+        title.toLowerCase().startsWith("new conversation") ||
+        title.toLowerCase().startsWith("新建会话");
+      if (hasDefaultTitle) {
+        useAppStore.getState().autoGenerateTitle(conversationId).catch(() => {});
+      }
+    }
+  }
+
+  // 7) Delayed cleanup of stream store metadata
   setTimeout(() => {
     useStreamStore.getState().removeSession(requestId);
   }, 1500);

@@ -365,7 +365,17 @@ fn build_ollama_request_body(request: &ResolvedModelStreamRequest) -> Value {
         ("stream".to_string(), Value::Bool(true)),
     ]);
 
+    // Disable thinking mode — prevents generating invisible thinking tokens that
+    // slow down the response. Combined with num_ctx=32768 below, context is preserved.
+    body.insert("think".to_string(), Value::Bool(false));
+
     let mut options = Map::new();
+
+    // Expand context window to 32k tokens so long conversations aren't truncated.
+    // Many models default to only 2048-4096 context, which silently drops earlier
+    // messages when the conversation grows.
+    options.insert("num_ctx".to_string(), json!(32768));
+
     if let Some(params) = request.generation_params.as_ref() {
         if let Some(temperature) = params.temperature {
             options.insert("temperature".to_string(), json!(temperature));
@@ -378,9 +388,7 @@ fn build_ollama_request_body(request: &ResolvedModelStreamRequest) -> Value {
         }
     }
 
-    if !options.is_empty() {
-        body.insert("options".to_string(), Value::Object(options));
-    }
+    body.insert("options".to_string(), Value::Object(options));
 
     Value::Object(body)
 }
@@ -517,12 +525,32 @@ async fn stream_ollama_response(
     channel: &Channel<ModelStreamEventDto>,
     cancel_rx: watch::Receiver<bool>,
 ) -> Result<ModelStreamOutcome, ModelStreamFailure> {
-    if request.base_url.ends_with("/v1") {
-        let endpoint = build_openai_chat_completions_url(&request.base_url);
-        return stream_openai_compatible_response(request, &endpoint, channel, cancel_rx).await;
+    tracing::info!(
+        provider_type = "OLLAMA",
+        base_url = %request.base_url,
+        model = %request.request_model_name,
+        prompt_count = request.prompt_messages.len(),
+        "stream_ollama_response: starting"
+    );
+    for (i, msg) in request.prompt_messages.iter().enumerate() {
+        tracing::debug!(
+            index = i,
+            role = %msg.role,
+            content_len = msg.content.len(),
+            "prompt_message"
+        );
     }
 
-    let native_endpoint = build_ollama_api_chat_url(&request.base_url);
+    // Always try native /api/chat first for Ollama for full feature support
+    // and other native-only features. Fall back to OpenAI-compatible if needed.
+    let native_base_url = if request.base_url.ends_with("/v1") {
+        request.base_url.trim_end_matches("/v1").to_string()
+    } else {
+        request.base_url.clone()
+    };
+    let native_endpoint = build_ollama_api_chat_url(&native_base_url);
+    tracing::info!(endpoint = %native_endpoint, "routing to native Ollama API (preferred)");
+
     let native_result =
         stream_ollama_native_response(request, &native_endpoint, channel, cancel_rx.clone()).await;
 

@@ -132,9 +132,9 @@ export function BranchPanel() {
       <div className="border-b border-miro-border/10 px-5 py-5">
         <p className="app-section-label mb-1">{t("common.workspace")}</p>
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
-            {t("branch.panelTitle")}
-          </h2>
+        <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
+          {t("branch.panelTitle")}
+        </h2>
           <button
             type="button"
             onClick={() => setShowGlobalView(true)}
@@ -170,31 +170,31 @@ export function BranchPanel() {
                 onToggleSelect={handleToggleSelect}
                 onShowTooltip={showTooltip}
                 onHideTooltip={hideTooltip}
-              />
-            ))}
+                  />
+                ))}
 
             {/* Archived section */}
             {tree.archived.length > 0 ? (
               <div className="mt-3 border-t border-miro-border/10 pt-3">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between px-1 text-left"
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-1 text-left"
                   onClick={() => setArchivedExpanded((v) => !v)}
-                >
+              >
                   <span className="text-[10px] font-medium uppercase tracking-wider text-miro-text-secondary">
                     {t("branch.archivedBranches")} ({tree.archived.length})
-                  </span>
+                </span>
                   {archivedExpanded ? (
                     <IconChevronUp size={12} />
                   ) : (
                     <IconChevronDown size={12} />
                   )}
-                </button>
+              </button>
                 {archivedExpanded ? (
                   <div className="mt-1.5 space-y-0.5">
                     {tree.archived.map((branch) => (
                       <BranchRow
-                        key={branch.id}
+                      key={branch.id}
                         node={{
                           branch,
                           depth: 0,
@@ -209,12 +209,12 @@ export function BranchPanel() {
                         onToggleSelect={() => {}}
                         onShowTooltip={showTooltip}
                         onHideTooltip={hideTooltip}
-                      />
-                    ))}
-                  </div>
-                ) : null}
+                    />
+                  ))}
+                </div>
+              ) : null}
               </div>
-            ) : null}
+          ) : null}
 
             <BranchHealthCard />
           </div>
@@ -592,7 +592,7 @@ function BranchRow({
           >
             <IconRotateCcw size={10} />
           </button>
-        </div>
+      </div>
       ) : null}
     </div>
   );

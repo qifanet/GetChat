@@ -16,6 +16,7 @@ use sqlx::{Executor, FromRow, Sqlite};
 pub struct ConversationRow {
     pub id: String,
     pub title: String,
+    pub title_source: String,
     pub mainline_branch_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -185,6 +186,7 @@ where
 }
 
 /** Update conversation title. */
+#[allow(dead_code)]
 pub async fn update_title<'e, E>(executor: E, id: &str, title: &str) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -198,6 +200,36 @@ where
     .await?;
 
     Ok(())
+}
+
+/** Update conversation title and title_source atomically. */
+pub async fn update_title_and_source<'e, E>(
+    executor: E,
+    id: &str,
+    title: &str,
+    title_source: &str,
+) -> sqlx::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query(
+        "UPDATE conversations SET title = ?, title_source = ?, updated_at = unixepoch() WHERE id = ?",
+    )
+    .bind(title)
+    .bind(title_source)
+    .bind(id)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
+/** Update conversation title and set title_source to USER_SET. */
+pub async fn update_title_user_set<'e, E>(executor: E, id: &str, title: &str) -> sqlx::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    update_title_and_source(executor, id, title, "USER_SET").await
 }
 
 /** Archive or unarchive a conversation. Set archived_at = NULL to unarchive. */

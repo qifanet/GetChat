@@ -86,12 +86,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Bootstrap (4)
+            // Bootstrap (4+2)
             commands::bootstrap::bootstrap_app,
             commands::bootstrap::save_last_workspace,
             commands::bootstrap::get_default_model,
             commands::bootstrap::set_default_model,
-            // Conversations (7)
+            commands::bootstrap::get_helper_model,
+            commands::bootstrap::set_helper_model,
+            // Conversations (7+1)
             commands::conversations::list_conversation_summaries,
             commands::conversations::create_conversation,
             commands::conversations::load_conversation_snapshot,
@@ -99,6 +101,7 @@ pub fn run() {
             commands::conversations::archive_conversation,
             commands::conversations::unarchive_conversation,
             commands::conversations::delete_conversation,
+            commands::conversations::generate_conversation_title,
             // Branches (5+2)
             commands::branches::create_branch,
             commands::branches::rename_branch,
@@ -124,6 +127,7 @@ pub fn run() {
             commands::settings::save_provider,
             commands::settings::delete_provider,
             commands::settings::test_provider_connection,
+            commands::settings::fetch_ollama_models,
             // Debug (1)
             commands::debug::check_db_invariants,
         ])

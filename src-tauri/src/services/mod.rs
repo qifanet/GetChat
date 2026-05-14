@@ -9,6 +9,7 @@
  *   - Runtime index construction (childIds, branchIdsByForkPointId)
  */
 
+pub mod helper_ai_service;
 pub mod invariant_service;
 pub mod model_stream_service;
 pub mod message_repair_service;

@@ -47,10 +47,13 @@ export type BrowserDebugCommandName =
   | "save_last_workspace"
   | "get_default_model"
   | "set_default_model"
+  | "get_helper_model"
+  | "set_helper_model"
   | "list_providers"
   | "save_provider"
   | "delete_provider"
   | "test_provider_connection"
+  | "fetch_ollama_models"
   | "list_conversation_summaries"
   | "create_conversation"
   | "load_conversation_snapshot"
@@ -58,6 +61,7 @@ export type BrowserDebugCommandName =
   | "archive_conversation"
   | "unarchive_conversation"
   | "delete_conversation"
+  | "generate_conversation_title"
   | "create_branch"
   | "rename_branch"
   | "set_branch_preferred_model"
@@ -95,6 +99,7 @@ interface BrowserDebugState {
   version: 1;
   lastWorkspace: LastWorkspaceSelection | null;
   defaultModelId: string | null;
+  helperModelId: string | null;
   providersById: Record<string, ProviderDto>;
   providerOrder: string[];
   conversationsById: Record<string, BrowserDebugConversationRecord>;
@@ -298,6 +303,7 @@ function createInitialBrowserDebugState(): BrowserDebugState {
       branchId: seedConversation.summary.mainlineBranchId,
     },
     defaultModelId: null,
+    helperModelId: null,
     providersById: {},
     providerOrder: [],
     conversationsById: {
@@ -810,6 +816,7 @@ export async function invokeBrowserDebugCommand<T>(
           lastWorkspace: state.lastWorkspace,
           providers: listOrderedProviders(state),
           defaultModelId: state.defaultModelId,
+          helperModelId: state.helperModelId,
         })
       ) as T;
 
@@ -825,6 +832,15 @@ export async function invokeBrowserDebugCommand<T>(
     case "set_default_model":
       return mutateBrowserDebugState((state) => {
         state.defaultModelId = (args?.modelId as string | null) ?? null;
+        return undefined;
+      }) as T;
+
+    case "get_helper_model":
+      return readBrowserDebugCommand((state) => state.helperModelId) as T;
+
+    case "set_helper_model":
+      return mutateBrowserDebugState((state) => {
+        state.helperModelId = (args?.modelId as string | null) ?? null;
         return undefined;
       }) as T;
 
@@ -912,6 +928,9 @@ export async function invokeBrowserDebugCommand<T>(
 
         return undefined;
       }) as T;
+
+    case "fetch_ollama_models":
+      return [] as T;
 
     case "list_conversation_summaries":
       return readBrowserDebugCommand((state) =>
@@ -1119,6 +1138,10 @@ export async function invokeBrowserDebugCommand<T>(
 
         return undefined;
       }) as T;
+
+    case "generate_conversation_title":
+      // No-op in browser debug: title generation requires a real AI backend
+      return Promise.resolve(null) as T;
 
     case "create_branch":
     case "rename_branch":

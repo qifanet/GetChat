@@ -76,6 +76,13 @@ pub async fn build_prompt_messages(
     let mut path = Vec::new();
     let mut current_id = Some(input.up_to_message_id.as_str());
 
+    tracing::info!(
+        conv_id = %input.conversation_id,
+        up_to_msg_id = %input.up_to_message_id,
+        total_msgs_in_conversation = all_rows.len(),
+        "build_prompt_messages: starting walk"
+    );
+
     while let Some(id) = current_id {
         match msg_map.get(id) {
             Some(row) => {
@@ -88,6 +95,16 @@ pub async fn build_prompt_messages(
                     _ => false,
                 };
 
+                tracing::debug!(
+                    msg_id = %row.id,
+                    role = %row.role,
+                    status = %row.status,
+                    parent_id = ?row.parent_message_id,
+                    content_len = row.content_text.len(),
+                    include,
+                    "walk_step"
+                );
+
                 if include && !row.content_text.is_empty() {
                     path.push(PromptMessage {
                         role: row.role.clone(),
@@ -97,7 +114,13 @@ pub async fn build_prompt_messages(
 
                 current_id = row.parent_message_id.as_deref();
             }
-            None => break, // Broken chain — stop walking
+            None => {
+                tracing::warn!(
+                    current_id = %id,
+                    "walk_broken_chain: message not found in conversation"
+                );
+                break; // Broken chain — stop walking
+            }
         }
     }
 
