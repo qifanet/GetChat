@@ -279,7 +279,6 @@ export function findBranchContainingMessage(
   // 2. Walk each branch path and check for containment
   const messages = snapshot.entities.messages;
   let bestBranchId: BranchId | null = null;
-  let bestIsArchived = true;
 
   for (const branch of branches) {
     if (!branch.headMessageId) continue;
@@ -290,7 +289,6 @@ export function findBranchContainingMessage(
         if (!branch.archivedAt) return branch.id;
         if (bestBranchId === null) {
           bestBranchId = branch.id;
-          bestIsArchived = true;
         }
         break;
       }
