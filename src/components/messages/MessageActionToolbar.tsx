@@ -107,13 +107,29 @@ interface MessageActionMoreMenuProps {
 
 /**
  * "More" overflow button that opens a floating dropdown menu.
+ * Uses fixed positioning to avoid clipping by overflow-hidden ancestors.
  * Closes on outside click or Escape.
  */
 export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
 
-  const handleToggle = useCallback(() => setOpen((prev) => !prev), []);
+  const handleToggle = useCallback(() => {
+    setOpen((prev) => {
+      if (!prev && triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setMenuStyle({
+          position: "fixed",
+          bottom: `calc(100vh - ${rect.top}px + 4px)`,
+          left: rect.left,
+          minWidth: 140,
+        });
+      }
+      return !prev;
+    });
+  }, []);
+
   const handleClose = useCallback(() => setOpen(false), []);
 
   // Close on outside click
@@ -121,7 +137,7 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
     if (!open) return;
 
     function handleMouseDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
@@ -145,21 +161,24 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
   if (items.length === 0) return null;
 
   return (
-    <div ref={containerRef} className="relative">
-      <MessageActionButton
-        icon={
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="5" cy="12" r="1" fill="currentColor" />
-            <circle cx="12" cy="12" r="1" fill="currentColor" />
-            <circle cx="19" cy="12" r="1" fill="currentColor" />
-          </svg>
-        }
-        label="More"
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
         onClick={handleToggle}
-      />
+        className={`relative flex h-7 w-7 items-center justify-center rounded-md text-miro-text-secondary transition-colors hover:bg-miro-border/15 hover:text-miro-text`}
+        title="More"
+      >
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="5" cy="12" r="1" fill="currentColor" />
+          <circle cx="12" cy="12" r="1" fill="currentColor" />
+          <circle cx="19" cy="12" r="1" fill="currentColor" />
+        </svg>
+      </button>
       {open ? (
         <div
-          className="absolute bottom-full left-0 z-50 mb-1 min-w-[140px] rounded-lg border border-miro-border/40 bg-white py-1 shadow-lg"
+          className="z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-white py-1 shadow-lg"
+          style={menuStyle}
           role="menu"
         >
           {items.map((item, i) => (
@@ -182,6 +201,6 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
           ))}
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

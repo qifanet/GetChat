@@ -142,9 +142,18 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
         </div>
       </div>
       {summaryText ? (
-        <div className="mt-4 rounded-lg border border-miro-blue/15 bg-miro-blue-light/20 p-4">
-          <div className="mb-2 text-xs font-semibold text-miro-blue">
-            {t("compare.aiSummary")}
+        <div className="mt-4 max-h-[300px] overflow-y-auto rounded-lg border border-miro-blue/15 bg-miro-blue-light/20 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold text-miro-blue">
+              {t("compare.aiSummary")}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSummaryText(null)}
+              className="text-xs text-miro-text-secondary hover:text-miro-text"
+            >
+              {t("common.collapse")}
+            </button>
           </div>
           <div className="prose prose-sm max-w-none text-sm text-miro-text">
             <MarkdownRenderer content={summaryText} />
