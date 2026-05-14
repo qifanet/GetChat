@@ -12,7 +12,7 @@
  *   </MessageActionToolbar>
  */
 
-import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 // ============================================================================
@@ -206,8 +206,8 @@ interface MoreMenuPortalProps {
 
 /**
  * Renders the dropdown menu via a React portal to document.body.
- * Positions itself above the trigger button using fixed coordinates
- * recalculated on every render to stay in sync with scroll/layout changes.
+ * Positions itself above the trigger button using fixed coordinates,
+ * keeping in sync with scroll and resize changes while open.
  */
 function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalProps) {
   const [coords, setCoords] = useState<{ left: number; bottom: number }>({
@@ -215,13 +215,22 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
     bottom: 0,
   });
 
-  useEffect(() => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    setCoords({
-      left: rect.left,
-      bottom: window.innerHeight - rect.top + 4,
-    });
+  useLayoutEffect(() => {
+    const updatePosition = () => {
+      if (!triggerRef.current) return;
+      const rect = triggerRef.current.getBoundingClientRect();
+      setCoords({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 4,
+      });
+    };
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
   }, [triggerRef]);
 
   const menu = (

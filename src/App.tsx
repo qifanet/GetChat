@@ -783,7 +783,6 @@ export function App() {
     onCreateConversation: () => void handleCreateConversation(),
     onSendMessage: () => void sendMessageAction(),
     onOpenSettings: handleOpenSettings,
-    onOpenWorkspace: handleOpenWorkspace,
     onOpenSearch: () => setSearchOpen(true),
   });
   if (bootStatus === "IDLE" || bootStatus === "LOADING") {

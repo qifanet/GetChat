@@ -32,7 +32,6 @@ interface GlobalShortcutsOptions {
   onCreateConversation: () => void;
   onSendMessage: () => void;
   onOpenSettings: () => void;
-  onOpenWorkspace: () => void;
   onOpenSearch?: () => void;
 }
 
@@ -40,7 +39,6 @@ export function useGlobalShortcuts({
   onCreateConversation,
   onSendMessage,
   onOpenSettings,
-  onOpenWorkspace,
   onOpenSearch,
 }: GlobalShortcutsOptions) {
   const activeRequestId = useAppStore((s) => s.composer.activeRequestId);

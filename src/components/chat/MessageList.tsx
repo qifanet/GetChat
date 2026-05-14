@@ -50,6 +50,7 @@ export function MessageList() {
   const [autoFollow, setAutoFollow] = useState(true);
   const userScrolledRef = useRef(false);
   const reenableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollToMessageId = useAppStore((s) => s.ui.scrollToMessageId);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainer;
@@ -92,7 +93,7 @@ export function MessageList() {
 
   // Scroll to a specific message (set by search navigation)
   useEffect(() => {
-    const targetId = useAppStore.getState().ui.scrollToMessageId;
+    const targetId = scrollToMessageId;
     if (!targetId) return;
     // Small delay to let the branch switch render messages
     const timer = setTimeout(() => {
@@ -107,7 +108,7 @@ export function MessageList() {
       useAppStore.setState((s) => { s.ui.scrollToMessageId = null; });
     }, 200);
     return () => clearTimeout(timer);
-  }, [messages]);
+  }, [messages, scrollToMessageId]);
 
   useEffect(() => {
     if (bottomRef.current && !scrollContainerRef.current) {

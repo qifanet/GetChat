@@ -421,13 +421,11 @@ pub async fn generate_branch_diff_summary(
     );
 
     // 1. Resolve helper model
-    let helper_model_id = match app_kv::get(&state.db, "helper_model_id").await {
-        Ok(Some(raw)) => serde_json::from_value::<String>(
-            serde_json::from_str::<Value>(&raw).unwrap_or(json!(null)),
-        )
-        .ok(),
-        _ => None,
-    };
+    let helper_model_id = app_kv::get(&state.db, "helper_model_id")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<String>(&raw).ok());
     let model_id = match helper_model_id {
         Some(id) => id,
         None => {
