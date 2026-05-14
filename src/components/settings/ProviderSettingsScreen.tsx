@@ -522,13 +522,13 @@ export function ProviderSettingsScreen({
       await setHelperModel(helperModelDraft.trim() || null);
       setFeedback({
         tone: "success",
-        message: t("settings.defaultModelSaved"),
+        message: t("settings.helperModelSaved"),
       });
     } catch (modelError) {
       setError(
         modelError instanceof Error
           ? modelError.message
-          : t("settings.defaultModelSaveFailed")
+          : t("settings.helperModelSaveFailed")
       );
     } finally {
       setIsSubmitting(false);

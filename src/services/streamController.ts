@@ -528,14 +528,14 @@ export async function completeStream(
   // 6) Trigger auto title generation for new conversations
   if (session.completionMode === "BRANCH_HEAD") {
     const { workspace, summariesById } = useAppStore.getState();
-    const conversationId = workspace.activeConversationId;
+    const conversationId = workspace?.activeConversationId;
     if (conversationId) {
       const summary = summariesById[conversationId];
+      const title = summary?.title ?? "";
       const hasDefaultTitle =
-        !summary?.title ||
-        summary.title === "" ||
-        summary.title.toLowerCase().startsWith("new conversation") ||
-        summary.title.toLowerCase().startsWith("新建会话");
+        title === "" ||
+        title.toLowerCase().startsWith("new conversation") ||
+        title.toLowerCase().startsWith("新建会话");
       if (hasDefaultTitle) {
         useAppStore.getState().autoGenerateTitle(conversationId).catch(() => {});
       }

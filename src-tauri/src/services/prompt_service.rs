@@ -95,7 +95,7 @@ pub async fn build_prompt_messages(
                     _ => false,
                 };
 
-                tracing::info!(
+                tracing::debug!(
                     msg_id = %row.id,
                     role = %row.role,
                     status = %row.status,

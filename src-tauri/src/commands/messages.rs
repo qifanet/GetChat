@@ -195,11 +195,10 @@ pub async fn build_prompt_messages(
                 "prompt_messages_built"
             );
             for (i, msg) in msgs.iter().enumerate() {
-                tracing::info!(
+                tracing::debug!(
                     index = i,
                     role = %msg.role,
                     content_len = msg.content.len(),
-                    content_preview = %msg.content.chars().take(60).collect::<String>(),
                     "prompt_entry"
                 );
             }

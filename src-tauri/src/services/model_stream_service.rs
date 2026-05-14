@@ -533,11 +533,10 @@ async fn stream_ollama_response(
         "stream_ollama_response: starting"
     );
     for (i, msg) in request.prompt_messages.iter().enumerate() {
-        tracing::info!(
+        tracing::debug!(
             index = i,
             role = %msg.role,
             content_len = msg.content.len(),
-            content_preview = %msg.content.chars().take(80).collect::<String>(),
             "prompt_message"
         );
     }

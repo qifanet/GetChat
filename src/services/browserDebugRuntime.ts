@@ -929,6 +929,9 @@ export async function invokeBrowserDebugCommand<T>(
         return undefined;
       }) as T;
 
+    case "fetch_ollama_models":
+      return [] as T;
+
     case "list_conversation_summaries":
       return readBrowserDebugCommand((state) =>
         listOrderedConversationSummaries(state)

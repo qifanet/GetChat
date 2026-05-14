@@ -649,10 +649,6 @@ async fn test_provider_connection_impl(
     }))
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 /**
  * Fetch available models from a running Ollama instance.
  *
@@ -696,7 +692,11 @@ pub async fn fetch_ollama_models(base_url: String) -> Result<Vec<OllamaModelInfo
 
     if !response.status().is_success() {
         let status = response.status();
-        let fallback_url = format!("{normalized}/v1/models");
+        let fallback_url = if normalized.ends_with("/v1") {
+            format!("{normalized}/models")
+        } else {
+            format!("{normalized}/v1/models")
+        };
         let fallback = client.get(&fallback_url).send().await.map_err(|_| {
             AppError::db_error("Ollama returned an error").with_details(format!(
                 "GET {probe_url} -> HTTP {status}"
@@ -757,6 +757,10 @@ pub async fn fetch_ollama_models(base_url: String) -> Result<Vec<OllamaModelInfo
 
     Ok(models)
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {

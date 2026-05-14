@@ -286,7 +286,7 @@ async fn call_ollama(
         "messages": messages,
         "stream": false,
         "think": false,
-        "options": { "num_ctx": 2048 }
+        "options": { "num_ctx": 32768 }
     });
 
     let client = reqwest::Client::new();
