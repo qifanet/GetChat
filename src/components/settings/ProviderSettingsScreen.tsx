@@ -43,12 +43,11 @@ const SHORTCUT_ITEMS = [
 ] as const;
 function getNavigatorPlatform(): string {
   if (typeof navigator === "undefined") return "";
-  const userAgentDataPlatform =
+  const userAgentData =
     "userAgentData" in navigator
       ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
-          ?.platform
       : undefined;
-  return userAgentDataPlatform ?? navigator.platform ?? "";
+  return userAgentData?.platform ?? navigator.platform ?? "";
 }
 
 function getShortcutModifierLabel(): string {

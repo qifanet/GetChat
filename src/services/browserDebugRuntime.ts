@@ -127,7 +127,7 @@ function getBrowserDebugLocale(): string {
   if (typeof window === "undefined") return "en";
   const stored = window.localStorage.getItem(BROWSER_DEBUG_LOCALE_KEY);
   if (stored) return stored;
-  return window.navigator.language ?? "en";
+  return window.navigator.language;
 }
 
 function buildBrowserDebugDiffSummary(): string {
