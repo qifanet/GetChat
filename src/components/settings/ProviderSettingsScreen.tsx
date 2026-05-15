@@ -41,6 +41,11 @@ const SHORTCUT_ITEMS = [
   { key: "panel", labelKey: "settings.shortcutPanel", display: "⌘ ." },
   { key: "search", labelKey: "settings.shortcutSearch", display: "⌘ K" },
 ] as const;
+function getShortcutModifierLabel(): string {
+  if (typeof navigator === "undefined") return "Ctrl";
+  const platform = navigator.platform ?? "";
+  return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
+}
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -189,6 +194,15 @@ export function ProviderSettingsScreen({
   onClose,
 }: ProviderSettingsScreenProps) {
   const { t, i18n } = useTranslation();
+  const shortcutModifierLabel = useMemo(() => getShortcutModifierLabel(), []);
+  const shortcutItems = useMemo(
+    () =>
+      SHORTCUT_ITEMS.map((item) => ({
+        ...item,
+        display: item.display.replace("⌘", shortcutModifierLabel),
+      })),
+    [shortcutModifierLabel]
+  );
   const providersById = useAppStore(_sel_providers);
   const providerModelsById = useAppStore(_sel_providerModels);
   const providerOrder = useAppStore(_sel_providerOrder);
@@ -1147,7 +1161,7 @@ export function ProviderSettingsScreen({
                 {t("settings.shortcutsTitle")}
               </h3>
               <div className="mt-3 space-y-2">
-                {SHORTCUT_ITEMS.map((item) => (
+                {shortcutItems.map((item) => (
                   <div key={item.key} className="flex items-center justify-between text-sm">
                     <span className="text-miro-text-secondary">{t(item.labelKey)}</span>
                     <kbd className="rounded-md border border-miro-border/30 bg-miro-surface-low px-2 py-0.5 font-mono text-xs text-miro-text">

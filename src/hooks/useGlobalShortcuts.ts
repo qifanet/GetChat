@@ -79,7 +79,7 @@ export function useGlobalShortcuts({
       }
 
       // ---- Ctrl/Cmd + N — New conversation ----
-      if (mod && e.key === "n" && !e.shiftKey) {
+      if (mod && e.key === "n" && !e.shiftKey && !isEditing) {
         e.preventDefault();
         onCreateConversation();
         return;
@@ -95,7 +95,7 @@ export function useGlobalShortcuts({
       }
 
       // ---- Ctrl/Cmd + , — Toggle settings ----
-      if (mod && e.key === ",") {
+      if (mod && e.key === "," && !isEditing) {
         e.preventDefault();
         onOpenSettings();
         return;

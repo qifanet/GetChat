@@ -115,8 +115,24 @@ class BrowserDebugStreamController {
 }
 
 const BROWSER_DEBUG_STORAGE_KEY = "getchat.browser-debug-runtime.v1";
+const BROWSER_DEBUG_LOCALE_KEY = "getchat-locale";
 const browserDebugStreams = new Map<RequestId, BrowserDebugStreamController>();
 let browserDebugMemoryState: BrowserDebugState | null = null;
+
+function getBrowserDebugLocale(): string {
+  if (typeof window === "undefined") return "en";
+  const stored = window.localStorage.getItem(BROWSER_DEBUG_LOCALE_KEY);
+  if (stored) return stored;
+  return navigator?.language ?? "en";
+}
+
+function buildBrowserDebugDiffSummary(): string {
+  const locale = getBrowserDebugLocale().toLowerCase();
+  if (locale.startsWith("zh")) {
+    return "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。";
+  }
+  return "## Branch Diff Summary\n\nThe two branches diverge in refactoring strategy.\n\n### Left branch\n- Boundary decomposition first\n- Incremental rollout\n\n### Right branch\n- Event bus first\n- Decoupling and async focus\n\n### Recommendation\nPick the approach that fits team size and delivery pace.";
+}
 
 /**
  * Return true when the app runs inside a normal browser dev session rather
@@ -1706,7 +1722,7 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
 
     case "generate_branch_diff_summary":
       return readBrowserDebugCommand((_state): T => {
-        return { summary: "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。" } as T;
+        return { summary: buildBrowserDebugDiffSummary() } as T;
       });
 
     default:
