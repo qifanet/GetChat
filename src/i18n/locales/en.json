@@ -138,7 +138,14 @@
     "noDivergedMessages": "No diverged messages on this path",
     "sharedContext": "Shared context ({{count}} messages)",
     "noSharedContext": "No shared context (branches may start from different points)",
-    "sharedContextHint": "These messages are identical on both paths. Expand them to quickly review the pre-fork context."
+    "sharedContextHint": "These messages are identical on both paths. Expand them to quickly review the pre-fork context.",
+    "aiSummary": "AI Summary",
+    "summarizing": "Summarizing...",
+    "helperModelRequired": "Configure a helper model in Settings to enable AI summaries",
+    "returnBtn": "Switch",
+    "setMainlineBtn": "Set Mainline",
+    "mainlineBadge": "Mainline",
+    "returnToBranch": "Switch to {{name}}"
   },
   "message": {
     "edited": "Edited",
@@ -258,6 +265,14 @@
     "adviceModels": "Keep commonly used models under the same provider when possible so branch-level model switching stays easy to reason about.",
     "adviceDefaultModel": "The application default model is only a fallback. Individual branches can still override it without locking the whole workspace to one model.",
     "adviceConnection": "Save the provider first, then test the connection. That makes it clear whether the problem is the draft itself or the backend connectivity.",
+    "shortcutsTitle": "Keyboard Shortcuts",
+    "shortcutNewChat": "New conversation",
+    "shortcutSend": "Send message",
+    "shortcutStop": "Stop generation / Cancel",
+    "shortcutSettings": "Open settings",
+    "shortcutSidebar": "Toggle sidebar",
+    "shortcutPanel": "Toggle right panel",
+    "shortcutSearch": "Full-text search",
     "confirmDeleteProvider": "Delete this provider? This also removes the stored API key reference.",
     "providerSaveFailed": "Failed to save provider",
     "providerDeleteFailed": "Failed to delete provider",
@@ -309,5 +324,12 @@
     "installing": "Installing update...",
     "installingHint": "The app will restart automatically after download",
     "installFailed": "Update failed. Please try again later."
+  },
+  "search": {
+    "placeholder": "Search messages...",
+    "searching": "Searching...",
+    "noResults": "No matching messages found",
+    "recent": "Recent conversations",
+    "noRecent": "No recent conversations"
   }
 }

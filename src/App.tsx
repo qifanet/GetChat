@@ -13,6 +13,8 @@ import { useTranslation } from "react-i18next";
 import { getModelDisplayName } from "./features/models/modelUtils";
 import { useAppStore } from "./stores/useAppStoreSelector";
 import { useCompactAppShell } from "./hooks/useCompactAppShell";
+import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
+import { sendMessageAction } from "./features/composer/sendMessageAction";
 import { getConversationDisplayTitle } from "./i18n/displayNames";
 import { TopContextBar } from "./components/layout/TopContextBar";
 import { BranchPanel } from "./components/branches/BranchPanel";
@@ -35,6 +37,7 @@ import { ExportDialog } from "./components/export/ExportDialog";
 import { BranchRenameDialog } from "./components/branches/BranchRenameDialog";
 import { ConfirmDialogPortal } from "./components/common/confirmDialog";
 import { UpdateNotification } from "./components/common/UpdateNotification";
+import { SearchDialog } from "./components/common/SearchDialog";
 // ============================================================================
 // Module-level selectors (stable references for React 19 useSyncExternalStore)
 //
@@ -775,6 +778,13 @@ export function App() {
     setLeftSidebarCollapsed,
     setRightPanelCollapsed,
   ]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useGlobalShortcuts({
+    onCreateConversation: () => void handleCreateConversation(),
+    onSendMessage: () => void sendMessageAction(),
+    onOpenSettings: handleOpenSettings,
+    onOpenSearch: () => setSearchOpen(true),
+  });
   if (bootStatus === "IDLE" || bootStatus === "LOADING") {
     return <BootScreen />;
   }
@@ -905,6 +915,27 @@ export function App() {
       <BranchRenameDialog />
       <ConfirmDialogPortal />
       <UpdateNotification />
+      {searchOpen ? (
+        <SearchDialog
+          onClose={() => setSearchOpen(false)}
+          onNavigate={async (conversationId, messageId) => {
+            setActivePage("WORKSPACE");
+            await openConversation(conversationId);
+            if (messageId) {
+              const snapshot = useAppStore.getState().activeSnapshot;
+              if (snapshot) {
+                const { findBranchContainingMessage } = await import("./selectors/conversationSelectors");
+                const branchId = findBranchContainingMessage(snapshot, messageId);
+                if (branchId) {
+                  const setCurrentBranch = useAppStore.getState().setCurrentBranch;
+                  setCurrentBranch(branchId);
+                }
+              }
+              useAppStore.setState((s) => { s.ui.scrollToMessageId = messageId; });
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

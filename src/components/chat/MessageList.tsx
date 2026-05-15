@@ -50,6 +50,7 @@ export function MessageList() {
   const [autoFollow, setAutoFollow] = useState(true);
   const userScrolledRef = useRef(false);
   const reenableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollToMessageId = useAppStore((s) => s.ui.scrollToMessageId);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainer;
@@ -89,6 +90,25 @@ export function MessageList() {
   useEffect(() => {
     if (isStreaming) { setAutoFollow(true); userScrolledRef.current = false; }
   }, [isStreaming]);
+
+  // Scroll to a specific message (set by search navigation)
+  useEffect(() => {
+    const targetId = scrollToMessageId;
+    if (!targetId) return;
+    // Small delay to let the branch switch render messages
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-message-id="${targetId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Briefly highlight the target message
+        el.classList.add("ring-2", "ring-miro-blue/40", "rounded-2xl");
+        setTimeout(() => el.classList.remove("ring-2", "ring-miro-blue/40", "rounded-2xl"), 2000);
+      }
+      // Clear the scroll target
+      useAppStore.setState((s) => { s.ui.scrollToMessageId = null; });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [messages, scrollToMessageId]);
 
   useEffect(() => {
     if (bottomRef.current && !scrollContainerRef.current) {

@@ -8,7 +8,7 @@
  * and are independently testable.
  */
 import type { AppStore } from "../stores/appStore.types";
-import type { MessageId } from "../types/base";
+import type { MessageId, BranchId } from "../types/base";
 import type { MessageNode, ConversationSnapshot, ConversationSummary, BranchEntity } from "../types/conversation";
 import type { DerivedVariantGroup } from "../types/variant";
 import { stableArraySelector } from "./stable";
@@ -250,4 +250,51 @@ export function findForkPoint(
   }
   // No common ancestor found
   return null;
+}
+
+/**
+ * Find the best branch to display a specific message.
+ *
+ * Strategy:
+ *   1. If any branch has headMessageId === targetMessageId, use it (exact match).
+ *   2. Otherwise, walk from each branch head back to root; pick the first branch
+ *      whose path includes the target message.
+ *   3. Prefer non-archived branches.
+ *   4. Falls back to null if no branch contains the message.
+ */
+export function findBranchContainingMessage(
+  snapshot: ConversationSnapshot,
+  targetMessageId: MessageId
+): BranchId | null {
+  const branches = Object.values(snapshot.entities.branches);
+
+  // 1. Exact head match (fast path)
+  const exactMatch = branches.find((b) => b.headMessageId === targetMessageId && !b.archivedAt);
+  if (exactMatch) return exactMatch.id;
+
+  // Also check archived
+  const exactMatchAny = branches.find((b) => b.headMessageId === targetMessageId);
+  if (exactMatchAny) return exactMatchAny.id;
+
+  // 2. Walk each branch path and check for containment
+  const messages = snapshot.entities.messages;
+  let bestBranchId: BranchId | null = null;
+
+  for (const branch of branches) {
+    if (!branch.headMessageId) continue;
+    let cursor: MessageId | null = branch.headMessageId;
+    while (cursor) {
+      if (cursor === targetMessageId) {
+        // Prefer non-archived
+        if (!branch.archivedAt) return branch.id;
+        if (bestBranchId === null) {
+          bestBranchId = branch.id;
+        }
+        break;
+      }
+      cursor = messages[cursor]?.parentId ?? null;
+    }
+  }
+
+  return bestBranchId;
 }

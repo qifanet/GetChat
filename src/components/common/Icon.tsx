@@ -128,6 +128,73 @@ export function IconPencilSquare({ size = 16, ...props }: IconBaseProps) {
 }
 
 /**
+ * Copy / clipboard icon — used for copy-to-clipboard actions.
+ */
+export function IconCopy({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+    </svg>
+  );
+}
+
+/**
+ * Refresh / regenerate icon — used for regenerate reply actions.
+ */
+export function IconRefresh({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0115-6.7L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 01-15 6.7L3 16" />
+    </svg>
+  );
+}
+
+/**
+ * Branch / fork icon — used for "continue from here" actions.
+ */
+export function IconBranch({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M6 3v6" />
+      <path d="M6 9a3 3 0 106 0" />
+      <path d="M12 3v6" />
+      <path d="M18 3v6a3 3 0 01-3 3H9" />
+      <circle cx="6" cy="3" r="1" fill="currentColor" />
+      <circle cx="12" cy="3" r="1" fill="currentColor" />
+      <circle cx="18" cy="3" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * Ellipsis (three dots) icon — used for "more actions" overflow menu.
+ */
+export function IconEllipsis({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <circle cx="5" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * Check / tick icon — used for copied confirmation.
+ */
+export function IconCheck({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
+/**
  * Info circle icon — used for history fork banner.
  */
 export function IconInfoCircle({ size = 16, ...props }: IconBaseProps) {

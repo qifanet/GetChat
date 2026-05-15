@@ -291,6 +291,7 @@ export function createStoreState(
       rightPanelTab: "BRANCHES",
       exportDialogOpen: false,
       branchRenameDialogOpen: false,
+      scrollToMessageId: null,
     },
     setLeftSidebarCollapsed: () => {},
     setRightPanelCollapsed: () => {},

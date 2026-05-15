@@ -364,3 +364,63 @@ where
     .await?;
     Ok(row.0)
 }
+
+// ============================================================================
+// Search
+// ============================================================================
+
+/// Lightweight row returned by message search queries.
+/// Only includes fields needed for search result display.
+#[derive(Debug, FromRow)]
+pub struct MessageSearchRow {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content_text: String,
+    pub created_at: i64,
+}
+
+/**
+ * Search messages by keyword across all conversations (or a specific one).
+ *
+ * Uses SQL LIKE for simple substring matching. Returns results ordered
+ * by creation time (newest first), limited to `limit` results.
+ */
+pub async fn search_messages<'e, E>(
+    executor: E,
+    query: &str,
+    conversation_id: Option<&str>,
+    limit: i64,
+) -> sqlx::Result<Vec<MessageSearchRow>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+    if let Some(conv_id) = conversation_id {
+        sqlx::query_as::<_, MessageSearchRow>(
+            "SELECT id, conversation_id, role, content_text, created_at
+             FROM messages
+             WHERE conversation_id = ? AND content_text LIKE ? ESCAPE '\\'
+             ORDER BY created_at DESC
+             LIMIT ?",
+        )
+        .bind(conv_id)
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(executor)
+        .await
+    } else {
+        sqlx::query_as::<_, MessageSearchRow>(
+            "SELECT id, conversation_id, role, content_text, created_at
+             FROM messages
+             WHERE content_text LIKE ? ESCAPE '\\'
+             ORDER BY created_at DESC
+             LIMIT ?",
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(executor)
+        .await
+    }
+}

@@ -257,3 +257,100 @@ pub async fn edit_user_message_inline(
     }
     result
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesInput {
+    pub query: String,
+    pub conversation_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultItem {
+    pub message_id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub snippet: String,
+    pub created_at: i64,
+}
+
+/// Search messages by keyword. Returns results grouped by conversation.
+#[tauri::command]
+pub async fn search_messages(
+    state: State<'_, AppState>,
+    input: SearchMessagesInput,
+) -> Result<Vec<SearchResultItem>, AppError> {
+    let start = std::time::Instant::now();
+    let query_len = input.query.len();
+    let limit = input.limit.unwrap_or(50);
+
+    let rows = crate::repositories::messages::search_messages(
+        &state.db,
+        &input.query,
+        input.conversation_id.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| AppError::db_error(&format!("Search failed: {}", e)))?;
+
+    let keyword = input.query.to_lowercase();
+    let snippet_len = 80;
+
+    let results: Vec<SearchResultItem> = rows
+        .into_iter()
+        .map(|row| {
+            let snippet = extract_snippet(&row.content_text, &keyword, snippet_len);
+            SearchResultItem {
+                message_id: row.id,
+                conversation_id: row.conversation_id,
+                role: row.role,
+                snippet,
+                created_at: row.created_at * 1000,
+            }
+        })
+        .collect();
+
+    tracing::info!(
+        cmd = "search_messages",
+        query_len,
+        result_count = results.len(),
+        duration_ms = start.elapsed().as_millis() as u64,
+        "ok"
+    );
+
+    Ok(results)
+}
+
+/// Extract a short snippet around the first keyword occurrence.
+/// Uses char-boundary-safe slicing to avoid panics on multi-byte UTF-8 (CJK, emoji, etc.).
+fn extract_snippet(text: &str, keyword: &str, max_chars: usize) -> String {
+    let text_lower = text.to_lowercase();
+    let byte_pos = text_lower.find(keyword).unwrap_or(0);
+
+    // Convert byte position → char index
+    let char_pos = text[..byte_pos].chars().count();
+    let total_chars = text.chars().count();
+
+    let half = max_chars / 2;
+    let char_start = char_pos.saturating_sub(half);
+    let char_end = (char_start + max_chars).min(total_chars);
+
+    // Slice by char indices (always on char boundaries)
+    let snippet: String = text
+        .chars()
+        .skip(char_start)
+        .take(char_end - char_start)
+        .collect();
+
+    let mut result = String::with_capacity(snippet.len() + 8);
+    if char_start > 0 {
+        result.push_str("...");
+    }
+    result.push_str(&snippet);
+    if char_end < total_chars {
+        result.push_str("...");
+    }
+    result
+}

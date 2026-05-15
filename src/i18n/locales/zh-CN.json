@@ -138,7 +138,14 @@
     "noDivergedMessages": "此路径无分叉后消息",
     "sharedContext": "共同上下文 ({{count}} 条消息)",
     "noSharedContext": "两条路径没有共同上下文（可能从不同起点开始）",
-    "sharedContextHint": "这些消息在两条路线中完全一致，展开后可以快速复核分叉前的上下文。"
+    "sharedContextHint": "这些消息在两条路线中完全一致，展开后可以快速复核分叉前的上下文。",
+    "aiSummary": "AI 差异总结",
+    "summarizing": "正在生成总结...",
+    "helperModelRequired": "请在设置中配置辅助模型以启用 AI 总结",
+    "returnBtn": "切换",
+    "setMainlineBtn": "设为主线",
+    "mainlineBadge": "主线",
+    "returnToBranch": "切换到 {{name}}"
   },
   "message": {
     "edited": "已编辑",
@@ -258,6 +265,14 @@
     "adviceModels": "优先把常用模型都挂在同一个 Provider 下，后续分支切换模型时会更清晰。",
     "adviceDefaultModel": "应用默认模型只作为兜底，实际对话可以按分支单独覆盖，不必把所有分支绑死在一个模型上。",
     "adviceConnection": "先保存 Provider 再执行连接测试，这样能区分是草稿问题还是后端联通性问题。",
+    "shortcutsTitle": "键盘快捷键",
+    "shortcutNewChat": "新建会话",
+    "shortcutSend": "发送消息",
+    "shortcutStop": "停止生成 / 取消操作",
+    "shortcutSettings": "打开设置",
+    "shortcutSidebar": "切换侧边栏",
+    "shortcutPanel": "切换右侧面板",
+    "shortcutSearch": "全文搜索",
     "confirmDeleteProvider": "确定要删除这个 Provider 吗？这会同时删除已保存的 API Key 引用。",
     "providerSaveFailed": "Provider 保存失败",
     "providerDeleteFailed": "Provider 删除失败",
@@ -309,5 +324,12 @@
     "installing": "正在安装更新...",
     "installingHint": "下载完成后应用将自动重启",
     "installFailed": "更新安装失败，请稍后重试"
+  },
+  "search": {
+    "placeholder": "搜索消息内容...",
+    "searching": "搜索中...",
+    "noResults": "未找到匹配的消息",
+    "recent": "最近会话",
+    "noRecent": "暂无最近会话"
   }
 }

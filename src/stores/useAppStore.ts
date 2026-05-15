@@ -72,6 +72,7 @@ const initialUi: UiState = {
   rightPanelTab: "BRANCHES",
   exportDialogOpen: false,
   branchRenameDialogOpen: false,
+  scrollToMessageId: null,
 };
 
 // ============================================================================

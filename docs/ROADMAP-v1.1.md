@@ -62,120 +62,105 @@ Ollama 完善 ──→ 辅助 AI 模型设置 ──→ AI 自动生成标题
 - 前端 `streamController.ts` 的 `completeStream` 中自动触发标题生成
 - 条件判断：仅当 `title_source = DEFAULT` 且当前标题是默认值时才触发
 - 失败静默降级，不弹错误、不阻塞用户操作
-- 错误处理改进：`call_helper_model` 失败时返回 `Ok(None)` 而非 `Err`，避免前端收到异常
-- 空标题保护：模型返回空内容时跳过数据库更新，不覆盖原始标题
-- 关键节点 INFO 日志：Ollama/OpenAI 调用的每个步骤都有可追踪的日志
-- 实测验证：使用 `gpt-4.1-mini` 辅助模型，3 秒内完成标题生成（如"工具类型及应用场景介绍"）
 
 ---
 
 ## 4. 消息操作菜单完善
 
-**状态**: 待开发  
-**优先级**: P2 — 中（可与其他任务并行）
+**状态**: ✅ 已完成
+**优先级**: P2 — 中
 
-### 背景
+### 完成内容
 
-当前消息的操作入口（复制、从这里继续、编辑、删除等）不够统一和直观。需要设计统一的右键/悬浮菜单。
-
-### 验收标准
-
-- [ ] 每条消息悬浮时显示操作按钮栏（hover toolbar），包含：复制、更多（...）
-- [ ] 点击"更多"展开下拉菜单，包含所有可用操作
-- [ ] User 消息可用操作：复制、编辑消息（创建新分支）、从这里继续（创建新分支）
-- [ ] Assistant 消息可用操作：复制、重新生成（创建候选回答）、从这里继续
-- [ ] 操作按钮使用 icon + tooltip，不占用消息阅读空间
-- [ ] 移动端/窄屏下操作按钮通过右键或长按触发
-
-### 涉及文件
-
-- `src/components/chat/` — MessageBubble 组件增加 hover toolbar
-- `src/components/common/` — 可能需要 ContextMenu 或 DropdownMenu 通用组件
+- 新增 `MessageActionToolbar` / `MessageActionButton` / `MessageActionMoreMenu` 组件
+- 新增 6 个 Icon 组件：`IconCopy`、`IconRefresh`、`IconBranch`、`IconEllipsis`、`IconCheck`
+- User 消息：hover 时显示复制 + 更多（编辑、从这里继续）按钮
+- Assistant 消息：hover 时显示复制 + 重新生成 + 应用到分支 + 更多（从这里继续）按钮
+- 更多菜单：下拉菜单，点击外部或 Escape 关闭
+- 使用 `group/message` + `group-hover/message:opacity-100` 实现 hover 触发
 
 ---
 
 ## 5. 快捷键支持
 
-**状态**: 待开发  
-**优先级**: P2 — 中（独立任务，可并行）
+**状态**: ✅ 已完成
+**优先级**: P2 — 中
 
-### 验收标准
+### 完成内容
 
-- [ ] `Ctrl/Cmd + N` — 新建会话
-- [ ] `Ctrl/Cmd + Shift + N` — 新建会话并作为新分支发送（如果当前有活跃会话）
-- [ ] `Ctrl/Cmd + Enter` — 发送消息
-- [ ] `Escape` — 取消/停止当前流式生成
-- [ ] `Ctrl/Cmd + ,` — 打开设置
-- [ ] `Ctrl/Cmd + K` — 打开全文搜索（为 #6 预留）
-- [ ] 快捷键列表在设置页面可查看
-- [ ] 输入框聚焦时，单字母快捷键不触发（避免打字冲突）
-
-### 涉及文件
-
-- `src/hooks/useKeyboardShortcuts.ts` — 新增全局快捷键 hook
-- `src/App.tsx` — 注册全局快捷键
-- `src/components/settings/ProviderSettingsScreen.tsx` — 快捷键展示区
+- 新增 `useGlobalShortcuts` hook，注册 7 个全局快捷键
+- `Ctrl/Cmd + N` → 新建会话
+- `Ctrl/Cmd + Enter` → 发送消息（即使 textarea 聚焦也生效）
+- `Escape` → 取消流式生成 → 取消分叉 → 退出对比（优先级）
+- `Ctrl/Cmd + ,` → 打开设置
+- `Ctrl/Cmd + B` → 切换左侧边栏
+- `Ctrl/Cmd + .` → 切换右侧面板
+- `Ctrl/Cmd + K` → 打开全文搜索
+- Settings 页面新增"键盘快捷键"帮助区，使用 `<kbd>` 元素展示
+- 输入框聚焦时，单字母快捷键不触发（`isEditableTarget()` 检测）
 
 ---
 
 ## 6. 全文搜索
 
-**状态**: 待开发  
-**优先级**: P2 — 中（独立任务，可并行）
+**状态**: ✅ 已完成
+**优先级**: P2 — 中
 
-### 验收标准
+### 完成内容
 
-- [ ] 搜索栏位于顶部工具栏，支持 `Ctrl/Cmd + K` 快捷唤出
-- [ ] 输入关键词后实时搜索所有会话的消息内容
-- [ ] 搜索结果按会话分组，显示会话标题 + 匹配消息的摘要（关键词高亮）
-- [ ] 点击搜索结果跳转到对应会话的对应消息
-- [ ] 支持中英文搜索
-- [ ] 空搜索时显示最近打开的会话列表
-
-### 涉及文件
-
-- `src-tauri/src/commands/` — 新增 search_messages command
-- `src-tauri/src/repositories/messages.rs` — SQL LIKE 或 FTS 查询
-- `src/components/layout/` — 搜索弹窗 UI
-- `src/components/common/` — SearchDialog 通用组件
+- 后端 `repositories/messages.rs` 新增 `search_messages` SQL LIKE 查询
+- 后端 `commands/messages.rs` 新增 `search_messages` command，含 snippet 提取
+- 前端 `tauriCommands.ts` 新增 `searchMessages` / `SearchResultItem` 类型
+- 新增 `SearchDialog` 组件：弹窗式搜索界面
+- 300ms 防抖搜索，结果按会话分组
+- 关键词高亮（`<mark>` 标签 + amber 背景色）
+- 空搜索时显示最近 5 个会话
+- 搜索图标 + placeholder 提示
+- i18n：中英文搜索相关翻译键
+- Browser debug runtime：同步支持搜索 mock
 
 ---
 
 ## 7. AI 分支差异总结
 
-**状态**: 待开发  
+**状态**: ✅ 已完成
 **优先级**: P3 — 低（依赖 #2 辅助模型设置）
 
-### 验收标准
+### 完成内容
 
-- [ ] Compare 模式界面新增"AI 总结差异"按钮
-- [ ] 点击后调用辅助模型，将两条分支的消息内容作为输入
-- [ ] 模型输出包含：各分支的关键观点、主要差异点、推荐建议
-- [ ] 总结结果以 Markdown 格式显示在 Compare 面板中
-- [ ] 如果辅助模型未配置，按钮显示为禁用状态并提示用户配置
-- [ ] 调用过程中显示 loading 状态，不阻塞页面交互
-
-### 涉及文件
-
-- `src/components/compare/CompareWorkspace.tsx` — 增加 AI 总结按钮和展示区
-- `src-tauri/src/commands/` — 新增 summarize_branch_diff command
-- `src-tauri/src/services/` — 分支差异总结 service
+- 后端 `helper_ai_service.rs` 新增 `generate_branch_diff_summary` 服务
+- 后端新增 `generate_branch_diff_summary` command（Ollama + OpenAI Compatible 双适配）
+- 分支文本收集：从 head 向 root 回溯，最多 10 条消息，每条截断 300 字符
+- 前端 `tauriCommands.ts` 新增 `generateBranchDiffSummary` 函数
+- CompareToolbar 新增"AI 差异总结"按钮 + Markdown 结果展示区
+- 未配置辅助模型时按钮禁用 + tooltip 提示
+- Loading 状态展示
+- i18n：中英文对比模式 AI 总结翻译键
+- Browser debug runtime：同步支持 diff summary mock
 
 ---
 
-## 开发顺序建议
+## 版本信息
+
+- **版本号**: 1.1.0
+- **发布日期**: 2026-05
+- **涉及文件版本更新**: `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
+
+---
+
+## 开发顺序
 
 ```text
 阶段 1（可并行）:
-  ├── #1 Ollama Provider 支持
-  ├── #4 消息操作菜单
-  └── #5 快捷键支持
+  ├── #1 Ollama Provider 支持 ✅
+  ├── #4 消息操作菜单 ✅
+  └── #5 快捷键支持 ✅
 
 阶段 2（依赖阶段 1）:
-  ├── #2 辅助 AI 模型设置
-  └── #6 全文搜索
+  ├── #2 辅助 AI 模型设置 ✅
+  └── #6 全文搜索 ✅
 
 阶段 3（依赖阶段 2）:
-  ├── #3 AI 自动生成会话标题
-  └── #7 AI 分支差异总结
+  ├── #3 AI 自动生成会话标题 ✅
+  └── #7 AI 分支差异总结 ✅
 ```

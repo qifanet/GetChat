@@ -153,4 +153,7 @@ export interface UiState {
 
   exportDialogOpen: boolean;
   branchRenameDialogOpen: boolean;
+
+  /** Set by search navigation; MessageList scrolls to this message then clears it. */
+  scrollToMessageId: string | null;
 }
