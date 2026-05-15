@@ -43,7 +43,11 @@ const SHORTCUT_ITEMS = [
 ] as const;
 function getShortcutModifierLabel(): string {
   if (typeof navigator === "undefined") return "Ctrl";
-  const platform = navigator.platform ?? "";
+  const platform =
+    ("userAgentData" in navigator
+      ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+          ?.platform
+      : undefined) ?? navigator.platform ?? "";
   return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
 }
 type EditableProviderId = string | "new";

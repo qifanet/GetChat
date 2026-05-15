@@ -116,6 +116,10 @@ class BrowserDebugStreamController {
 
 const BROWSER_DEBUG_STORAGE_KEY = "getchat.browser-debug-runtime.v1";
 const BROWSER_DEBUG_LOCALE_KEY = "getchat-locale";
+const BROWSER_DEBUG_DIFF_SUMMARY_ZH =
+  "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。";
+const BROWSER_DEBUG_DIFF_SUMMARY_EN =
+  "## Branch Diff Summary\n\nThe two branches diverge in refactoring strategy.\n\n### Left branch\n- Boundary decomposition first\n- Incremental rollout\n\n### Right branch\n- Event bus first\n- Decoupling and async focus\n\n### Recommendation\nPick the approach that fits team size and delivery pace.";
 const browserDebugStreams = new Map<RequestId, BrowserDebugStreamController>();
 let browserDebugMemoryState: BrowserDebugState | null = null;
 
@@ -129,9 +133,9 @@ function getBrowserDebugLocale(): string {
 function buildBrowserDebugDiffSummary(): string {
   const locale = getBrowserDebugLocale().toLowerCase();
   if (locale.startsWith("zh")) {
-    return "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。";
+    return BROWSER_DEBUG_DIFF_SUMMARY_ZH;
   }
-  return "## Branch Diff Summary\n\nThe two branches diverge in refactoring strategy.\n\n### Left branch\n- Boundary decomposition first\n- Incremental rollout\n\n### Right branch\n- Event bus first\n- Decoupling and async focus\n\n### Recommendation\nPick the approach that fits team size and delivery pace.";
+  return BROWSER_DEBUG_DIFF_SUMMARY_EN;
 }
 
 /**
