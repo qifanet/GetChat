@@ -41,13 +41,18 @@ const SHORTCUT_ITEMS = [
   { key: "panel", labelKey: "settings.shortcutPanel", display: "⌘ ." },
   { key: "search", labelKey: "settings.shortcutSearch", display: "⌘ K" },
 ] as const;
-function getShortcutModifierLabel(): string {
-  if (typeof navigator === "undefined") return "Ctrl";
-  const platform =
-    ("userAgentData" in navigator
+function getNavigatorPlatform(): string {
+  if (typeof navigator === "undefined") return "";
+  const userAgentDataPlatform =
+    "userAgentData" in navigator
       ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
           ?.platform
-      : undefined) ?? navigator.platform ?? "";
+      : undefined;
+  return userAgentDataPlatform ?? navigator.platform ?? "";
+}
+
+function getShortcutModifierLabel(): string {
+  const platform = getNavigatorPlatform();
   return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
 }
 type EditableProviderId = string | "new";
