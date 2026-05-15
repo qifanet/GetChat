@@ -126,12 +126,12 @@ let browserDebugMemoryState: BrowserDebugState | null = null;
 function getBrowserDebugLocale(): string {
   if (typeof window === "undefined") return "en";
   const stored = window.localStorage.getItem(BROWSER_DEBUG_LOCALE_KEY);
-  if (stored) return stored;
-  return window.navigator.language;
+  if (stored) return stored.toLowerCase();
+  return window.navigator.language.toLowerCase();
 }
 
 function buildBrowserDebugDiffSummary(): string {
-  const locale = getBrowserDebugLocale().toLowerCase();
+  const locale = getBrowserDebugLocale();
   if (locale.startsWith("zh")) {
     return BROWSER_DEBUG_DIFF_SUMMARY_ZH;
   }

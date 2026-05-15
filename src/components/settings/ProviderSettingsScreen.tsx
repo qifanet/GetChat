@@ -41,13 +41,18 @@ const SHORTCUT_ITEMS = [
   { key: "panel", labelKey: "settings.shortcutPanel", display: "⌘ ." },
   { key: "search", labelKey: "settings.shortcutSearch", display: "⌘ K" },
 ] as const;
+function hasUserAgentData(
+  nav: Navigator
+): nav is Navigator & { userAgentData: { platform?: string } } {
+  return "userAgentData" in nav;
+}
+
 function getNavigatorPlatform(): string {
   if (typeof navigator === "undefined") return "";
-  const userAgentData =
-    "userAgentData" in navigator
-      ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
-      : undefined;
-  return userAgentData?.platform ?? navigator.platform ?? "";
+  if (hasUserAgentData(navigator)) {
+    return navigator.userAgentData.platform ?? navigator.platform ?? "";
+  }
+  return navigator.platform ?? "";
 }
 
 function getShortcutModifierLabel(): string {
