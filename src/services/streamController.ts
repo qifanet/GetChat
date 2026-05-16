@@ -525,7 +525,7 @@ export async function completeStream(
     `[stream] complete request=${requestId} chars=${finalText.length} chunks=${runtime.chunks.length} duration=${Date.now() - session.startedAt}ms`
   );
 
-  // 6) Trigger auto title generation for new conversations
+  // 6) Trigger auto title generation for conversations without a user-set title
   if (session.completionMode === "BRANCH_HEAD") {
     const { workspace, summariesById } = useAppStore.getState();
     const conversationId = workspace?.activeConversationId;
@@ -533,10 +533,15 @@ export async function completeStream(
       const summary = summariesById[conversationId];
       const title = summary?.title ?? "";
       const hasDefaultTitle =
-        title === "" ||
+        !title.trim() ||
+        title === "New Conversation" ||
         title.toLowerCase().startsWith("new conversation") ||
-        title.toLowerCase().startsWith("新建会话");
+        title.toLowerCase().startsWith("新建会话") ||
+        title.toLowerCase().startsWith("未命名会话");
       if (hasDefaultTitle) {
+        console.info(
+          `[stream] triggering auto title generation for conv=${conversationId} title="${title}"`
+        );
         useAppStore.getState().autoGenerateTitle(conversationId).catch(() => {});
       }
     }

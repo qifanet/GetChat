@@ -10,7 +10,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getBranchDisplayName } from "../../i18n/displayNames";
 import type { MessageNode } from "../../types/conversation";
-import { MarkdownRenderer } from "../messages/MarkdownRenderer";
+import { MarkdownRenderer } from "../../../docs/private/MarkdownRenderer";
 
 interface CompareColumnProps {
   /** Branch name displayed as column header. */

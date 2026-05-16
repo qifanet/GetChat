@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { getBranchDisplayName } from "../../i18n/displayNames";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import { generateBranchDiffSummary } from "../../services/tauriCommands";
-import { MarkdownRenderer } from "../messages/MarkdownRenderer";
+import { MarkdownRenderer } from "../../../docs/private/MarkdownRenderer";
 import type { BranchEntity } from "../../types/conversation";
 
 const _select_openExportDialog = (s: import("../../stores/appStore.types").AppStore) => s.openExportDialog;

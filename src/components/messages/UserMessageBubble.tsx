@@ -16,6 +16,7 @@ import {
 } from "./MessageActionToolbar";
 import type { MessageNode } from "../../types/conversation";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
 const _sel_setDraft = (s: import("../../stores/appStore.types").AppStore) => s.setDraft;
@@ -94,8 +95,8 @@ export const UserMessageBubble = memo(function UserMessageBubble({
             {t("common.user").slice(0, 1)}
           </span>
         </div>
-        <div className="rounded-[26px] rounded-tr-[10px] border border-miro-blue/12 bg-miro-blue-light px-5 py-4 text-[15px] leading-7 text-miro-text shadow-ring">
-          <p className="whitespace-pre-wrap break-words">{message.content.text}</p>
+        <div className="rounded-[26px] rounded-tr-[10px] border border-miro-blue/12 bg-miro-blue-light px-5 py-4 text-[15px] leading-7 text-miro-text shadow-ring [&_.markdown-content]:text-[15px] [&_.markdown-content_p:last-child]:mb-0">
+          <MarkdownRenderer content={message.content.text} disableMermaid />
         </div>
       </div>
       <div className="mt-1.5 flex max-w-[min(760px,82%)] items-center gap-0.5 justify-end opacity-0 transition-opacity duration-150 group-hover/message:opacity-100">

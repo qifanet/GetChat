@@ -39,6 +39,16 @@ function resolveVendorChunk(id: string): string | undefined {
 
   if (
     matchesAny([
+      "/katex/",
+      "/rehype-katex/",
+      "/remark-math/",
+    ])
+  ) {
+    return "vendor-katex";
+  }
+
+  if (
+    matchesAny([
       "/react/",
       "/react-dom/",
       "/scheduler/",

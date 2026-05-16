@@ -166,3 +166,6 @@ src-tauri/icons/ios/
 .claude/
 CLAUDE.md
 .tauri/
+
+# Private development documents (not for public repo)
+docs/private/

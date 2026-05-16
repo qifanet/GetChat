@@ -350,9 +350,9 @@
     margin: 0.9rem 0 0.45rem;
   }
 
-  /* Inline code */
+  /* Inline code — no background since code blocks already have one */
   .markdown-content code {
-    @apply rounded-md bg-miro-surface-low px-1.5 py-0.5 font-mono text-[0.88em] text-miro-blue;
+    @apply rounded-md px-1.5 py-0.5 font-mono text-[0.88em] text-miro-blue;
   }
 
   /* Fenced code blocks — wrapper produced by react-markdown <pre><code> */
@@ -364,8 +364,16 @@
     box-shadow: none;
   }
   .markdown-content pre code {
-    @apply bg-transparent px-0 py-0 text-inherit;
+    @apply px-0 py-0 text-inherit;
+    background: transparent;
     display: block;
+  }
+
+  /* KaTeX block-level math — center and add spacing */
+  .markdown-content .katex-display {
+    margin: 1rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   /* Lists */

@@ -6,7 +6,7 @@
 
 **Get inspiration, get creativity, get infinite possibilities.**
 
-A local-first desktop AI chat application that supports branching conversations and side-by-side comparison.
+A local-first desktop AI chat app where every conversation is a tree, not a line. Branch anywhere, compare side-by-side, and never lose a great idea again.
 
 [![Windows](https://img.shields.io/badge/Windows-x64-0078D4?logo=windows11&logoColor=white)](#)
 [![macOS](https://img.shields.io/badge/macOS-Intel%20%2F%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#)
@@ -22,144 +22,84 @@ A local-first desktop AI chat application that supports branching conversations 
 
 ---
 
-## Why GetChat?
+## The Problem
 
-Most AI chat tools treat conversations as a flat timeline. Once you hit "regenerate" or try a different prompt, the previous response is gone. GetChat takes a different approach: **every conversation is a tree**, not a line.
+Ever had this happen? You're deep in a conversation with an AI, the response is almost perfect — so you tweak the prompt and hit regenerate. Now the old answer is gone. Or you try a completely different approach, and the entire context resets.
 
-- **Branch anywhere** — Fork from any message in history. Try different prompts, models, or approaches without losing context.
-- **Compare side by side** — Place two branches next to each other to see which response works best.
-- **Your data stays local** — All conversations, branches, and settings are stored in a local SQLite database. Nothing is sent to any server except the AI API calls you configure.
+Most AI chat tools treat conversations as a straight line. One wrong turn and you lose your work.
 
-## Features
+## The Idea
 
-### Branching Conversations
+**What if every conversation was a tree instead of a line?**
 
-Every message can be the starting point of a new branch. Edit-and-resend, regenerate, or manually fork — the original path is always preserved. Navigate the full tree in the sidebar.
+GetChat lets you branch from *any* message — like forking a Git repo, but for your train of thought. The original path is never destroyed. You can explore freely, compare branches side-by-side, and merge your favorite path back as the main thread.
 
-### Side-by-Side Comparison
+## What Can You Do?
 
-Select any two branches and compare them in a split view. Shared context is highlighted, so you can focus on what actually differs.
+### Branch From Anywhere
 
-### Multi-Provider Support
+Spotted a message halfway through the conversation that could go in a different direction? Click and branch. Want to try a different model for the same question? Regenerate creates a variant without touching the original. Your exploration is always non-destructive.
 
-Connect to OpenAI, DeepSeek, Ollama, or any OpenAI-compatible API. Configure multiple providers and switch between them per-branch. Set a global default model for quick access.
+### Compare Branches Side-by-Side
 
-### Local-First & Private
+Pick two branches and view them in a split pane. Shared context is highlighted so you can focus on what's different. There's even an AI-powered diff summary to help you decide which path to keep.
 
-- All data lives in a local SQLite database on your machine.
-- No telemetry, no analytics, no cloud sync.
-- Only the AI API calls you explicitly configure leave your machine.
+### Rich Markdown Rendering
 
-### Cross-Platform Desktop App
+AI responses come alive with full Markdown rendering: syntax-highlighted code blocks (30+ languages), LaTeX math formulas, Mermaid diagrams, tables, and more. User messages get the same treatment — because your words deserve nice formatting too.
 
-Built with Tauri v2 for a lightweight, native experience on Windows, macOS, and Linux. No Electron, no heavy browser bundled.
+### Connect Any Provider
 
-### Auto-Update
+OpenAI, DeepSeek, Ollama, or anything that speaks the OpenAI protocol. Add as many providers as you like, set a default model for quick chats, or pick different models per branch. Your local Ollama models work out of the box.
 
-The app checks for new versions in the background and notifies you when an update is available. You stay in control of when to install.
+### Your Data, Your Machine
 
-### Internationalization
+Everything lives in a local SQLite database. No cloud sync, no telemetry, no accounts. The only network calls are the AI APIs you configure yourself. Your conversations stay where they belong — on your computer.
 
-Supports English and Simplified Chinese. Switch at any time in Settings.
+### Small & Fast
 
-## Tech Stack
+Built on Tauri v2 (Rust backend), not Electron. The app is lightweight, starts instantly, and uses a fraction of the memory. Runs natively on Windows, macOS, and Linux.
 
-| Layer | Technology |
-| --- | --- |
-| Frontend | React 19, TypeScript, Tailwind CSS |
-| State Management | Zustand v5 with Immer |
-| Desktop Runtime | Tauri v2 (Rust) |
-| Database | SQLite (WAL mode, local-first) |
-| Streaming | Rust-based stream pipeline with imperative text rendering |
-| i18n | i18next |
-| Testing | Vitest (frontend), Cargo test (backend) |
+### Keyboard-First
 
-## Getting Started
+Chat with keyboard shortcuts: send messages, switch conversations, navigate branches — all without reaching for the mouse.
 
-### Prerequisites
+### Speaks Your Language
 
-- [Node.js](https://nodejs.org/) 18+
-- [Rust](https://www.rust-lang.org/tools/install) stable toolchain
-- Platform-specific requirements for [Tauri v2](https://tauri.app/start/prerequisites/)
+English and Chinese out of the box. Switch anytime in Settings.
 
-### Install & Run
+## Quick Start
+
+### For Users
+
+Head to the [Releases page](https://github.com/qifanet/GetChat/releases) and grab the latest installer for your platform. That's it.
+
+### For Developers
 
 ```bash
-# Clone the repository
 git clone https://github.com/qifanet/GetChat.git
 cd GetChat
-
-# Install frontend dependencies
 npm install
-
-# Start development mode (hot reload for frontend + backend)
 npx tauri dev
 ```
 
-### Build for Production
+You'll need [Node.js](https://nodejs.org/) 18+, the [Rust](https://www.rust-lang.org/tools/install) stable toolchain, and the [Tauri v2 prerequisites](https://tauri.app/start/prerequisites/) for your platform.
+
+### Build from Source
 
 ```bash
 npx tauri build
 ```
 
-The installer will be generated in `src-tauri/target/release/bundle/`.
-
-### Run Tests
-
-```bash
-# Frontend tests
-npm test
-
-# Backend tests
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-## Project Structure
-
-```
-GetChat/
-├── src/                          # Frontend source (React + TypeScript)
-│   ├── components/               # UI components
-│   │   ├── chat/                 # Message list and conversation view
-│   │   ├── composer/             # Message input area
-│   │   ├── compare/              # Side-by-side comparison workspace
-│   │   ├── conversations/        # Conversation sidebar
-│   │   ├── settings/             # Provider and app settings
-│   │   └── ...
-│   ├── features/                 # Feature modules (composer, models)
-│   ├── services/                 # Tauri IPC, streaming runtime
-│   ├── stores/                   # Zustand state stores
-│   └── i18n/                     # Internationalization resources
-├── src-tauri/                    # Backend source (Rust + Tauri)
-│   ├── src/
-│   │   ├── commands/             # Tauri IPC command handlers
-│   │   ├── services/             # Business logic services
-│   │   ├── repositories/         # Database access layer
-│   │   └── db/migrations/        # SQLite schema migrations
-│   └── icons/                    # App icons for all platforms
-├── docs/                         # Design documents and specs
-└── scripts/                      # Build and lint scripts
-```
-
-## Documentation
-
-Design documents and technical specs are in the [`docs/`](./docs/) directory:
-
-- **PRD-v1.md** — Product requirements
-- **SQLiteSchema + TauriCommand Interface Design** — Database schema and IPC API
-- **TypeScript Core Types + Zustand Store Design** — Frontend architecture
+The installer will be in `src-tauri/target/release/bundle/`.
 
 ## Contributing
 
-We welcome contributions! Please read the [Contributing Guide](./CONTRIBUTING.md) for details on:
-
-- Branch naming conventions
-- Commit message format (`feat:`, `fix:`, `docs:`, etc.)
-- Pull request workflow and review process
+We'd love your help! Check out the [Contributing Guide](./CONTRIBUTING.md) for branch naming conventions, commit message format, and the PR workflow.
 
 ## License
 
-[MIT License](./LICENSE) — free to use, modify, and distribute.
+[MIT License](./LICENSE) — use it, fork it, share it.
 
 ---
 
