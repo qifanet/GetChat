@@ -2,8 +2,10 @@
  * @file MarkdownRenderer.tsx
  * @description Production markdown renderer for finalized assistant content.
  *
- * This component is ONLY used after streaming completes. It supports:
+ * Supports:
  *   - GitHub-Flavored Markdown via remark-gfm
+ *   - LaTeX math via remark-math + rehype-katex
+ *   - Mermaid diagrams (dynamic import, rendered as SVG) — can be disabled
  *   - Syntax-highlighted fenced code blocks with language label and copy button
  *   - Safe external link handling
  *   - Tables, lists, blockquotes, and inline code
@@ -13,33 +15,59 @@
 import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
+import c from "react-syntax-highlighter/dist/esm/languages/prism/c";
+import cpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
 import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
+import csharp from "react-syntax-highlighter/dist/esm/languages/prism/csharp";
+import dart from "react-syntax-highlighter/dist/esm/languages/prism/dart";
 import diff from "react-syntax-highlighter/dist/esm/languages/prism/diff";
 import go from "react-syntax-highlighter/dist/esm/languages/prism/go";
 import java from "react-syntax-highlighter/dist/esm/languages/prism/java";
 import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
 import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
 import jsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
+import kotlin from "react-syntax-highlighter/dist/esm/languages/prism/kotlin";
+import lua from "react-syntax-highlighter/dist/esm/languages/prism/lua";
 import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import php from "react-syntax-highlighter/dist/esm/languages/prism/php";
 import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import r from "react-syntax-highlighter/dist/esm/languages/prism/r";
+import ruby from "react-syntax-highlighter/dist/esm/languages/prism/ruby";
 import rust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
+import scala from "react-syntax-highlighter/dist/esm/languages/prism/scala";
 import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import swift from "react-syntax-highlighter/dist/esm/languages/prism/swift";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTranslation } from "react-i18next";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { MermaidBlock } from "./MermaidBlock";
+
+import "katex/dist/katex.min.css";
+
 interface MarkdownRendererProps {
   content: string;
+  /** When true, mermaid code blocks are displayed as plain code instead of rendered diagrams. */
+  disableMermaid?: boolean;
 }
+
 const registeredLanguages = {
   bash,
   sh: bash,
   shell: bash,
+  c,
+  "c++": cpp,
+  cpp,
+  cs: csharp,
+  csharp,
   css,
+  dart,
   diff,
   go,
   java,
@@ -47,29 +75,42 @@ const registeredLanguages = {
   js: javascript,
   json,
   jsx,
+  kotlin,
+  lua,
   markdown,
   md: markdown,
+  php,
   python,
   py: python,
+  r,
+  ruby,
+  rb: ruby,
   rust,
   rs: rust,
+  scala,
   sql,
+  swift,
   ts: typescript,
   tsx,
   typescript,
   yaml,
   yml: yaml,
 } as const;
+
 for (const [name, grammar] of Object.entries(registeredLanguages)) {
   SyntaxHighlighter.registerLanguage(name, grammar);
 }
+
 const supportedLanguages = new Set(Object.keys(registeredLanguages));
+
 function resolveCodeLanguage(className?: string): string | null {
-  const m = /language-([\w-]+)/.exec(className ?? "");
+  const m = /language-([\w+-]+)/.exec(className ?? "");
   if (!m) return null;
   const norm = m[1].toLowerCase();
+  if (norm === "mermaid") return "mermaid";
   return supportedLanguages.has(norm) ? norm : null;
 }
+
 function extractLanguageFromChildren(children: ReactNode): string | null {
   if (!children) return null;
   if (typeof children === "object" && "props" in children) {
@@ -86,6 +127,7 @@ function extractLanguageFromChildren(children: ReactNode): string | null {
   }
   return null;
 }
+
 function extractTextFromChildren(children: ReactNode): string {
   if (typeof children === "string") return children;
   if (typeof children === "number") return String(children);
@@ -95,6 +137,7 @@ function extractTextFromChildren(children: ReactNode): string {
   }
   return "";
 }
+
 function CodeBlockHeader({
   language,
   rawCode,
@@ -133,14 +176,21 @@ function CodeBlockHeader({
     </div>
   );
 }
+
 function buildMarkdownComponents(
   copyLabel: string,
-  copiedLabel: string
+  copiedLabel: string,
+  disableMermaid: boolean,
 ): Components {
   return {
   pre({ node: _node, children }) {
     const language = extractLanguageFromChildren(children);
     const rawCode = extractTextFromChildren(children).replace(/\n$/, "");
+
+    if (language === "mermaid" && !disableMermaid) {
+      return <MermaidBlock code={rawCode} />;
+    }
+
     return (
       <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
         <CodeBlockHeader
@@ -163,6 +213,11 @@ function buildMarkdownComponents(
   code({ node: _node, className, children, ...props }) {
     const language = resolveCodeLanguage(className);
     const codeText = String(children).replace(/\n$/, "");
+
+    if (language === "mermaid" && !disableMermaid) {
+      return <MermaidBlock code={codeText} />;
+    }
+
     if (language) {
       return (
         <SyntaxHighlighter
@@ -197,20 +252,56 @@ function buildMarkdownComponents(
   },
   };
 }
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: MarkdownRendererProps) {
+
+/**
+ * Normalize LaTeX math delimiters to formats recognized by remark-math.
+ *
+ * Many AI models output math using LaTeX-style delimiters:
+ *   \[...\] for block math, \(...\) for inline math.
+ * remark-math only recognizes $...$ and $$...$$, so we convert.
+ * Fenced code blocks are excluded to avoid false positives.
+ */
+function normalizeMathDelimiters(text: string): string {
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      let result = part;
+      // Block math: \[...\] -> $$...$$
+      result = result.replace(
+        /\\\[([\s\S]*?)\\\]/g,
+        (_m, inner: string) => "$$" + inner + "$$"
+      );
+      // Inline math: \(...\) -> $...$
+      result = result.replace(
+        /\\\(([\s\S]*?)\\\)/g,
+        (_m, inner: string) => "$" + inner + "$"
+      );
+      return result;
+    })
+    .join("");
+}
+
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, disableMermaid = false }: MarkdownRendererProps) {
   const { t } = useTranslation();
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents(
         t("common.copyCode"),
-        t("common.codeCopied")
+        t("common.codeCopied"),
+        disableMermaid,
       ),
-    [t]
+    [t, disableMermaid]
   );
+  const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
   return (
     <div className="markdown-content max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {content}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={markdownComponents}
+      >
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );

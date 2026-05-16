@@ -789,7 +789,9 @@ export const useAppStore = create<AppStore>()(
 
         autoGenerateTitle: async (conversationId) => {
           try {
+            console.info(`[title] calling generate_conversation_title for conv=${conversationId}`);
             const result = await tauriCmd.generateConversationTitle(conversationId);
+            console.info(`[title] result:`, result);
             if (result?.title) {
               const summary = get().summariesById[conversationId];
               if (summary) {
@@ -811,8 +813,8 @@ export const useAppStore = create<AppStore>()(
                 );
               }
             }
-          } catch {
-            // Silent fallback — title generation failure should not disrupt UX
+          } catch (err) {
+            console.warn(`[title] generation failed for conv=${conversationId}:`, err);
           }
         },
 

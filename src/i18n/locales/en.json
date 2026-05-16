@@ -25,6 +25,10 @@
     "saving": "Saving...",
     "saved": "Saved"
   },
+  "markdown": {
+    "renderingDiagram": "Rendering diagram...",
+    "mermaidError": "Diagram rendering failed"
+  },
   "boot": {
     "initializationFailed": "Initialization failed",
     "loadingDescription": "Preparing your workspace and recent content."
