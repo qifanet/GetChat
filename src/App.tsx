@@ -33,7 +33,6 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconChevronUp,
-  IconExport,
   IconSettings,
 } from "./components/common/Icon";
 import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsScreen";
@@ -67,9 +66,8 @@ const selectSetLeftSidebarCollapsed = (s: import("./stores/appStore.types").AppS
 const selectSetRightPanelCollapsed = (s: import("./stores/appStore.types").AppStore) => s.setRightPanelCollapsed;
 const selectCreateConversation = (s: import("./stores/appStore.types").AppStore) => s.createConversation;
 const selectOpenConversation = (s: import("./stores/appStore.types").AppStore) => s.openConversation;
-const selectOpenExportDialog = (s: import("./stores/appStore.types").AppStore) => s.openExportDialog;
-const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
 const selectSummariesById = (s: import("./stores/appStore.types").AppStore) => s.summariesById;
+const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
 const selectActiveConversationId = (s: import("./stores/appStore.types").AppStore) => s.workspace.activeConversationId;
 const selectFileExplorerOpen = (s: import("./stores/appStore.types").AppStore) => s.ui.fileExplorerOpen;
 const selectPreviewFilePath = (s: import("./stores/appStore.types").AppStore) => s.ui.previewFilePath;
@@ -195,7 +193,6 @@ function ShellHeader({
   const { t } = useTranslation();
   const workspaceMode = useAppStore(selectWorkspaceMode);
   const activeSnapshot = useAppStore(selectActiveSnapshot);
-  const openExportDialog = useAppStore(selectOpenExportDialog);
   const compareActive = activePage === "WORKSPACE" && workspaceMode === "COMPARE";
   const conversationTitle = getConversationDisplayTitle(
     activeSnapshot?.summary.title,
@@ -269,16 +266,6 @@ function ShellHeader({
           <span className="app-status-pill hidden xl:inline-flex">
             {defaultModelName}
           </span>
-        ) : null}
-        {activePage === "WORKSPACE" && activeSnapshot ? (
-          <button
-            type="button"
-            onClick={openExportDialog}
-            className="app-secondary-button gap-2 px-3 py-2 text-xs"
-          >
-            <IconExport size={12} />
-            <span className="hidden sm:inline">{t("common.export")}</span>
-          </button>
         ) : null}
       </div>
     </header>
