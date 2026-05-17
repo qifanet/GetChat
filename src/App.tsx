@@ -647,35 +647,26 @@ function WorkspaceCenter({
 
   if (workspaceMode === "COMPARE") {
     return (
-      <main className="app-panel h-full min-w-0 overflow-hidden rounded-shell bg-white/90">
+      <main className="h-full min-w-0 overflow-hidden rounded-shell bg-white">
         <CompareWorkspace />
       </main>
     );
   }
 
   return (
-    <main className="app-panel flex h-full min-w-0 overflow-hidden rounded-shell bg-white/92">
-      <div className="flex flex-1 flex-col min-w-0">
-        <TopContextBar />
-        <WorkspaceBannerRegion />
-        <div className="relative flex-1 overflow-y-auto">
-          {previewFilePath && fileExplorerOpen ? (
-            <FilePreviewPanel
-              filePath={previewFilePath}
-              onClose={() => setPreviewFilePath(null)}
-            />
-          ) : activeSnapshot ? (
-            <MessageList />
-          ) : (
-            <WorkspaceEmptyState
-              hasConfiguredProviders={hasConfiguredProviders}
-              onCreateConversation={onCreateConversation}
-              onOpenSettings={onOpenSettings}
-            />
-          )}
-        </div>
-        <TodoStatusBar conversationId={activeSnapshot?.summary.id} />
-        <Composer />
+    <main className="flex h-full min-w-0 flex-col overflow-hidden rounded-shell bg-white">
+      <TopContextBar />
+      <WorkspaceBannerRegion />
+      <div className="relative flex-1 overflow-y-auto">
+        {activeSnapshot ? (
+          <MessageList />
+        ) : (
+          <WorkspaceEmptyState
+            hasConfiguredProviders={hasConfiguredProviders}
+            onCreateConversation={onCreateConversation}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
       </div>
       {fileExplorerOpen && (
         <div className="flex w-[260px] shrink-0 flex-col border-l border-miro-border/15 bg-miro-surface-low/50">
