@@ -872,13 +872,15 @@ export function App() {
               ? `fixed inset-y-16 right-3 z-40 w-[min(340px,calc(100vw-24px))] transition-transform duration-200 ${
                   rightPanelCollapsed ? "translate-x-[calc(100%+20px)]" : "translate-x-0"
                 }`
-              : "fixed inset-y-16 right-0 z-10 overflow-hidden transition-[width] duration-200"
+              : `fixed inset-y-16 right-0 z-10 overflow-hidden transition-transform duration-200 ${
+                  rightPanelCollapsed ? "translate-x-full" : "translate-x-0"
+                }`
           }
           style={
             isCompactShell
               ? undefined
               : {
-                  width: rightPanelCollapsed ? 0 : DESKTOP_RIGHT_RAIL_WIDTH_PX,
+                  width: DESKTOP_RIGHT_RAIL_WIDTH_PX,
                 }
           }
         >
