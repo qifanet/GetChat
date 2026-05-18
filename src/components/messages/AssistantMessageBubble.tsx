@@ -385,7 +385,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
         message={message}
         statusText={t("message.generating")}
         footer={footerActions}
-        toneClassName="assistant-message-bubble streaming"
       >
         <StreamingAssistantContent
           requestId={requestId}
