@@ -362,11 +362,26 @@ export function ProviderSettingsScreen({
         setFeedback({ tone: "info", message: t("settings.noModelsFound") });
         return;
       }
-      const newModels = models.map((m: OllamaModelInfo) => ({
-        id: createModelProfileId(),
-        requestName: m.name,
-        displayName: m.name.split(":")[0],
-      }));
+      // Build a lookup map from existing form models by requestName to preserve
+      // their stable IDs. This prevents UNIQUE constraint conflicts when saving
+      // an edited provider whose model names match already-persisted entries.
+      const existingByName = new Map<string, ProviderModelFormState>();
+      for (const m of form.models) {
+        if (m.requestName.trim().length > 0) {
+          existingByName.set(m.requestName.trim(), m);
+        }
+      }
+      const newModels = models.map((m: OllamaModelInfo) => {
+        const existing = existingByName.get(m.name);
+        if (existing) {
+          return existing;
+        }
+        return {
+          id: createModelProfileId(),
+          requestName: m.name,
+          displayName: m.name.split(":")[0],
+        } as ProviderModelFormState;
+      });
       setForm((current) => ({
         ...current,
         models: newModels,
