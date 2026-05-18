@@ -840,13 +840,15 @@ export function App() {
             ? `fixed inset-y-0 left-0 z-40 w-[min(320px,calc(100vw-28px))] transition-transform duration-200 ${
                 leftSidebarCollapsed ? "-translate-x-full" : "translate-x-0"
               }`
-            : "fixed inset-y-0 left-0 z-10 overflow-hidden transition-[width] duration-200"
+            : `fixed inset-y-0 left-0 z-10 overflow-hidden transition-transform duration-200 ${
+                leftSidebarCollapsed ? "-translate-x-full" : "translate-x-0"
+              }`
         }
         style={
           isCompactShell
             ? undefined
             : {
-                width: leftSidebarCollapsed ? 0 : DESKTOP_LEFT_SIDEBAR_WIDTH_PX,
+                width: DESKTOP_LEFT_SIDEBAR_WIDTH_PX,
               }
         }
       >
