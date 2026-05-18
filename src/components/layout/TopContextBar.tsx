@@ -6,8 +6,7 @@
  * long titles, breadcrumbs, and sidebars crush the main reading area.
  */
 import { useTranslation } from "react-i18next";
-import { useCallback, useMemo } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import {
   getModelDisplayName,
   listAvailableModelOptions,
@@ -81,47 +80,30 @@ export function TopContextBar() {
     providerModels,
     t("shell.modelUnset")
   );
-  const handleSetWorkspace = useCallback(async () => {
-    if (!summary?.id) return;
-    const selected = await openDialog({
-      directory: true,
-      multiple: false,
-      title: t("workspaceDir.dirPickerTitle"),
-    });
-    if (!selected) return;
-    const path = typeof selected === "string" ? selected : selected;
-    await tauriCmd.setConversationWorkspace(summary.id, path);
-    useAppStore.setState(
-      (s) => {
-        if (s.activeSnapshot) {
-          s.activeSnapshot.summary.workspacePath = path;
-        }
-        if (s.summariesById[summary.id]) {
-          s.summariesById[summary.id].workspacePath = path;
-        }
-      },
-      undefined,
-      "workspace/dirSet"
-    );
-  }, [summary?.id, t]);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  const handleClearWorkspace = useCallback(async () => {
-    if (!summary?.id) return;
-    await tauriCmd.setConversationWorkspace(summary.id, null);
-    useAppStore.setState(
-      (s) => {
-        if (s.activeSnapshot) {
-          s.activeSnapshot.summary.workspacePath = null;
-        }
-        if (s.summariesById[summary.id]) {
-          s.summariesById[summary.id].workspacePath = null;
-        }
-      },
-      undefined,
-      "workspace/dirClear"
-    );
-  }, [summary?.id]);
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        modelDropdownRef.current &&
+        !modelDropdownRef.current.contains(event.target as Node)
+      ) {
+        setModelDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [modelDropdownOpen]);
 
+  const handleModelSelect = useCallback(
+    (modelId: string | null) => {
+      void setBranchPreferredModel(currentBranchId, modelId);
+      setModelDropdownOpen(false);
+    },
+    [currentBranchId, setBranchPreferredModel]
+  );
   /** Toggle the conversation sidebar while preventing two overlay drawers from overlapping. */
   function handleToggleLeftSidebar(): void {
     const nextCollapsed = !leftCollapsed;
@@ -165,18 +147,67 @@ export function TopContextBar() {
         </div>
         <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
           {currentBranchId ? (
-            <div className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-2.5 py-1.5 shadow-ring">
-              <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary 2xl:inline">
-                {t("shell.currentModel")}
-              </span>
-              <ModelSelector
-                options={availableModelOptions}
-                value={selectedModelId}
-                onChange={(modelId) =>
-                  void setBranchPreferredModel(currentBranchId, modelId)
-                }
-                placeholder={t("shell.modelUnset")}
-              />
+            <div ref={modelDropdownRef} className="relative flex min-w-0 max-w-full items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setModelDropdownOpen((prev) => !prev)}
+                className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-2.5 py-1.5 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                title={currentBranch?.preferredModelId ? currentModelLabel : undefined}
+              >
+                <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary 2xl:inline">
+                  {t("shell.currentModel")}
+                </span>
+                <span className="min-w-[132px] max-w-[220px] truncate">
+                  {currentModelLabel}
+                </span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-miro-text-secondary">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {modelDropdownOpen && (
+                <div
+                  role="listbox"
+                  className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[420px] rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                >
+                  {!selectedModelId && (
+                    <button
+                      role="option"
+                      type="button"
+                      aria-selected
+                      onClick={() => handleModelSelect(null)}
+                      className="flex w-full items-center gap-2 rounded-lg bg-miro-blue-light/65 px-3 py-2 text-left text-sm text-miro-blue transition-colors"
+                    >
+                      {t("shell.modelUnset")}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    </button>
+                  )}
+                  {availableModelOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      role="option"
+                      type="button"
+                      aria-selected={selectedModelId === option.id}
+                      onClick={() => handleModelSelect(option.id)}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                        selectedModelId === option.id
+                          ? "bg-miro-blue-light/65 text-miro-blue"
+                          : "text-miro-text hover:bg-miro-surface-high"
+                      }`}
+                    >
+                      <span className="truncate">
+                        {option.providerName} / {option.displayName}
+                      </span>
+                      {selectedModelId === option.id && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
           {workspaceMode === "COMPARE" ? (
