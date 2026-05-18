@@ -689,24 +689,30 @@ function SidebarEdgeStrip({
 }) {
   const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      onClick={onExpand}
-      title={
-        side === "left"
-          ? t("common.toggleLeftSidebar")
-          : t("common.toggleRightSidebar")
-      }
-      className={`fixed top-[88px] z-20 flex h-16 w-10 items-center justify-center rounded-full bg-white/88 shadow-float transition-colors hover:bg-white ${
-        side === "left" ? "left-3" : "right-3"
+    <div
+      className={`group fixed top-16 bottom-8 z-20 w-12 ${
+        side === "left" ? "left-0" : "right-0"
       }`}
     >
-      {side === "left" ? (
-        <IconChevronRight size={14} className="text-miro-text-secondary" />
-      ) : (
-        <IconChevronLeft size={14} className="text-miro-text-secondary" />
-      )}
-    </button>
+      <button
+        type="button"
+        onClick={onExpand}
+        title={
+          side === "left"
+            ? t("common.toggleLeftSidebar")
+            : t("common.toggleRightSidebar")
+        }
+        className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-white/88 shadow-float opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-white ${
+          side === "left" ? "left-2" : "right-2"
+        }`}
+      >
+        {side === "left" ? (
+          <IconChevronRight size={14} className="text-miro-text-secondary" />
+        ) : (
+          <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        )}
+      </button>
+    </div>
   );
 }
 // ============================================================================
@@ -859,7 +865,7 @@ export function App() {
           onOpenSettings={handleOpenSettings}
         />
       </div>
-      {!isCompactShell && leftSidebarCollapsed && activePage !== "WORKSPACE" ? (
+      {!isCompactShell && leftSidebarCollapsed ? (
         <SidebarEdgeStrip
           side="left"
           onExpand={() => setLeftSidebarCollapsed(false)}
@@ -897,7 +903,7 @@ export function App() {
           </aside>
         </div>
       ) : null}
-      {!isCompactShell && showRightRail && rightPanelCollapsed && activePage !== "WORKSPACE" ? (
+      {!isCompactShell && showRightRail && rightPanelCollapsed ? (
         <SidebarEdgeStrip
           side="right"
           onExpand={() => setRightPanelCollapsed(false)}
