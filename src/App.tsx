@@ -897,7 +897,7 @@ export function App() {
           </aside>
         </div>
       ) : null}
-      {!isCompactShell && showRightRail && rightPanelCollapsed ? (
+      {!isCompactShell && showRightRail && rightPanelCollapsed && activePage !== "WORKSPACE" ? (
         <SidebarEdgeStrip
           side="right"
           onExpand={() => setRightPanelCollapsed(false)}
