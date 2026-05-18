@@ -174,7 +174,7 @@
   }
 
   .app-icon-button {
-    @apply inline-flex items-center justify-center rounded-xl border border-transparent text-miro-text-secondary transition-colors duration-150 hover:bg-miro-surface-low hover:text-miro-text;
+    @apply inline-flex items-center justify-center rounded-xl border border-transparent text-miro-text-secondary transition-colors duration-150 hover:bg-miro-surface-low hover:text-miro-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent;
   }
 
   .app-primary-button {
@@ -188,7 +188,7 @@
   }
 
   .app-secondary-button {
-    @apply inline-flex items-center justify-center rounded-xl border border-transparent bg-miro-surface-high px-4 py-2.5 font-display text-sm font-semibold text-miro-text transition-colors duration-150 hover:bg-miro-surface-highest disabled:cursor-not-allowed disabled:text-miro-text-secondary;
+    @apply inline-flex items-center justify-center rounded-xl border border-miro-border/20 bg-miro-surface-high px-4 py-2.5 font-display text-sm font-semibold text-miro-text transition-colors duration-150 hover:bg-miro-surface-highest disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-miro-surface-high;
   }
 
   .app-tertiary-button {
