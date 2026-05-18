@@ -42,19 +42,7 @@ export function Composer() {
   const menuRef = useRef<HTMLDivElement>(null);
   const submitInFlightRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Slash command state
-  const [slashItems, setSlashItems] = useState<tauriCmd.SlashItemDto[]>([]);
-  const [showSlashMenu, setShowSlashMenu] = useState(false);
-  const [slashFilter, setSlashFilter] = useState("");
-  const [paramDialog, setParamDialog] = useState<{
-    item: tauriCmd.SlashItemDto;
-    variables: string[];
-    values: Record<string, string>;
-  } | null>(null);
-  const [activeSlashItem, setActiveSlashItem] = useState<{
-    item: tauriCmd.SlashItemDto;
-    argsJson: string;
-  } | null>(null);
+  const [scrollable, setScrollable] = useState(false);
   const draft = useAppStore(_select_draft);
   const isSending = useAppStore(_select_isSending);
   const activeRequestId = useAppStore(_select_activeRequestId);
@@ -68,8 +56,15 @@ export function Composer() {
   const activeConversationId = useAppStore(
     (state) => state.workspace.activeConversationId
   );
-  const activeBranchId = useAppStore(
-    (state) => state.workspace.currentBranchId
+
+  // Line height 24px (15px font * 1.6), padding 20px (py-2.5), 6 lines = 164px
+  const MAX_LINES_BEFORE_SCROLL = 6;
+  const LINE_HEIGHT_PX = 24;
+  const PADDING_PX = 20;
+  const MAX_CONTENT_HEIGHT = MAX_LINES_BEFORE_SCROLL * LINE_HEIGHT_PX + PADDING_PX; // 164px
+
+  const hasEnabledProvider = providerOrder.some(
+    (providerId) => providers[providerId]?.enabled
   );
   const [contextStatus, setContextStatus] = useState<tauriCmd.ContextStatusDto | null>(null);
   const [compressing, setCompressing] = useState(false);
@@ -95,6 +90,7 @@ export function Composer() {
       return;
     }
     textareaRef.current.style.height = "34px";
+    setScrollable(false);
   }, [draft]);
   /** Close dropdown on outside clicks. */
   useEffect(() => {
@@ -176,178 +172,36 @@ export function Composer() {
     },
     [handleSend]
   );
-  /** Auto-resize the textarea while keeping the composer height under control.
-   *  Also detect `/` at start for slash command menu. */
+  /** Auto-resize the textarea; enable scrollbar only when content exceeds 6 lines. */
   const handleInput = useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = event.target.value;
       setDraft(value);
       const element = event.target;
       element.style.height = "auto";
-      element.style.height = `${Math.min(element.scrollHeight, 180)}px`;
-
-      // Slash command detection: starts with "/" and no newline before the slash
-      if (value.startsWith("/")) {
-        const query = value.slice(1).split(/\s/)[0] ?? "";
-        if (!showSlashMenu) {
-          tauriCmd.listSlashItems().then(setSlashItems).catch(() => {});
-        }
-        setShowSlashMenu(true);
-        setSlashFilter(query.toLowerCase());
-      } else {
-        setShowSlashMenu(false);
-      }
-    },
-    [setDraft, showSlashMenu]
-  );
-
-  /** Select a slash item — defer rendering to send time. */
-  const handleSelectSlashItem = useCallback(
-    async (item: tauriCmd.SlashItemDto) => {
-      setShowSlashMenu(false);
-      setDraft("");
-
-      let variables: string[] = [];
-      try {
-        const parsed = JSON.parse(item.argumentsJson);
-        if (Array.isArray(parsed)) {
-          variables = parsed.map((v: unknown) =>
-            typeof v === "string" ? v : String(v)
-          );
-        } else if (typeof parsed === "object" && parsed !== null) {
-          variables = (parsed as Array<{ name: string }>).map((a) => a.name);
-        }
-      } catch {
-        // ignore
-      }
-
-      if (variables.length > 0) {
-        const initialValues: Record<string, string> = {};
-        variables.forEach((v) => {
-          initialValues[v] = "";
-        });
-        setParamDialog({ item, variables, values: initialValues });
-      } else {
-        setActiveSlashItem({ item, argsJson: "{}" });
-      }
+      const newHeight = Math.min(element.scrollHeight, MAX_CONTENT_HEIGHT);
+      element.style.height = `${newHeight}px`;
+      setScrollable(element.scrollHeight > MAX_CONTENT_HEIGHT);
     },
     [setDraft]
   );
 
-  /** Submit the parameter dialog and activate deferred slash rendering. */
-  const handleParamSubmit = useCallback(async () => {
-    if (!paramDialog) return;
-    const { item, values } = paramDialog;
-    setActiveSlashItem({ item, argsJson: JSON.stringify(values) });
-    setParamDialog(null);
-  }, [paramDialog]);
-  /** Refetch context status from backend immediately. */
-  const refreshContextStatus = useCallback(() => {
-    if (!activeConversationId || !activeBranchId || !selectedModelId) return;
-    tauriCmd
-      .getContextStatus(activeConversationId, activeBranchId, selectedModelId)
-      .then(setContextStatus)
-      .catch(() => {});
-  }, [activeConversationId, activeBranchId, selectedModelId]);
-
-  /** Poll context status periodically. Uses 5s interval during active streaming, 30s when idle. */
-  useEffect(() => {
-    if (!activeConversationId || !activeBranchId || !selectedModelId) return;
-    let cancelled = false;
-    const interval = isSending ? 5_000 : 30_000;
-    const poll = () => {
-      if (cancelled) return;
-      tauriCmd
-        .getContextStatus(activeConversationId, activeBranchId, selectedModelId)
-        .then(setContextStatus)
-        .catch(() => {});
-      timer = window.setTimeout(poll, interval);
-    };
-    let timer: ReturnType<typeof setTimeout>;
-    poll();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [activeConversationId, activeBranchId, selectedModelId, isSending]);
-
-  /** Re-fetch context status immediately when a stream completes. */
-  const prevSendingRef = useRef(isSending);
-  useEffect(() => {
-    if (prevSendingRef.current && !isSending) {
-      refreshContextStatus();
-    }
-    prevSendingRef.current = isSending;
-  }, [isSending, refreshContextStatus]);
-
-  /** Re-fetch context status when mid-loop compression completes (CONTEXT_COMPRESSED SSE event). */
-  const streamSession = useStreamStore((s) =>
-    activeRequestId ? s.sessionsByRequestId[activeRequestId] : undefined
+  /** Prevent wheel events from bubbling to the message list when textarea is scrollable. */
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLTextAreaElement>) => {
+      if (scrollable) {
+        event.stopPropagation();
+      }
+    },
+    [scrollable]
   );
-  useEffect(() => {
-    if (streamSession?.contextCompressed) {
-      refreshContextStatus();
-    }
-  }, [streamSession?.contextCompressed, refreshContextStatus]);
-
-  /** Post-stream async compaction (opencode-style): trigger background compression
-   *  after a stream completes if context usage is high. The result takes effect on
-   *  the NEXT conversation turn, not the current one. */
-  const POST_STREAM_COMPRESSION_THRESHOLD = 75;
-  useEffect(() => {
-    if (prevSendingRef.current && !isSending) {
-      if (activeConversationId && activeBranchId && selectedModelId) {
-        tauriCmd.getContextStatus(activeConversationId, activeBranchId, selectedModelId)
-          .then((status) => {
-            const pct = status.rawPercentage ?? status.percentage;
-            if (pct >= POST_STREAM_COMPRESSION_THRESHOLD) {
-              console.info(
-                `[context] post-stream async compression: usage=${pct}% >= ${POST_STREAM_COMPRESSION_THRESHOLD}%`
-              );
-              tauriCmd.compressContext(activeConversationId, activeBranchId, selectedModelId)
-                .then((result) => {
-                  if (result.skipped) {
-                    console.info("[context] post-stream compression skipped", result.skipReason);
-                  } else {
-                    console.info(
-                      `[context] post-stream compression done: ${result.compressedMessageCount} messages, ~${result.estimatedTokens} tokens`
-                    );
-                  }
-                  refreshContextStatus();
-                })
-                .catch((err) => {
-                  console.warn("[context] post-stream compression failed (non-critical)", err);
-                });
-            }
-          })
-          .catch(() => { /* status fetch failed, ignore */ });
-      }
-    }
-  }, [isSending, activeConversationId, activeBranchId, selectedModelId, refreshContextStatus]);
-
-  async function handleCompress() {
-    if (!activeConversationId || !activeBranchId || !selectedModelId) return;
-    setCompressing(true);
-    try {
-      const result = await tauriCmd.compressContext(activeConversationId, activeBranchId, selectedModelId);
-      if (result.skipped) {
-        console.info("[composer] context compression skipped", result.skipReason ?? "NO_COMPRESSIBLE_CONTENT");
-      }
-      refreshContextStatus();
-    } catch (err) {
-      console.error("[composer] compress failed:", err);
-    } finally {
-      setCompressing(false);
-    }
-  }
-
   if (!activeConversationId || workspaceMode === "COMPARE") {
     return null;
   }
   return (
     <div className="shrink-0 border-t border-miro-border/10 bg-white/60 px-3 py-2.5 sm:px-4">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-end gap-2">
+        <div className="flex min-h-[44px] items-stretch gap-2">
           {/* Branch mode indicator */}
           {isBranchMode && (
             <div
@@ -357,15 +211,24 @@ export function Composer() {
               <span className="h-2 w-2 rounded-full bg-miro-blue" />
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            placeholder={disabledReason ?? t("composer.placeholder")}
-            rows={1}
-            className="min-h-[44px] max-h-[180px] flex-1 resize-none rounded-[20px] border border-miro-border/15 bg-white px-4 py-2.5 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder shadow-ring focus:outline-none focus:ring-4 focus:ring-miro-blue/10"
-          />
+          <div className="flex-1 min-h-[44px] overflow-hidden rounded-[20px] bg-white shadow-ring">
+            <div className="w-[calc(100%-6px)]">
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={handleInput}
+              onWheel={handleWheel}
+              onKeyDown={handleKeyDown}
+              placeholder={disabledReason ?? t("composer.placeholder")}
+              rows={1}
+              className={`min-h-[44px] w-full resize-none border-none bg-transparent px-4 pt-3 pb-2.5 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none focus:ring-0 ${
+                scrollable
+                  ? "overflow-y-auto composer-scrollbar"
+                  : "overflow-hidden"
+              }`}
+            />
+            </div>
+          </div>
           {isSending ? (
             <button
               type="button"

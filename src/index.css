@@ -464,4 +464,20 @@
   .markdown-content tbody tr:last-child td {
     border-bottom: none;
   }
+
+  /* Composer textarea scrollbar — confined within rounded corners */
+  .composer-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .composer-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 8px 0;
+  }
+  .composer-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(96, 121, 183, 0.45);
+    border-radius: 999px;
+  }
+  .composer-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(55, 85, 195, 0.65);
+  }
 }
