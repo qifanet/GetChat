@@ -857,7 +857,7 @@ export function App() {
           onOpenSettings={handleOpenSettings}
         />
       </div>
-      {!isCompactShell && leftSidebarCollapsed ? (
+      {!isCompactShell && leftSidebarCollapsed && activePage !== "WORKSPACE" ? (
         <SidebarEdgeStrip
           side="left"
           onExpand={() => setLeftSidebarCollapsed(false)}
