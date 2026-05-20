@@ -50,7 +50,7 @@ Let the AI call tools and external services during a conversation. Connect any M
 
 ### Skills System
 
-Customize AI behavior with Skills. Import skill directories containing prompts, plugins, and scripts. Trigger skills with slash commands in the composer. Your AI assistant adapts to your workflow.
+Customize AI behavior with Skills. Import skill directories containing prompt templates with optional tool bindings and resources. Trigger skills with slash commands in the composer. Your AI assistant adapts to your workflow.
 
 ### Context Management
 
