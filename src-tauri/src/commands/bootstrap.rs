@@ -15,6 +15,7 @@ use tauri::State;
 use crate::dto::settings::{ProviderDto, ProviderModelDto};
 use crate::error::AppError;
 use crate::repositories::{app_kv, provider_models, providers};
+use crate::services::system_prompt_service;
 use crate::state::AppState;
 
 // ============================================================================
@@ -37,6 +38,7 @@ pub struct BootstrapResult {
     pub providers: Vec<ProviderDto>,
     pub default_model_id: Option<String>,
     pub helper_model_id: Option<String>,
+    pub system_prompt: String,
 }
 
 // ============================================================================
@@ -45,6 +47,9 @@ pub struct BootstrapResult {
 
 fn parse_provider_type(s: &str) -> crate::dto::common::ProviderType {
     match s {
+        "DEEPSEEK" => crate::dto::common::ProviderType::DeepSeek,
+        "OPENROUTER" => crate::dto::common::ProviderType::OpenRouter,
+        "GROQ" => crate::dto::common::ProviderType::Groq,
         "OLLAMA" => crate::dto::common::ProviderType::Ollama,
         _ => crate::dto::common::ProviderType::OpenaiCompatible,
     }
@@ -56,6 +61,7 @@ fn map_provider_model_row(row: provider_models::ProviderModelRow) -> ProviderMod
         provider_id: row.provider_id,
         request_name: row.request_name,
         display_name: row.display_name,
+        context_window_kb: row.context_window_kb,
         created_at: row.created_at * 1000,
         updated_at: row.updated_at * 1000,
     }
@@ -138,6 +144,9 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
         .flatten()
         .and_then(|v| serde_json::from_str::<String>(&v).ok());
 
+    // Load the app-wide system prompt used as the first stable prompt prefix.
+    let system_prompt = system_prompt_service::get_system_prompt(&state.db).await?;
+
     let duration_ms = start.elapsed().as_millis() as u64;
     tracing::info!(
         cmd = "bootstrap_app",
@@ -145,6 +154,7 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
         providers_count = provider_dtos.len(),
         has_default_model = default_model_id.is_some(),
         has_helper_model = helper_model_id.is_some(),
+        system_prompt_chars = system_prompt.chars().count(),
         repaired_count = repair_result.repaired_count,
         duration_ms,
         "ok"
@@ -155,6 +165,7 @@ pub async fn bootstrap_app(state: State<'_, AppState>) -> Result<BootstrapResult
         providers: provider_dtos,
         default_model_id,
         helper_model_id,
+        system_prompt,
     })
 }
 

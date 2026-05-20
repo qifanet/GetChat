@@ -503,6 +503,7 @@ describe("completeAssistantMessage", () => {
 
     const input = {
       messageId: "msg-2",
+      requestId: "req-2",
       contentText: "Hello! How can I help?",
       usage: { promptTokens: 10, completionTokens: 20 },
     };
@@ -529,6 +530,7 @@ describe("failAssistantMessage", () => {
 
     const input = {
       messageId: "msg-2",
+      requestId: "req-2",
       errorCode: "RATE_LIMIT",
       errorMessage: "Too many requests",
       errorRetriable: true,
@@ -736,8 +738,8 @@ describe("command name contract", () => {
     try { await createUserMessage({ conversationId: "x", branchId: "y", contentText: "" }); } catch {}
     try { await createAssistantPlaceholderForBranch({ conversationId: "x", branchId: "y", providerId: "p", modelId: "m", requestId: "r" }); } catch {}
     try { await createAssistantVariantPlaceholder({ conversationId: "x", parentMessageId: "m", providerId: "p", modelId: "m", requestId: "r" }); } catch {}
-    try { await completeAssistantMessage({ messageId: "x", contentText: "" }); } catch {}
-    try { await failAssistantMessage({ messageId: "x", errorCode: "", errorMessage: "", errorRetriable: false }); } catch {}
+    try { await completeAssistantMessage({ messageId: "x", requestId: "r", contentText: "" }); } catch {}
+    try { await failAssistantMessage({ messageId: "x", requestId: "r", errorCode: "", errorMessage: "", errorRetriable: false }); } catch {}
     try { await buildPromptMessages({ conversationId: "x", upToMessageId: "y" }); } catch {}
     try { await startModelStream({ requestId: "r", providerId: "p", modelId: "m", promptMessages: [] }, () => undefined); } catch {}
     try { await abortModelStream("r"); } catch {}

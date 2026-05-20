@@ -113,9 +113,9 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
       const msg = activeSnapshot.entities.messages[messageId];
       if (!msg || msg.status === "STREAMING") return;
       try {
-        await useAppStore.getState().deleteMessageHard(messageId);
+        await useAppStore.getState().deleteAssistantVariantMessage(messageId);
       } catch (err) {
-        console.error("[variant] Hard delete failed:", err);
+        console.error("[variant] Assistant variant delete failed:", err);
       }
     },
     [activeSnapshot]

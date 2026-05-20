@@ -31,11 +31,11 @@ import {
   type CreateBranchInput,
   type BranchEntity,
   type RenameBranchInput,
-  type SetBranchHeadMessageInput,
   type SetBranchPreferredModelInput,
   type SetMainlineBranchInput,
   type SetMainlineResult,
   type CreateUserMessageInput,
+  type DirectOverwriteUserMessageInput,
   type MessageNode,
   type CreateAssistantPlaceholderForBranchInput,
   type CreateAssistantVariantPlaceholderInput,
@@ -44,6 +44,7 @@ import {
   type BuildPromptMessagesInput,
   type PromptMessage,
   type InvariantCheckResult,
+  type ToolDefinitionDto,
 } from "./tauriTypes";
 import {
   abortBrowserDebugModelStream,
@@ -142,6 +143,16 @@ export async function setHelperModel(modelId: string | null): Promise<void> {
   return executeCommand<void>("set_helper_model", { modelId });
 }
 
+/** Get the app-wide system prompt used as the first prompt prefix. */
+export async function getSystemPrompt(): Promise<string> {
+  return executeCommand<string>("get_system_prompt");
+}
+
+/** Save the app-wide system prompt and return the normalized value. */
+export async function setSystemPrompt(prompt: string): Promise<string> {
+  return executeCommand<string>("set_system_prompt", { prompt });
+}
+
 // ============================================================================
 // Provider Commands
 // ============================================================================
@@ -235,10 +246,31 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 /** Auto-generate a conversation title using the helper AI model */
 export async function generateConversationTitle(
   conversationId: string
-): Promise<{ title: string } | null> {
-  return executeCommand<{ title: string } | null>("generate_conversation_title", {
+): Promise<{ title: string | null; skipReason: string | null } | null> {
+  return executeCommand<{ title: string | null; skipReason: string | null } | null>("generate_conversation_title", {
     conversationId,
   });
+}
+
+/** Set or clear the workspace directory path for file-system tools */
+export async function setConversationWorkspace(
+  conversationId: string,
+  workspacePath: string | null
+): Promise<void> {
+  return executeCommand<void>("set_conversation_workspace", {
+    conversationId,
+    workspacePath,
+  });
+}
+
+export interface TodoItemResult {
+  id: string;
+  content: string;
+  status: string;
+}
+
+export async function readTodoItems(conversationId?: string): Promise<TodoItemResult[]> {
+  return executeCommand<TodoItemResult[]>("read_todo_items", { conversationId });
 }
 
 // ============================================================================
@@ -262,13 +294,6 @@ export async function setBranchPreferredModel(
   return executeCommand<BranchEntity>("set_branch_preferred_model", { input });
 }
 
-/** Promote an existing message to the current branch head. */
-export async function setBranchHeadMessage(
-  input: SetBranchHeadMessageInput
-): Promise<BranchEntity> {
-  return executeCommand<BranchEntity>("set_branch_head_message", { input });
-}
-
 /** Archive a branch (cannot archive the mainline branch). Returns the updated branch DTO. */
 export async function archiveBranch(branchId: string): Promise<BranchEntity> {
   return executeCommand<BranchEntity>("archive_branch", { branchId });
@@ -277,6 +302,16 @@ export async function archiveBranch(branchId: string): Promise<BranchEntity> {
 /** Unarchive a branch. Returns the updated branch DTO. */
 export async function unarchiveBranch(branchId: string): Promise<BranchEntity> {
   return executeCommand<BranchEntity>("unarchive_branch", { branchId });
+}
+
+export interface DeleteBranchResult {
+  deletedBranchIds: string[];
+  deletedMessageIds: string[];
+  conversationId: string;
+}
+
+export async function deleteBranch(branchId: string): Promise<DeleteBranchResult> {
+  return executeCommand<DeleteBranchResult>("delete_branch", { branchId });
 }
 
 /** Set the mainline branch (only ACTIVE branches allowed). Returns result with IDs for isMainline update. */
@@ -295,6 +330,13 @@ export async function createUserMessage(
   input: CreateUserMessageInput
 ): Promise<MessageNode> {
   return executeCommand<MessageNode>("create_user_message", { input });
+}
+
+/** Explicit destructive history-edit exception: mutate a USER node in place. */
+export async function directOverwriteUserMessage(
+  input: DirectOverwriteUserMessageInput
+): Promise<MessageNode> {
+  return executeCommand<MessageNode>("direct_overwrite_user_message", { input });
 }
 
 /** Create a STREAMING assistant placeholder (appended to branch head) */
@@ -338,20 +380,9 @@ export async function buildPromptMessages(
 
 // ============================================================================
 // Runtime Streaming Commands
-/** Hard delete a variant/candidate assistant message */
-export async function deleteMessage(messageId: string): Promise<void> {
-  return executeCommand<void>("delete_message", { messageId });
-}
-
-/** Edit a user message inline — replaces content, deletes assistant children */
-export async function editUserMessageInline(
-  messageId: string,
-  newContent: string
-): Promise<MessageNode> {
-  return executeCommand<MessageNode>("edit_user_message_inline", {
-    messageId,
-    newContent,
-  });
+/** Delete a non-head leaf assistant variant. */
+export async function deleteAssistantVariantMessage(messageId: string): Promise<void> {
+  return executeCommand<void>("delete_assistant_variant_message", { messageId });
 }
 
 export interface SearchMessagesInput {
@@ -394,6 +425,14 @@ export async function generateBranchDiffSummary(
 
 // ============================================================================
 
+/** Fetch all enabled tool definitions from the backend executor registry. */
+export async function getEnabledToolDefinitions(): Promise<ToolDefinitionDto[]> {
+  if (shouldUseBrowserDebugRuntime()) {
+    return [];
+  }
+  return cmd(invoke<ToolDefinitionDto[]>("get_enabled_tool_definitions"), "get_enabled_tool_definitions");
+}
+
 /**
  * Start a provider-backed model stream and forward normalized events through a
  * Tauri Channel.
@@ -419,6 +458,166 @@ export async function abortModelStream(requestId: string): Promise<void> {
   return cmd(invoke("abort_model_stream", { requestId }), "abort_model_stream");
 }
 
+/** Approve or reject a pending destructive tool action. */
+export async function approveToolAction(
+  approvalId: string,
+  approved: boolean
+): Promise<boolean> {
+  return executeCommand<boolean>("approve_tool_action", {
+    approvalId,
+    approved,
+  });
+}
+
+export interface ToolSettingsDto {
+  max_iterations: number;
+  max_consecutive_failures: number;
+  approval_timeout_secs: number;
+}
+
+export async function getToolSettings(): Promise<ToolSettingsDto> {
+  return executeCommand<ToolSettingsDto>("get_tool_settings");
+}
+
+export async function updateToolSettings(params: {
+  max_iterations?: number;
+  max_consecutive_failures?: number;
+  approval_timeout_secs?: number;
+}): Promise<ToolSettingsDto> {
+  // Tauri v2 expects camelCase parameter names from JS
+  const camelParams: Record<string, unknown> = {};
+  if (params.max_iterations !== undefined) camelParams.maxIterations = params.max_iterations;
+  if (params.max_consecutive_failures !== undefined) camelParams.maxConsecutiveFailures = params.max_consecutive_failures;
+  if (params.approval_timeout_secs !== undefined) camelParams.approvalTimeoutSecs = params.approval_timeout_secs;
+  return executeCommand<ToolSettingsDto>("update_tool_settings", camelParams);
+}
+
+export interface ToolStateDto {
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
+export async function getBuiltinToolStates(): Promise<ToolStateDto[]> {
+  return executeCommand<ToolStateDto[]>("get_builtin_tool_states");
+}
+
+export async function setBuiltinToolEnabled(
+  name: string,
+  enabled: boolean
+): Promise<boolean> {
+  return executeCommand<boolean>("set_builtin_tool_enabled", { name, enabled });
+}
+
+// ============================================================================
+// MCP Server Management Commands
+// ============================================================================
+
+export interface McpServerConfig {
+  transport?: "stdio" | "streamable_http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export interface McpToolDto {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface McpServerStateDto {
+  name: string;
+  transport: "stdio" | "streamable_http" | "sse";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url: string;
+  headers: Record<string, string>;
+  status: string;
+  enabled: boolean;
+  tools: McpToolDto[];
+}
+
+export interface AddMcpServerInput {
+  name: string;
+  config: McpServerConfig;
+}
+
+export async function listMcpServers(): Promise<McpServerStateDto[]> {
+  return executeCommand<McpServerStateDto[]>("list_mcp_servers");
+}
+
+export async function addMcpServer(input: AddMcpServerInput): Promise<void> {
+  return executeCommand<void>("add_mcp_server", { input });
+}
+
+export async function removeMcpServer(name: string): Promise<void> {
+  return executeCommand<void>("remove_mcp_server", { name });
+}
+
+export async function setMcpServerEnabled(
+  name: string,
+  enabled: boolean
+): Promise<boolean> {
+  return executeCommand<boolean>("set_mcp_server_enabled", { name, enabled });
+}
+
+export interface ContextTokenBreakdownDto {
+  systemTokens: number;
+  toolPromptTokens: number;
+  userTokens: number;
+  assistantTokens: number;
+  toolTokens: number;
+  compressedContextTokens: number;
+  skillPromptTokens: number;
+}
+
+export interface ContextStatusDto {
+  usedTokens: number;
+  totalTokens: number;
+  percentage: number;
+  messageCount: number;
+  breakdown: ContextTokenBreakdownDto;
+}
+
+export async function getContextStatus(
+  conversationId: string,
+  branchId: string,
+  modelId: string
+): Promise<ContextStatusDto> {
+  return executeCommand<ContextStatusDto>("get_context_status", {
+    conversationId,
+    branchId,
+    modelId,
+  });
+}
+
+export interface CompressContextResult {
+  compressedId: string;
+  summaryText: string;
+  compressedMessageCount: number;
+  estimatedTokens: number;
+}
+
+export async function compressContext(
+  conversationId: string,
+  branchId: string,
+  modelId: string
+): Promise<CompressContextResult> {
+  return executeCommand<CompressContextResult>("compress_context", {
+    conversationId,
+    branchId,
+    modelId,
+  });
+}
+
+export async function getMcpToolDefinitions(): Promise<ToolDefinitionDto[]> {
+  return executeCommand<ToolDefinitionDto[]>("get_mcp_tool_definitions");
+}
+
 // ============================================================================
 // Debug Commands — Dev-only, not for production UI
 // ============================================================================
@@ -426,4 +625,99 @@ export async function abortModelStream(requestId: string): Promise<void> {
 /** Run all database invariant checks. Returns structured violation report. */
 export async function checkDbInvariants(): Promise<InvariantCheckResult> {
   return executeCommand<InvariantCheckResult>("check_db_invariants");
+}
+
+// ============================================================================
+// Skills Commands
+// ============================================================================
+
+export interface SkillDto {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  triggerType: string;
+  promptTemplate: string;
+  variablesJson: string;
+  boundToolsJson: string;
+  scope: string;
+  sourceType: string;
+  enabled: boolean;
+}
+
+export interface CreateSkillInput {
+  name: string;
+  displayName: string;
+  description: string;
+  triggerType: string;
+  promptTemplate: string;
+  variablesJson?: string;
+  boundToolsJson?: string;
+}
+
+export interface SlashItemDto {
+  itemType: string;
+  name: string;
+  displayName: string;
+  description: string;
+  argumentsJson: string;
+  serverName?: string;
+}
+
+export async function listSkills(): Promise<SkillDto[]> {
+  return executeCommand<SkillDto[]>("list_skills");
+}
+
+export async function createSkill(input: CreateSkillInput): Promise<SkillDto> {
+  return executeCommand<SkillDto>("create_skill", { input });
+}
+
+export async function updateSkill(input: CreateSkillInput): Promise<SkillDto> {
+  return executeCommand<SkillDto>("update_skill", { input });
+}
+
+export async function deleteSkill(id: string): Promise<void> {
+  return executeCommand<void>("delete_skill", { id });
+}
+
+export async function setSkillEnabled(
+  id: string,
+  enabled: boolean
+): Promise<boolean> {
+  return executeCommand<boolean>("set_skill_enabled", { id, enabled });
+}
+
+export async function listSlashItems(): Promise<SlashItemDto[]> {
+  return executeCommand<SlashItemDto[]>("list_slash_items");
+}
+
+export async function executeSkill(
+  name: string,
+  argumentsJson: string
+): Promise<string> {
+  return executeCommand<string>("execute_skill", { name, argumentsJson });
+}
+
+export async function executeMcpPrompt(
+  serverName: string,
+  promptName: string,
+  argumentsJson: string
+): Promise<string> {
+  return executeCommand<string>("execute_mcp_prompt", {
+    serverName,
+    promptName,
+    argumentsJson,
+  });
+}
+
+export async function getSkillsDirectory(): Promise<string> {
+  return executeCommand<string>("get_skills_directory");
+}
+
+export async function importSkill(sourcePath: string): Promise<void> {
+  return executeCommand<void>("import_skill", { sourcePath });
+}
+
+export async function refreshSkillsFromDisk(): Promise<void> {
+  return executeCommand<void>("refresh_skills_from_disk");
 }

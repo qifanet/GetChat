@@ -4,20 +4,24 @@
  *
  * Primary actions: Copy, Regenerate (icon buttons on hover).
  * Secondary actions: Continue from here (more menu).
- * Special action: Apply to current branch (blue highlight button).
  */
 
 import { useTranslation } from "react-i18next";
 import { memo, useState, type ReactNode } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { useStreamStore } from "../../stores/useStreamStore";
 import { getModelDisplayName } from "../../features/models/modelUtils";
 import { resolveProviderIdForModel } from "../../features/composer/sendMessageAction";
 import { startAssistantVariantStream } from "../../services/streamController";
 import * as tauriCmd from "../../services/tauriCommands";
 import { copyTextToClipboard } from "../../utils/clipboard";
 import { useStreamingMessage } from "../../hooks/useStreamingMessage";
+import { useStreamingToolCalls } from "../../hooks/useStreamingToolCalls";
 import { StreamingAssistantContent } from "./StreamingAssistantContent";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { ToolCallChain } from "./ToolCallChain";
+import { ContentBlockRenderer } from "./ContentBlockRenderer";
+import { ToolApprovalCard } from "./ToolApprovalCard";
 import { IconCopy, IconCheck, IconRefresh, IconBranch } from "../common/Icon";
 import {
   MessageActionToolbar,
@@ -30,9 +34,7 @@ const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) 
 const _sel_workspace_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
 const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
 const _sel_composer_isSending = (s: import("../../stores/appStore.types").AppStore) => s.composer.isSending;
-const _sel_setVariantPreview = (s: import("../../stores/appStore.types").AppStore) => s.setVariantPreview;
 const _sel_startHistoryFork = (s: import("../../stores/appStore.types").AppStore) => s.startHistoryFork;
-const _sel_setBranchHeadMessage = (s: import("../../stores/appStore.types").AppStore) => s.setBranchHeadMessage;
 
 interface AssistantMessageBubbleProps {
   message: MessageNode;
@@ -113,13 +115,7 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
     message.parentId ? state.activeSnapshot?.entities.messages[message.parentId] ?? null : null
   );
   const isSending = useAppStore(_sel_composer_isSending);
-  const setVariantPreview = useAppStore(_sel_setVariantPreview);
   const startHistoryFork = useAppStore(_sel_startHistoryFork);
-  const setBranchHeadMessage = useAppStore(_sel_setBranchHeadMessage);
-  const currentBranchHeadMessageId = useAppStore((state) => {
-    const branchId = state.workspace.currentBranchId;
-    return branchId ? state.activeSnapshot?.entities.branches[branchId]?.headMessageId ?? null : null;
-  });
 
   const [copied, setCopied] = useState(false);
 
@@ -135,9 +131,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       !isStreaming &&
       !isSending
   );
-  const canPromoteToCurrentPath =
-    Boolean(currentBranchId) && currentBranchHeadMessageId !== message.id;
-
   async function handleCopy(): Promise<void> {
     await copyTextToClipboard(message.content.text);
     setCopied(true);
@@ -151,12 +144,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       sourceBranchId: currentBranchId,
       sourceMessageId: message.id,
     });
-  }
-
-  async function handleApplyToCurrentPath(): Promise<void> {
-    if (!currentBranchId) return;
-    await setBranchHeadMessage(currentBranchId, message.id);
-    setVariantPreview(null);
   }
 
   async function handleRegenerate(): Promise<void> {
@@ -183,7 +170,6 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
       promptMessages,
       generationParams: { ...state.composer.params },
       hasDownstreamConflict,
-      promoteOnComplete: !hasDownstreamConflict,
       rendererMode: "DOM_TEXT",
     });
   }
@@ -212,17 +198,26 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
           onClick={() => void handleRegenerate()}
         />
       ) : null}
-      {canPromoteToCurrentPath ? (
-        <MessageActionButton
-          icon={<IconCheck size={14} />}
-          label={t("message.applyToCurrentBranch")}
-          onClick={() => void handleApplyToCurrentPath()}
-          highlight
-        />
-      ) : null}
       <MessageActionMoreMenu items={moreMenuItems} />
     </MessageActionToolbar>
   ) : null;
+
+  // Tool calls section rendered after markdown content
+  const persistedToolCallSection =
+    message.toolCalls && message.toolCalls.length > 0 ? (
+      <ToolCallChain toolCalls={message.toolCalls} />
+    ) : null;
+
+  // During streaming, get tool calls from runtime registry
+  const streamingToolCalls = useStreamingToolCalls(isStreaming ? requestId : null);
+  const streamingToolCallSection = streamingToolCalls.length > 0 ? (
+    <ToolCallChain toolCalls={streamingToolCalls} />
+  ) : null;
+
+  // Pending tool approval — read at top level (hooks can't be conditional)
+  const pendingApproval = useStreamStore(
+    (s) => (isStreaming && requestId ? s.sessionsByRequestId[requestId]?.pendingApproval : undefined)
+  );
 
   if (isStreaming && requestId) {
     return (
@@ -236,9 +231,27 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
           requestId={requestId}
           rendererMode={rendererMode}
         />
+        {streamingToolCallSection}
+        {pendingApproval ? (
+          <ToolApprovalCard
+            requestId={requestId}
+            approvalId={pendingApproval.approvalId}
+            functionName={pendingApproval.functionName}
+            description={pendingApproval.description}
+            timeoutSecs={pendingApproval.timeoutSecs}
+            receivedAt={pendingApproval.receivedAt}
+          />
+        ) : null}
       </AssistantMessageFrame>
     );
   }
+
+  // Determine if we should use block-level rendering (inline tool display)
+  const hasContentBlocks = message.content.blocks && message.content.blocks.length > 0 &&
+    message.content.blocks.some(b => b.type !== "text");
+  const blockContent = hasContentBlocks && message.content.blocks ? (
+    <ContentBlockRenderer blocks={message.content.blocks} />
+  ) : null;
 
   if (isUserCancelled) {
     return (
@@ -248,7 +261,8 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
         footer={footerActions}
         toneClassName="assistant-message-bubble aborted"
       >
-        <MarkdownRenderer content={message.content.text} />
+        {blockContent ?? <MarkdownRenderer content={message.content.text} />}
+        {blockContent ? null : persistedToolCallSection}
       </AssistantMessageFrame>
     );
   }
@@ -273,7 +287,8 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
           ) : null
         }
       >
-        <MarkdownRenderer content={message.content.text} />
+        {blockContent ?? <MarkdownRenderer content={message.content.text} />}
+        {blockContent ? null : persistedToolCallSection}
       </AssistantMessageFrame>
     );
   }
@@ -286,14 +301,16 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
         footer={footerActions}
         toneClassName="assistant-message-bubble aborted"
       >
-        <MarkdownRenderer content={message.content.text} />
+        {blockContent ?? <MarkdownRenderer content={message.content.text} />}
+        {blockContent ? null : persistedToolCallSection}
       </AssistantMessageFrame>
     );
   }
 
   return (
     <AssistantMessageFrame message={message} footer={footerActions}>
-      <MarkdownRenderer content={message.content.text} />
+      {blockContent ?? <MarkdownRenderer content={message.content.text} />}
+      {blockContent ? null : persistedToolCallSection}
     </AssistantMessageFrame>
   );
 });

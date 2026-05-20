@@ -20,6 +20,7 @@ use crate::dto::settings::{
 };
 use crate::error::AppError;
 use crate::repositories::{provider_models, providers};
+use crate::services::system_prompt_service;
 use crate::state::AppState;
 
 // ============================================================================
@@ -34,6 +35,11 @@ struct NormalizedProviderModelInput {
     id: String,
     request_name: String,
     display_name: String,
+    context_window_kb: i32,
+}
+
+fn normalize_context_window_kb(value: Option<i32>) -> i32 {
+    value.unwrap_or(64).clamp(1, 2048)
 }
 
 /** Normalize provider base URLs so probe endpoints can be appended safely. */
@@ -96,6 +102,7 @@ fn map_provider_model_row(row: provider_models::ProviderModelRow) -> ProviderMod
         provider_id: row.provider_id,
         request_name: row.request_name,
         display_name: row.display_name,
+        context_window_kb: row.context_window_kb,
         created_at: row.created_at * 1000,
         updated_at: row.updated_at * 1000,
     }
@@ -125,6 +132,7 @@ fn normalize_provider_models(
                 id: None,
                 request_name: legacy_name.to_string(),
                 display_name: legacy_name.to_string(),
+                context_window_kb: None,
             })
             .into_iter()
             .collect()
@@ -184,6 +192,7 @@ fn normalize_provider_models(
             id,
             request_name,
             display_name,
+            context_window_kb: normalize_context_window_kb(model.context_window_kb),
         });
     }
 
@@ -263,6 +272,7 @@ async fn sync_provider_models(
                 &model.id,
                 &model.request_name,
                 &model.display_name,
+                model.context_window_kb,
             )
             .await?;
         } else {
@@ -272,6 +282,7 @@ async fn sync_provider_models(
                 provider_id,
                 &model.request_name,
                 &model.display_name,
+                model.context_window_kb,
             )
             .await?;
         }
@@ -292,6 +303,9 @@ fn map_provider_row_to_dto(
     ProviderDto {
         id: row.id.clone(),
         provider_type: match row.r#type.as_str() {
+            "DEEPSEEK" => ProviderType::DeepSeek,
+            "OPENROUTER" => ProviderType::OpenRouter,
+            "GROQ" => ProviderType::Groq,
             "OLLAMA" => ProviderType::Ollama,
             _ => ProviderType::OpenaiCompatible,
         },
@@ -325,6 +339,21 @@ pub async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderDt
     Ok(dtos)
 }
 
+/** Read the application-level system prompt used as the first prompt prefix. */
+#[tauri::command]
+pub async fn get_system_prompt(state: State<'_, AppState>) -> Result<String, AppError> {
+    system_prompt_service::get_system_prompt(&state.db).await
+}
+
+/** Save the application-level system prompt and return the normalized value. */
+#[tauri::command]
+pub async fn set_system_prompt(
+    state: State<'_, AppState>,
+    prompt: String,
+) -> Result<String, AppError> {
+    system_prompt_service::set_system_prompt(&state.db, &prompt).await
+}
+
 /**
  * Save (create or update) a provider configuration.
  *
@@ -340,6 +369,9 @@ pub async fn save_provider(
 ) -> Result<ProviderDto, AppError> {
     let provider_type_str = match input.provider_type {
         ProviderType::OpenaiCompatible => "OPENAI_COMPATIBLE",
+        ProviderType::DeepSeek => "DEEPSEEK",
+        ProviderType::OpenRouter => "OPENROUTER",
+        ProviderType::Groq => "GROQ",
         ProviderType::Ollama => "OLLAMA",
     };
     let normalized_models = normalize_provider_models(&input)?;

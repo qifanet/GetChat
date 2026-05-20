@@ -121,7 +121,7 @@
   }
 
   .app-panel {
-    @apply bg-miro-card;
+    @apply bg-miro-card max-w-full;
     box-shadow: var(--app-panel-shadow);
   }
 
@@ -367,6 +367,7 @@
     @apply px-0 py-0 text-inherit;
     background: transparent;
     display: block;
+    white-space: pre;
   }
 
   /* KaTeX block-level math — center and add spacing */

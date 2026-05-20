@@ -16,11 +16,13 @@ import { useCompactAppShell } from "./hooks/useCompactAppShell";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { sendMessageAction } from "./features/composer/sendMessageAction";
 import { getConversationDisplayTitle } from "./i18n/displayNames";
+import { findBranchContainingMessage } from "./selectors/conversationSelectors";
 import { TopContextBar } from "./components/layout/TopContextBar";
 import { BranchPanel } from "./components/branches/BranchPanel";
 import { WorkspaceBannerRegion } from "./components/workspace/WorkspaceBannerRegion";
 import { MessageList } from "./components/chat/MessageList";
 import { Composer } from "./components/composer/Composer";
+import { TodoStatusBar } from "./components/todo/TodoStatusBar";
 import { CompareWorkspace } from "./components/compare/CompareWorkspace";
 import { ConversationListItem } from "./components/conversations/ConversationListItem";
 import { BrandLogo } from "./components/brand/BrandLogo";
@@ -668,6 +670,7 @@ function WorkspaceCenter({
           />
         )}
       </div>
+      <TodoStatusBar conversationId={activeSnapshot?.summary.id} />
       <Composer />
     </main>
   );
@@ -924,7 +927,6 @@ export function App() {
             if (messageId) {
               const snapshot = useAppStore.getState().activeSnapshot;
               if (snapshot) {
-                const { findBranchContainingMessage } = await import("./selectors/conversationSelectors");
                 const branchId = findBranchContainingMessage(snapshot, messageId);
                 if (branchId) {
                   const setCurrentBranch = useAppStore.getState().setCurrentBranch;

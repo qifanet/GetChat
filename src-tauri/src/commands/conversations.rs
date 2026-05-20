@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::dto::conversations::{ConversationSummaryDto, CreateConversationInput, LoadConversationSnapshotInput};
 use crate::error::AppError;
-use crate::repositories::conversations;
+use crate::repositories::{compressed_contexts, conversations};
 use crate::services::snapshot_service;
 use crate::state::AppState;
 
@@ -203,6 +203,10 @@ pub async fn delete_conversation(
         .await
         .map_err(AppError::from)?;
 
+    compressed_contexts::delete_by_conversation(&mut *tx, &conversation_id)
+        .await
+        .map_err(AppError::from)?;
+
     sqlx::query("DELETE FROM conversations WHERE id = ?")
         .bind(&conversation_id)
         .execute(&mut *tx)
@@ -254,4 +258,78 @@ pub async fn generate_branch_diff_summary(
         &right_branch_id,
     )
     .await
+}
+
+fn normalize_workspace_path(workspace_path: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(path) = workspace_path else {
+        return Ok(None);
+    };
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let canonical = std::path::PathBuf::from(trimmed)
+        .canonicalize()
+        .map_err(|e| {
+            AppError::invalid_argument(format!(
+                "Workspace path must be an existing directory: {e}"
+            ))
+        })?;
+
+    if !canonical.is_dir() {
+        return Err(AppError::invalid_argument(
+            "Workspace path must point to an existing directory",
+        ));
+    }
+
+    Ok(Some(canonical.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn set_conversation_workspace(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    workspace_path: Option<String>,
+) -> Result<(), AppError> {
+    let start = std::time::Instant::now();
+
+    conversations::find_by_id(&state.db, &conversation_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Conversation not found"))?;
+
+    let canonical_workspace_path = normalize_workspace_path(workspace_path)?;
+    let path_arg = canonical_workspace_path.as_deref();
+    conversations::set_workspace_path(&state.db, &conversation_id, path_arg).await?;
+
+    tracing::info!(
+        cmd = "set_conversation_workspace",
+        conv_id = %conversation_id,
+        path = ?canonical_workspace_path,
+        duration_ms = start.elapsed().as_millis() as u64,
+        "ok"
+    );
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItemDto {
+    pub id: String,
+    pub content: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub async fn read_todo_items(conversation_id: Option<String>) -> Vec<TodoItemDto> {
+    let items = match conversation_id {
+        Some(id) => crate::services::tool_executor::read_todos_for_conversation(&id),
+        None => crate::services::tool_executor::read_all_todos(),
+    };
+    items.into_iter().map(|t| TodoItemDto {
+        id: t.id,
+        content: t.content,
+        status: t.status,
+    }).collect()
 }

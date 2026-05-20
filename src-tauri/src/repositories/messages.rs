@@ -17,7 +17,7 @@ use sqlx::{Executor, FromRow, Sqlite};
 // Row Type
 // ============================================================================
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct MessageRow {
     pub id: String,
     pub conversation_id: String,
@@ -27,7 +27,12 @@ pub struct MessageRow {
     pub depth: i32,
     pub sibling_index: i32,
     pub content_text: String,
+    pub reasoning_content: String,
     pub content_format: String,
+    pub content_type: String,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub content_blocks_json: String,
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub request_id: Option<String>,
@@ -160,17 +165,21 @@ pub async fn complete_streaming<'e, E>(
     executor: E,
     message_id: &str,
     content_text: &str,
+    content_blocks_json: &str,
     usage_json: &str,
+    reasoning_content: Option<&str>,
 ) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
 {
     sqlx::query(
-        "UPDATE messages SET status = 'COMPLETED', content_text = ?, usage_json = ?,
+        "UPDATE messages SET status = 'COMPLETED', content_text = ?, content_blocks_json = ?, usage_json = ?, reasoning_content = COALESCE(?, ''),
          updated_at = unixepoch() WHERE id = ? AND status = 'STREAMING'",
     )
     .bind(content_text)
+    .bind(content_blocks_json)
     .bind(usage_json)
+    .bind(reasoning_content)
     .bind(message_id)
     .execute(executor)
     .await?;
@@ -186,6 +195,7 @@ pub async fn fail_streaming<'e, E>(
     executor: E,
     message_id: &str,
     partial_content_text: Option<&str>,
+    partial_content_blocks_json: Option<&str>,
     error_code: &str,
     error_message: &str,
     error_retriable: bool,
@@ -195,10 +205,12 @@ where
 {
     sqlx::query(
         "UPDATE messages SET status = 'FAILED', content_text = COALESCE(?, content_text),
+         content_blocks_json = COALESCE(?, content_blocks_json),
          error_code = ?, error_message = ?, error_retriable = ?,
          updated_at = unixepoch() WHERE id = ? AND status = 'STREAMING'",
     )
     .bind(partial_content_text)
+    .bind(partial_content_blocks_json)
     .bind(error_code)
     .bind(error_message)
     .bind(error_retriable as i32)
@@ -207,6 +219,35 @@ where
     .await?;
 
     Ok(())
+}
+
+/**
+ * Destructively update a completed USER message's text.
+ *
+ * Domain guardrails live in snapshot_service::direct_overwrite_user_message;
+ * keep this repository helper intentionally narrow and role/status scoped.
+ */
+pub async fn update_user_content<'e, E>(
+    executor: E,
+    message_id: &str,
+    content_text: &str,
+    now_secs: i64,
+) -> sqlx::Result<bool>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let result = sqlx::query(
+        "UPDATE messages
+         SET content_text = ?, content_blocks_json = '', updated_at = ?
+         WHERE id = ? AND role = 'USER' AND status = 'COMPLETED'",
+    )
+    .bind(content_text)
+    .bind(now_secs)
+    .bind(message_id)
+    .execute(executor)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 /** Get the next sibling index for children of a given parent. */
@@ -281,10 +322,10 @@ where
 }
 
 /**
- * Hard delete a single message by ID.
- * Caller must ensure the message has no children (leaf node).
+ * Remove a single leaf message by ID.
+ * Caller must ensure the message has no children and is safe to remove.
  */
-pub async fn hard_delete_message<'e, E>(executor: E, message_id: &str) -> sqlx::Result<bool>
+pub async fn remove_leaf_message<'e, E>(executor: E, message_id: &str) -> sqlx::Result<bool>
 where
     E: Executor<'e, Database = Sqlite>,
 {
@@ -296,57 +337,37 @@ where
 }
 
 /**
- * Update the content of an existing user message.
- * Only updates content_text and updated_at.
- */
-pub async fn update_content<'e, E>(
-    executor: E,
-    message_id: &str,
-    content_text: &str,
-) -> sqlx::Result<bool>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let result = sqlx::query(
-        "UPDATE messages SET content_text = ?, updated_at = unixepoch() WHERE id = ?",
-    )
-    .bind(content_text)
-    .bind(message_id)
-    .execute(executor)
-    .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/**
- * Delete ALL descendants of a given message (recursive).
+ * Collect all descendants of a message, deepest nodes first.
  *
- * Uses a recursive CTE to collect every descendant ID, then deletes
- * deepest-first to respect the FK constraint (parent_message_id ON DELETE RESTRICT).
- * Returns the number of deleted messages.
- */
-/**
- * Collect all descendant IDs of a given message using a recursive CTE.
- * Returns IDs ordered deepest-first (for safe deletion with FK RESTRICT).
+ * Used by the explicit direct-overwrite exception to truncate downstream
+ * messages after mutating a historical USER message.
  */
 pub async fn collect_descendant_ids<'e, E>(
     executor: E,
-    ancestor_id: &str,
+    conversation_id: &str,
+    root_message_id: &str,
 ) -> sqlx::Result<Vec<String>>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query_scalar(
+    let rows = sqlx::query_as::<_, (String,)>(
         "WITH RECURSIVE descendants(id, depth) AS (
-            SELECT m.id, 1 FROM messages m WHERE m.parent_message_id = ?
-            UNION ALL
-            SELECT m.id, d.depth + 1
-            FROM messages m INNER JOIN descendants d ON m.parent_message_id = d.id
-        )
-        SELECT id FROM descendants ORDER BY depth DESC",
+             SELECT id, depth FROM messages
+             WHERE parent_message_id = ? AND conversation_id = ?
+             UNION ALL
+             SELECT m.id, m.depth FROM messages m
+             JOIN descendants d ON m.parent_message_id = d.id
+             WHERE m.conversation_id = ?
+         )
+         SELECT id FROM descendants ORDER BY depth DESC",
     )
-    .bind(ancestor_id)
+    .bind(root_message_id)
+    .bind(conversation_id)
+    .bind(conversation_id)
     .fetch_all(executor)
-    .await
+    .await?;
+
+    Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
 /**
@@ -360,6 +381,23 @@ where
         "SELECT COUNT(*) FROM messages WHERE parent_message_id = ?",
     )
     .bind(message_id)
+    .fetch_one(executor)
+    .await?;
+    Ok(row.0)
+}
+
+/** Count assistant children under the given user message. */
+pub async fn count_assistant_children_by_parent<'e, E>(
+    executor: E,
+    parent_message_id: &str,
+) -> sqlx::Result<i64>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM messages WHERE parent_message_id = ? AND role = 'ASSISTANT'",
+    )
+    .bind(parent_message_id)
     .fetch_one(executor)
     .await?;
     Ok(row.0)

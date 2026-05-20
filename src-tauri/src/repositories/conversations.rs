@@ -18,6 +18,7 @@ pub struct ConversationRow {
     pub title: String,
     pub title_source: String,
     pub mainline_branch_id: Option<String>,
+    pub workspace_path: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_opened_at: i64,
@@ -37,6 +38,7 @@ pub struct ConversationSummaryRow {
     pub active_branch_count: i32,
     pub archived_branch_count: i32,
     pub total_message_count: i32,
+    pub workspace_path: Option<String>,
 }
 
 // ============================================================================
@@ -65,6 +67,7 @@ where
         "SELECT
             c.id, c.title, c.mainline_branch_id,
             c.created_at, c.updated_at, c.last_opened_at, c.archived_at,
+            c.workspace_path,
             COUNT(DISTINCT CASE WHEN b.status = 'ACTIVE' THEN b.id END) AS active_branch_count,
             COUNT(DISTINCT CASE WHEN b.status = 'ARCHIVED' THEN b.id END) AS archived_branch_count,
             COUNT(DISTINCT m.id) AS total_message_count
@@ -91,6 +94,7 @@ where
         "SELECT
             c.id, c.title, c.mainline_branch_id,
             c.created_at, c.updated_at, c.last_opened_at, c.archived_at,
+            c.workspace_path,
             COUNT(DISTINCT CASE WHEN b.status = 'ACTIVE' THEN b.id END) AS active_branch_count,
             COUNT(DISTINCT CASE WHEN b.status = 'ARCHIVED' THEN b.id END) AS archived_branch_count,
             COUNT(DISTINCT m.id) AS total_message_count
@@ -245,6 +249,26 @@ where
         "UPDATE conversations SET archived_at = ?, updated_at = unixepoch() WHERE id = ?",
     )
     .bind(archived_at)
+    .bind(id)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
+/** Set or clear the workspace path for a conversation. */
+pub async fn set_workspace_path<'e, E>(
+    executor: E,
+    id: &str,
+    workspace_path: Option<&str>,
+) -> sqlx::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query(
+        "UPDATE conversations SET workspace_path = ?, updated_at = unixepoch() WHERE id = ?",
+    )
+    .bind(workspace_path)
     .bind(id)
     .execute(executor)
     .await?;

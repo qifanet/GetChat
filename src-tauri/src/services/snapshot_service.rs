@@ -12,7 +12,7 @@
  * Required dependencies: sqlx, uuid, serde_json, crate::dto, crate::error, crate::repositories
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sqlx::SqlitePool;
 
@@ -21,7 +21,7 @@ use crate::dto::conversations::*;
 use crate::dto::messages::*;
 use crate::dto::branches::BranchDto;
 use crate::error::AppError;
-use crate::repositories::{branches, conversations, messages};
+use crate::repositories::{branches, compressed_contexts, conversations, messages, tool_calls};
 
 // ============================================================================
 // Helpers
@@ -105,6 +105,14 @@ fn map_message_row(row: &messages::MessageRow, child_ids: Vec<String>) -> Messag
         retriable: row.error_retriable == Some(1),
     });
 
+    let blocks = if row.content_blocks_json.trim().is_empty() {
+        None
+    } else {
+        serde_json::from_str::<Vec<ContentBlockDto>>(&row.content_blocks_json)
+            .ok()
+            .filter(|blocks| !blocks.is_empty())
+    };
+
     MessageDto {
         id: row.id.clone(),
         conversation_id: row.conversation_id.clone(),
@@ -116,13 +124,26 @@ fn map_message_row(row: &messages::MessageRow, child_ids: Vec<String>) -> Messag
         content: MessageContentDto {
             text: row.content_text.clone(),
             format: parse_format(&row.content_format),
+            blocks,
         },
         created_at: row.created_at * 1000,
         updated_at: row.updated_at * 1000,
         generation,
         error,
         edited_from_message_id: row.edited_from_message_id.clone(),
+        tool_calls: None,
     }
+}
+
+/** Map a MessageRow to MessageDto with optional tool calls. */
+fn map_message_row_with_tool_calls(
+    row: &messages::MessageRow,
+    child_ids: Vec<String>,
+    tool_call_dtos: Option<Vec<crate::dto::common::ToolCallResultDto>>,
+) -> MessageDto {
+    let mut dto = map_message_row(row, child_ids);
+    dto.tool_calls = tool_call_dtos;
+    dto
 }
 
 /** Map a BranchRow to BranchDto with computed is_mainline. Public for command reuse. */
@@ -182,6 +203,7 @@ pub async fn list_conversation_summaries(
             active_branch_count: r.active_branch_count,
             archived_branch_count: r.archived_branch_count,
             total_message_count: r.total_message_count,
+            workspace_path: r.workspace_path,
         })
         .collect())
 }
@@ -206,6 +228,7 @@ pub async fn get_conversation_summary(
         active_branch_count: row.active_branch_count,
         archived_branch_count: row.archived_branch_count,
         total_message_count: row.total_message_count,
+        workspace_path: row.workspace_path,
     })
 }
 
@@ -270,6 +293,7 @@ pub async fn load_snapshot(
     }
 
     // 6. Map message rows → DTOs
+    let message_ids: Vec<String> = message_rows.iter().map(|r| r.id.clone()).collect();
     let message_dtos: HashMap<String, MessageDto> = message_rows
         .iter()
         .map(|row| {
@@ -280,6 +304,31 @@ pub async fn load_snapshot(
             (row.id.clone(), map_message_row(row, child_ids))
         })
         .collect();
+
+    // 6b. Load tool calls for all messages and attach to DTOs
+    let tc_rows = tool_calls::list_by_conversation(pool, &message_ids).await.unwrap_or_default();
+    let mut message_dtos = message_dtos;
+    if !tc_rows.is_empty() {
+        let mut tc_by_message: HashMap<String, Vec<crate::dto::common::ToolCallResultDto>> = HashMap::new();
+        for r in tc_rows {
+            tc_by_message.entry(r.message_id.clone()).or_default().push(
+                crate::dto::common::ToolCallResultDto {
+                    id: r.id,
+                    call_id: r.call_id,
+                    function_name: r.function_name,
+                    arguments_json: r.arguments_json,
+                    result_json: r.result_json,
+                    status: r.status,
+                    error_message: r.error_message,
+                }
+            );
+        }
+        for (msg_id, tcs) in tc_by_message {
+            if let Some(dto) = message_dtos.get_mut(&msg_id) {
+                dto.tool_calls = Some(tcs);
+            }
+        }
+    }
 
     // 7. Map branch rows → DTOs (with is_mainline derivation)
     let branch_dtos: HashMap<String, BranchDto> = branch_rows
@@ -305,6 +354,7 @@ pub async fn load_snapshot(
         active_branch_count: active_count,
         archived_branch_count: archived_count,
         total_message_count: message_dtos.len() as i32,
+        workspace_path: conv.workspace_path,
     };
 
     // 9. Assemble snapshot
@@ -420,6 +470,7 @@ pub async fn create_conversation(
         active_branch_count: 1,
         archived_branch_count: 0,
         total_message_count: msg_count,
+        workspace_path: None,
     })
 }
 
@@ -542,13 +593,193 @@ pub async fn create_user_message(
         content: MessageContentDto {
             text: input.content_text.clone(),
             format: ContentFormat::Markdown,
+            blocks: None,
         },
         created_at: now * 1000,
         updated_at: now * 1000,
         generation: None,
         error: None,
         edited_from_message_id: input.edited_from_message_id.clone(),
+        tool_calls: None,
     })
+}
+
+/**
+ * Destructively overwrite a historical USER message and truncate downstream data.
+ *
+ * This is the intentionally narrow exception requested by the user. The default
+ * edit path remains non-destructive; this command is only for explicit direct
+ * overwrite mode and refuses cases that would corrupt another branch.
+ */
+pub async fn direct_overwrite_user_message(
+    pool: &SqlitePool,
+    input: &DirectOverwriteUserMessageInput,
+) -> Result<MessageDto, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::from)?;
+    let now = now_secs();
+
+    if input.content_text.trim().is_empty() {
+        return Err(AppError::invalid_argument("Message content cannot be empty"));
+    }
+
+    conversations::find_by_id(&mut *tx, &input.conversation_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Conversation not found"))?;
+
+    let branch = branches::find_by_id(&mut *tx, &input.branch_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Branch not found"))?;
+
+    if branch.conversation_id != input.conversation_id {
+        return Err(AppError::invalid_argument(
+            "Branch does not belong to this conversation",
+        ));
+    }
+
+    let target = messages::find_by_id(&mut *tx, &input.message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Message not found"))?;
+
+    if target.conversation_id != input.conversation_id {
+        return Err(AppError::invalid_argument(
+            "Message does not belong to this conversation",
+        ));
+    }
+    if target.role != "USER" {
+        return Err(AppError::invalid_argument(
+            "Only USER messages can be directly overwritten",
+        ));
+    }
+    if target.status != "COMPLETED" {
+        return Err(AppError::conflict(
+            "Only completed USER messages can be directly overwritten",
+        ));
+    }
+
+    // Verify the target message is actually on the selected branch path.
+    let mut cursor = branch.head_message_id.clone();
+    let mut found_on_path = false;
+    let mut guard = 0usize;
+    while let Some(message_id) = cursor {
+        guard += 1;
+        if guard > 10_000 {
+            return Err(AppError::invariant_violation(
+                "Branch path traversal exceeded safety limit",
+            ));
+        }
+
+        let row = messages::find_by_id(&mut *tx, &message_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("Branch path message not found"))?;
+        if row.conversation_id != input.conversation_id {
+            return Err(AppError::invariant_violation(
+                "Branch path contains a message from another conversation",
+            ));
+        }
+        if row.id == input.message_id {
+            found_on_path = true;
+            break;
+        }
+        cursor = row.parent_message_id;
+    }
+
+    if !found_on_path {
+        return Err(AppError::invalid_argument(
+            "Message is not on the selected branch path",
+        ));
+    }
+
+    let descendant_ids = messages::collect_descendant_ids(
+        &mut *tx,
+        &input.conversation_id,
+        &input.message_id,
+    )
+    .await?;
+    let descendant_set: HashSet<String> = descendant_ids.iter().cloned().collect();
+
+    for descendant_id in &descendant_ids {
+        let row = messages::find_by_id(&mut *tx, descendant_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("Descendant message not found"))?;
+        if row.status == "STREAMING" {
+            return Err(AppError::conflict(
+                "Cannot direct overwrite while a downstream generation is streaming",
+            ));
+        }
+    }
+
+    // Do not delete data referenced by another branch or by this branch's fork metadata.
+    let branch_rows = branches::list_by_conversation(&mut *tx, &input.conversation_id).await?;
+    for row in &branch_rows {
+        let fork_point_refs_deleted = row
+            .fork_point_message_id
+            .as_ref()
+            .is_some_and(|id| descendant_set.contains(id));
+        let fork_source_refs_deleted = row
+            .fork_source_message_id
+            .as_ref()
+            .is_some_and(|id| descendant_set.contains(id));
+
+        if row.id == input.branch_id {
+            if fork_point_refs_deleted || fork_source_refs_deleted {
+                return Err(AppError::conflict(
+                    "Cannot direct overwrite because the selected branch metadata points into downstream history",
+                ));
+            }
+            continue;
+        }
+
+        let head_refs_deleted = row
+            .head_message_id
+            .as_ref()
+            .is_some_and(|id| descendant_set.contains(id));
+        if head_refs_deleted || fork_point_refs_deleted || fork_source_refs_deleted {
+            return Err(AppError::conflict(
+                "Cannot direct overwrite because downstream messages are referenced by another branch",
+            ));
+        }
+    }
+
+    let updated = messages::update_user_content(
+        &mut *tx,
+        &input.message_id,
+        &input.content_text,
+        now,
+    )
+    .await?;
+    if !updated {
+        return Err(AppError::conflict(
+            "Message could not be directly overwritten",
+        ));
+    }
+
+    branches::update_head(&mut *tx, &input.branch_id, &input.message_id).await?;
+    compressed_contexts::delete_by_branch(&mut *tx, &input.conversation_id, &input.branch_id)
+        .await?;
+
+    for descendant_id in &descendant_ids {
+        messages::remove_leaf_message(&mut *tx, descendant_id).await?;
+    }
+
+    conversations::touch(&mut *tx, &input.conversation_id, now).await?;
+
+    let updated_row = messages::find_by_id(&mut *tx, &input.message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Updated message not found"))?;
+
+    tx.commit().await.map_err(AppError::from)?;
+
+    tracing::debug!(
+        service = "direct_overwrite_user_message",
+        conv_id = %input.conversation_id,
+        branch_id = %input.branch_id,
+        msg_id = %input.message_id,
+        deleted_descendants = descendant_ids.len(),
+        content_length = input.content_text.len(),
+        "transaction_committed"
+    );
+
+    Ok(map_message_row(&updated_row, vec![]))
 }
 
 /**
@@ -636,6 +867,7 @@ pub async fn create_assistant_placeholder_for_branch(
         content: MessageContentDto {
             text: String::new(),
             format: ContentFormat::Markdown,
+            blocks: None,
         },
         created_at: now * 1000,
         updated_at: now * 1000,
@@ -648,6 +880,7 @@ pub async fn create_assistant_placeholder_for_branch(
         }),
         error: None,
         edited_from_message_id: None,
+        tool_calls: None,
     })
 }
 
@@ -728,6 +961,7 @@ pub async fn create_assistant_variant_placeholder(
         content: MessageContentDto {
             text: String::new(),
             format: ContentFormat::Markdown,
+            blocks: None,
         },
         created_at: now * 1000,
         updated_at: now * 1000,
@@ -740,6 +974,7 @@ pub async fn create_assistant_variant_placeholder(
         }),
         error: None,
         edited_from_message_id: None,
+        tool_calls: None,
     })
 }
 
@@ -770,22 +1005,94 @@ pub async fn complete_assistant_message(
         )));
     }
 
+    if row.request_id.as_deref() != Some(input.request_id.as_str()) {
+        return Err(AppError::invariant_violation(format!(
+            "Message {} does not belong to request {}",
+            input.message_id, input.request_id
+        )));
+    }
+
     let usage_json = input
         .usage
         .as_ref()
         .and_then(|v| serde_json::to_string(v).ok())
         .unwrap_or_else(|| "{}".to_string());
 
-    messages::complete_streaming(&mut *tx, &input.message_id, &input.content_text, &usage_json).await?;
+    let content_blocks_json = input
+        .content_blocks
+        .as_ref()
+        .and_then(|blocks| serde_json::to_string(blocks).ok())
+        .unwrap_or_default();
+
+    messages::complete_streaming(
+        &mut *tx,
+        &input.message_id,
+        &input.content_text,
+        &content_blocks_json,
+        &usage_json,
+        input.reasoning_content.as_deref(),
+    )
+    .await?;
+
+    // Persist tool calls if present
+    if let Some(ref tool_calls) = input.tool_calls {
+        let now_secs_val = now_secs();
+        for tc in tool_calls {
+            let id = uuid::Uuid::new_v4().to_string();
+            tool_calls::insert(
+                &mut *tx,
+                &id,
+                &input.message_id,
+                &tc.call_id,
+                &tc.function_name,
+                &tc.arguments_json,
+                now_secs_val,
+            )
+            .await
+            .map_err(AppError::from)?;
+            tool_calls::complete(
+                &mut *tx,
+                &id,
+                &tc.result_json,
+                &tc.status,
+                tc.error_message.as_deref(),
+            )
+            .await
+            .map_err(AppError::from)?;
+        }
+    }
 
     // Re-fetch for the complete DTO (within same transaction)
     let updated = messages::find_by_id(&mut *tx, &input.message_id)
         .await?
         .ok_or_else(|| AppError::not_found("Message disappeared after update"))?;
 
+    // Load tool calls for the DTO
+    let tc_rows = tool_calls::list_by_message(&mut *tx, &input.message_id)
+        .await
+        .unwrap_or_default();
+    let tool_call_dtos = if tc_rows.is_empty() {
+        None
+    } else {
+        Some(
+            tc_rows
+                .into_iter()
+                .map(|r| crate::dto::common::ToolCallResultDto {
+                    id: r.id,
+                    call_id: r.call_id,
+                    function_name: r.function_name,
+                    arguments_json: r.arguments_json,
+                    result_json: r.result_json,
+                    status: r.status,
+                    error_message: r.error_message,
+                })
+                .collect(),
+        )
+    };
+
     tx.commit().await.map_err(AppError::from)?;
 
-    Ok(map_message_row(&updated, vec![]))
+    Ok(map_message_row_with_tool_calls(&updated, vec![], tool_call_dtos))
 }
 
 /**
@@ -814,24 +1121,87 @@ pub async fn fail_assistant_message(
         )));
     }
 
+    if row.request_id.as_deref() != Some(input.request_id.as_str()) {
+        return Err(AppError::invariant_violation(format!(
+            "Message {} does not belong to request {}",
+            input.message_id, input.request_id
+        )));
+    }
+
+    let partial_content_blocks_json = input
+        .partial_content_blocks
+        .as_ref()
+        .and_then(|blocks| serde_json::to_string(blocks).ok());
+
     messages::fail_streaming(
         &mut *tx,
         &input.message_id,
         input.partial_content_text.as_deref(),
+        partial_content_blocks_json.as_deref(),
         &input.error_code,
         &input.error_message,
         input.error_retriable,
     )
     .await?;
 
+    // Persist any tool calls that completed before the stream failed/cancelled.
+    if let Some(ref completed_tool_calls) = input.tool_calls {
+        let now_secs_val = now_secs();
+        for tc in completed_tool_calls {
+            let id = uuid::Uuid::new_v4().to_string();
+            tool_calls::insert(
+                &mut *tx,
+                &id,
+                &input.message_id,
+                &tc.call_id,
+                &tc.function_name,
+                &tc.arguments_json,
+                now_secs_val,
+            )
+            .await
+            .map_err(AppError::from)?;
+            tool_calls::complete(
+                &mut *tx,
+                &id,
+                &tc.result_json,
+                &tc.status,
+                tc.error_message.as_deref(),
+            )
+            .await
+            .map_err(AppError::from)?;
+        }
+    }
+
     // Re-fetch for the complete DTO (within same transaction)
     let updated = messages::find_by_id(&mut *tx, &input.message_id)
         .await?
         .ok_or_else(|| AppError::not_found("Message disappeared after update"))?;
 
+    let tc_rows = tool_calls::list_by_message(&mut *tx, &input.message_id)
+        .await
+        .unwrap_or_default();
+    let tool_call_dtos = if tc_rows.is_empty() {
+        None
+    } else {
+        Some(
+            tc_rows
+                .into_iter()
+                .map(|r| crate::dto::common::ToolCallResultDto {
+                    id: r.id,
+                    call_id: r.call_id,
+                    function_name: r.function_name,
+                    arguments_json: r.arguments_json,
+                    result_json: r.result_json,
+                    status: r.status,
+                    error_message: r.error_message,
+                })
+                .collect(),
+        )
+    };
+
     tx.commit().await.map_err(AppError::from)?;
 
-    Ok(map_message_row(&updated, vec![]))
+    Ok(map_message_row_with_tool_calls(&updated, vec![], tool_call_dtos))
 }
 
 /**
@@ -990,19 +1360,20 @@ pub async fn create_branch(
 }
 
 // ============================================================================
-// Hard Delete & Inline Edit
+// Constrained Assistant Variant Delete
 // ============================================================================
 
 /**
- * Hard delete a variant/candidate assistant message.
+ * Delete a variant/candidate assistant message.
  *
  * Rules:
  *   - Message must exist and be ASSISTANT role
+ *   - Message must be a sibling candidate under a USER message
  *   - Message must not have children (must be a leaf node)
- *   - If the deleted message is a branch's head, the branch head is NOT changed
- *     (the frontend handles this by refreshing the snapshot)
+ *   - Message must not be the head of any branch
+ *   - At least one other assistant candidate must remain under the same user message
  */
-pub async fn delete_variant_message(
+pub async fn delete_assistant_variant_message(
     pool: &SqlitePool,
     message_id: &str,
 ) -> Result<(), AppError> {
@@ -1019,104 +1390,291 @@ pub async fn delete_variant_message(
         return Err(AppError::invalid_argument("Cannot delete a streaming message"));
     }
 
+    let parent_id = msg.parent_message_id.as_deref().ok_or_else(|| {
+        AppError::invalid_argument("Only assistant variants with a user parent can be deleted")
+    })?;
+
+    let parent = messages::find_by_id(&mut *tx, parent_id).await
+        .map_err(|e| AppError::db_error(&format!("find parent message: {e}")))?
+        .ok_or_else(|| AppError::not_found(format!("parent message {} not found", parent_id)))?;
+    if parent.role != "USER" {
+        return Err(AppError::invalid_argument("Only assistant variants under USER messages can be deleted"));
+    }
+
     let child_count = messages::count_children(&mut *tx, message_id).await
         .map_err(|e| AppError::db_error(&format!("count children: {e}")))?;
     if child_count > 0 {
         return Err(AppError::invalid_argument("Cannot delete a message that has child messages"));
     }
 
-    messages::hard_delete_message(&mut *tx, message_id).await
-        .map_err(|e| AppError::db_error(&format!("hard delete: {e}")))?;
+    let branch_head_count = branches::count_heads_by_message(
+        &mut *tx,
+        &msg.conversation_id,
+        message_id,
+    )
+    .await
+    .map_err(|e| AppError::db_error(&format!("count branch heads: {e}")))?;
+    if branch_head_count > 0 {
+        return Err(AppError::conflict("Cannot delete a message that is currently a branch head"));
+    }
+
+    let assistant_sibling_count = messages::count_assistant_children_by_parent(&mut *tx, parent_id)
+        .await
+        .map_err(|e| AppError::db_error(&format!("count assistant siblings: {e}")))?;
+    if assistant_sibling_count <= 1 {
+        return Err(AppError::conflict("Cannot delete the only assistant candidate for this user message"));
+    }
+
+    messages::remove_leaf_message(&mut *tx, message_id).await
+        .map_err(|e| AppError::db_error(&format!("remove leaf message: {e}")))?;
 
     tx.commit().await.map_err(|e| AppError::db_error(&format!("tx commit: {e}")))?;
     Ok(())
 }
 
+// ============================================================================
+// Delete Branch (hard delete with cascade)
+// ============================================================================
+
+/** Result of a branch deletion, listing what was removed. */
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBranchResult {
+    pub deleted_branch_ids: Vec<String>,
+    pub deleted_message_ids: Vec<String>,
+    pub conversation_id: String,
+}
+
 /**
- * Edit a user message inline (no branch creation).
+ * Hard-delete a branch and its exclusive messages.
  *
- * This replaces the content of an existing user message and deletes all
- * its ASSISTANT children. The frontend will then create a new assistant
- * placeholder at the same position for streaming.
- * Returns CONFLICT when any downstream message is still used as a branch
- * fork point (fork_point_message_id FK is ON DELETE RESTRICT).
+ * Safety guards:
+ *   1. Cannot delete the mainline branch
+ *   2. Cannot delete a branch with status STREAMING messages
+ *   3. Child branches that have this branch as source_branch_id are also deleted (cascade)
+ *   4. Only messages exclusive to the deleted branch path are removed
+ *      (shared messages at the fork point and before are preserved)
+ *   5. Compressed contexts for deleted branches are cleaned up
  *
- * Returns the updated MessageDto.
+ * Algorithm:
+ *   a. Collect all branch IDs to delete (target + descendants)
+ *   b. For each branch, collect its exclusive message path (head → fork_point, exclusive)
+ *   c. Filter out messages referenced by surviving branches
+ *   d. Delete tool_calls, messages, compressed_contexts, branch rows
+ *   e. Use PRAGMA defer_foreign_keys for safe ordering
  */
-pub async fn edit_user_message_inline(
+pub async fn delete_branch(
     pool: &SqlitePool,
-    message_id: &str,
-    new_content: &str,
-) -> Result<MessageDto, AppError> {
-    let mut tx = pool.begin().await.map_err(|e| AppError::db_error(&format!("tx begin: {e}")))?;
+    branch_id: &str,
+) -> Result<DeleteBranchResult, AppError> {
+    let mut tx = pool.begin().await
+        .map_err(|e| AppError::db_error(&format!("tx begin: {e}")))?;
 
-    let msg = messages::find_by_id(&mut *tx, message_id).await
-        .map_err(|e| AppError::db_error(&format!("find message: {e}")))?
-        .ok_or_else(|| AppError::not_found(format!("message {} not found", message_id)))?;
+    // Enable deferred FK checking so constraint checks are deferred to commit
+    sqlx::query("PRAGMA defer_foreign_keys = ON")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::db_error(&format!("pragma defer: {e}")))?;
 
-    if msg.role != "USER" {
-        return Err(AppError::invalid_argument("Only USER messages can be edited inline"));
+    // 1. Load target branch
+    let target = branches::find_by_id(&mut *tx, branch_id).await
+        .map_err(|e| AppError::db_error(&format!("find branch: {e}")))?
+        .ok_or_else(|| AppError::not_found(format!("Branch {} not found", branch_id)))?;
+
+    let conversation_id = target.conversation_id.clone();
+
+    // 2. Guard: cannot delete mainline
+    let conv = conversations::find_by_id(&mut *tx, &conversation_id).await
+        .map_err(|e| AppError::db_error(&format!("find conversation: {e}")))?
+        .ok_or_else(|| AppError::not_found("Conversation not found"))?;
+
+    if conv.mainline_branch_id.as_deref() == Some(branch_id) {
+        return Err(AppError::conflict(
+            "Cannot delete the mainline branch. Set a different mainline first.",
+        ));
     }
 
-    // Delete ALL descendants of this user message (not just direct ASSISTANT children).
-    // This handles the case where the conversation continued past the edited message
-    // (User → Assistant → User → Assistant → ...) — all downstream messages must go.
-    // Step 1: collect IDs (deepest-first via CTE)
-    let descendant_ids = messages::collect_descendant_ids(&mut *tx, message_id).await
-        .map_err(|e| AppError::db_error(&format!("collect descendants: {e}")))?;
-    let fork_point_ref_count = branches::count_fork_points_in_set(
-        &mut *tx,
-        &msg.conversation_id,
-        &descendant_ids,
-    )
-    .await
-    .map_err(|e| AppError::db_error(&format!("count descendant fork-point refs: {e}")))?;
-    if fork_point_ref_count > 0 {
-        return Err(
-            AppError::conflict("Cannot edit message inline because downstream fork points exist")
-                .with_details(format!("fork_point_ref_count={fork_point_ref_count}")),
-        );
-    }
-    // Step 2: redirect branch heads that point to any descendant
-    //         (branches.head_message_id has ON DELETE RESTRICT)
-    if !descendant_ids.is_empty() {
-        branches::redirect_heads_from_descendants(
-            &mut *tx, &msg.conversation_id, &descendant_ids, message_id,
-        ).await.map_err(|e| AppError::db_error(&format!("redirect branch heads: {e}")))?;
-    }
-    // Step 3: delete each one deepest-first to respect ON DELETE RESTRICT
-    for desc_id in &descendant_ids {
-        messages::hard_delete_message(&mut *tx, desc_id).await
-            .map_err(|e| AppError::db_error(&format!("delete descendant: {e}")))?;
+    // 3. Collect all branch IDs to delete: target + recursive descendants
+    let mut branch_ids_to_delete = vec![branch_id.to_string()];
+    let mut queue = vec![branch_id.to_string()];
+    while let Some(bid) = queue.pop() {
+        let children = branches::list_child_branches(&mut *tx, &bid).await
+            .map_err(|e| AppError::db_error(&format!("list child branches: {e}")))?;
+        for child in children {
+            branch_ids_to_delete.push(child.id.clone());
+            queue.push(child.id.clone());
+        }
     }
 
-    // Update the user message content
-    messages::update_content(&mut *tx, message_id, new_content).await
-        .map_err(|e| AppError::db_error(&format!("update content: {e}")))?;
+    // 4. Collect all message IDs that surviving branches touch.
+    //    Walk each surviving branch from head → fork_point (inclusive).
+    let surviving_branches: Vec<branches::BranchRow> = {
+        let all_branches = branches::list_by_conversation(&mut *tx, &conversation_id).await
+            .map_err(|e| AppError::db_error(&format!("list branches: {e}")))?;
+        all_branches.into_iter()
+            .filter(|b| !branch_ids_to_delete.contains(&b.id))
+            .collect()
+    };
 
-    // Reload the updated message
-    let updated = messages::find_by_id(&mut *tx, message_id).await
-        .map_err(|e| AppError::db_error(&format!("reload message: {e}")))?
-        .ok_or_else(|| AppError::not_found(format!("message {} not found", message_id)))?;
+    let mut protected_msg_ids: HashSet<String> = HashSet::new();
+    for b in &surviving_branches {
+        // Insert fork_point (shared ancestor — never delete)
+        if let Some(ref fid) = b.fork_point_message_id {
+            protected_msg_ids.insert(fid.clone());
+        }
+        // Walk head → fork_point
+        if let Some(ref hid) = b.head_message_id {
+            let mut cursor: Option<String> = Some(hid.clone());
+            while let Some(cid) = cursor {
+                if protected_msg_ids.contains(&cid) { break; }
+                protected_msg_ids.insert(cid.clone());
+                let parent = sqlx::query_as::<_, (Option<String>,)>(
+                    "SELECT parent_message_id FROM messages WHERE id = ?",
+                )
+                .bind(&cid)
+                .fetch_optional(&mut *tx)
+                .await;
+                match parent {
+                    Ok(Some((Some(pid),))) => {
+                        if b.fork_point_message_id.as_ref() == Some(&pid) {
+                            break;
+                        }
+                        cursor = Some(pid);
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
 
-    tx.commit().await.map_err(|e| AppError::db_error(&format!("tx commit: {e}")))?;
+    // 5. Collect the direct path (head → fork) for each branch to delete,
+    //    using tx (not pool) for consistency.
+    //    Then expand to include all descendant messages that are not protected.
+    let mut messages_to_delete: HashSet<String> = HashSet::new();
 
-    Ok(MessageDto {
-        id: updated.id,
-        conversation_id: updated.conversation_id,
-        role: parse_role(&updated.role),
-        status: parse_status(&updated.status),
-        parent_id: updated.parent_message_id,
-        depth: updated.depth,
-        content: MessageContentDto {
-            text: updated.content_text,
-            format: ContentFormat::Markdown,
-        },
-        child_ids: Vec::new(), // Children were just deleted
-        generation: None,
-        error: None,
-        edited_from_message_id: updated.edited_from_message_id,
-        created_at: updated.created_at * 1000,
-        updated_at: updated.updated_at * 1000,
+    for bid in &branch_ids_to_delete {
+        // Load branch head and fork_point via tx
+        let br = sqlx::query_as::<_, branches::BranchRow>(
+            "SELECT * FROM branches WHERE id = ?",
+        )
+        .bind(bid)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| AppError::db_error(&format!("load branch {bid}: {e}")))?;
+
+        let Some(br) = br else { continue };
+
+        let Some(head_id) = br.head_message_id.as_deref() else { continue };
+        let fork_id = br.fork_point_message_id.as_deref();
+
+        // Walk head → fork, collecting messages
+        let mut path_ids: Vec<String> = Vec::new();
+        let mut cursor: Option<String> = Some(head_id.to_string());
+        while let Some(cid) = cursor {
+            if let Some(fid) = fork_id {
+                if cid == fid { break; }
+            }
+            path_ids.push(cid.clone());
+            let parent = sqlx::query_as::<_, (Option<String>,)>(
+                "SELECT parent_message_id FROM messages WHERE id = ?",
+            )
+            .bind(&cid)
+            .fetch_optional(&mut *tx)
+            .await;
+            match parent {
+                Ok(Some((Some(pid),))) => cursor = Some(pid),
+                _ => break,
+            }
+        }
+
+        // For each message on the path, collect its full descendant subtree
+        // that is NOT protected by surviving branches.
+        for path_id in &path_ids {
+            let mut sub_queue = vec![path_id.clone()];
+            while let Some(mid) = sub_queue.pop() {
+                if messages_to_delete.contains(&mid) { continue; }
+                if protected_msg_ids.contains(&mid) { continue; }
+
+                messages_to_delete.insert(mid.clone());
+
+                // Find children of this message
+                let children = sqlx::query_as::<_, (String,)>(
+                    "SELECT id FROM messages WHERE parent_message_id = ?",
+                )
+                .bind(&mid)
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap_or_default();
+                for (child_id,) in children {
+                    if !protected_msg_ids.contains(&child_id) {
+                        sub_queue.push(child_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove protected messages (safety net — should already be excluded)
+    messages_to_delete.retain(|id| !protected_msg_ids.contains(id));
+
+    // 6. Before deleting messages, NULL out any parent_message_id references
+    //    from messages that are NOT being deleted, pointing to messages that ARE.
+    //    This satisfies the ON DELETE RESTRICT FK constraint.
+    let ids_list = messages_to_delete.iter()
+        .map(|id| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    if !ids_list.is_empty() {
+        sqlx::query(&format!(
+            "UPDATE messages SET parent_message_id = NULL \
+             WHERE parent_message_id IN ({ids_list}) \
+             AND id NOT IN ({ids_list})"
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::db_error(&format!("nullify parent refs: {e}")))?;
+    }
+
+    // 7. Delete tool_calls for messages being deleted
+    for mid in &messages_to_delete {
+        let _ = tool_calls::delete_by_message(&mut *tx, mid).await;
+    }
+
+    // 8. Delete messages
+    for mid in &messages_to_delete {
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(mid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::db_error(&format!("delete message {}: {e}", mid)))?;
+    }
+
+    // 9. Delete compressed contexts for deleted branches
+    for bid in &branch_ids_to_delete {
+        let _ = compressed_contexts::delete_by_branch(&mut *tx, &conversation_id, bid).await;
+    }
+
+    // 10. Delete branch rows
+    for bid in &branch_ids_to_delete {
+        branches::delete_by_id(&mut *tx, bid).await
+            .map_err(|e| AppError::db_error(&format!("delete branch {}: {e}", bid)))?;
+    }
+
+    tx.commit().await
+        .map_err(|e| AppError::db_error(&format!("tx commit: {e}")))?;
+
+    tracing::info!(
+        cmd = "delete_branch",
+        branch_id = %branch_id,
+        conversation_id = %conversation_id,
+        branches_deleted = branch_ids_to_delete.len(),
+        messages_deleted = messages_to_delete.len(),
+        "ok"
+    );
+
+    Ok(DeleteBranchResult {
+        deleted_branch_ids: branch_ids_to_delete,
+        deleted_message_ids: messages_to_delete.into_iter().collect(),
+        conversation_id,
     })
 }

@@ -13,12 +13,12 @@
 use tauri::State;
 
 use crate::dto::branches::{
-    BranchDto, CreateBranchInput, RenameBranchInput, SetBranchHeadMessageInput,
-    SetBranchPreferredModelInput, SetMainlineBranchInput, SetMainlineResult,
+    BranchDto, CreateBranchInput, RenameBranchInput, SetBranchPreferredModelInput,
+    SetMainlineBranchInput, SetMainlineResult,
 };
 use crate::error::AppError;
-use crate::repositories::{branches, conversations, messages, provider_models};
-use crate::services::snapshot_service;
+use crate::repositories::{branches, conversations, provider_models};
+use crate::services::snapshot_service::{self, DeleteBranchResult};
 use crate::state::AppState;
 
 // ============================================================================
@@ -118,48 +118,6 @@ pub async fn set_branch_preferred_model(
         conv_id = %updated.conversation_id,
         branch_id = %updated.id,
         preferred_model_id = ?input.model_id,
-        duration_ms = start.elapsed().as_millis() as u64,
-        "ok"
-    );
-
-    Ok(snapshot_service::map_branch_row_public(&updated, is_mainline))
-}
-
-/** Promote an existing message to the branch head after a regenerate flow. */
-#[tauri::command]
-pub async fn set_branch_head_message(
-    state: State<'_, AppState>,
-    input: SetBranchHeadMessageInput,
-) -> Result<BranchDto, AppError> {
-    let start = std::time::Instant::now();
-    let branch = branches::find_by_id(&state.db, &input.branch_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Branch not found"))?;
-    let message = messages::find_by_id(&state.db, &input.message_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Message not found"))?;
-
-    if message.conversation_id != branch.conversation_id {
-        return Err(AppError::invalid_argument(
-            "Message does not belong to the same conversation as the branch",
-        ));
-    }
-
-    branches::update_head_optional(&state.db, &input.branch_id, Some(&input.message_id)).await?;
-
-    let updated = branches::find_by_id(&state.db, &input.branch_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Branch not found after head update"))?;
-    let conv = conversations::find_by_id(&state.db, &updated.conversation_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Conversation not found"))?;
-    let is_mainline = conv.mainline_branch_id.as_ref() == Some(&updated.id);
-
-    tracing::info!(
-        cmd = "set_branch_head_message",
-        conv_id = %updated.conversation_id,
-        branch_id = %updated.id,
-        message_id = %input.message_id,
         duration_ms = start.elapsed().as_millis() as u64,
         "ok"
     );
@@ -313,4 +271,42 @@ pub async fn set_mainline_branch(
         old_mainline_branch_id,
         new_mainline_branch: new_mainline,
     })
+}
+
+/**
+ * Hard-delete a branch and its exclusive messages.
+ *
+ * Domain rules:
+ *   - Cannot delete the mainline branch
+ *   - Child branches are cascade-deleted
+ *   - Only messages exclusive to the deleted branch path are removed
+ *   - Compressed contexts are cleaned up
+ */
+#[tauri::command]
+pub async fn delete_branch(
+    state: State<'_, AppState>,
+    branch_id: String,
+) -> Result<DeleteBranchResult, AppError> {
+    let start = std::time::Instant::now();
+    let result = snapshot_service::delete_branch(&state.db, &branch_id).await;
+    match &result {
+        Ok(r) => tracing::info!(
+            cmd = "delete_branch",
+            branch_id = %branch_id,
+            conv_id = %r.conversation_id,
+            branches_deleted = r.deleted_branch_ids.len(),
+            messages_deleted = r.deleted_message_ids.len(),
+            duration_ms = start.elapsed().as_millis() as u64,
+            "ok"
+        ),
+        Err(e) => tracing::warn!(
+            cmd = "delete_branch",
+            branch_id = %branch_id,
+            error_code = %e.code,
+            message = %e.message,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "error"
+        ),
+    }
+    result
 }

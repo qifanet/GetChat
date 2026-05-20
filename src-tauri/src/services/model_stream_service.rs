@@ -25,14 +25,17 @@ use sqlx::SqlitePool;
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
-use crate::dto::common::{GenerationParamsDto, TokenUsageDto};
+use crate::dto::common::{GenerationParamsDto, TokenUsageDto, ToolCallDto, ToolDefinitionDto};
 use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto, StartModelStreamInput};
-use crate::repositories::{provider_models, providers};
+use crate::repositories::{conversations, provider_models, providers};
+use crate::services::provider_profiles::ProviderProfile;
 use crate::state::SecureKeyStore;
 
 const MODEL_CONNECT_TIMEOUT_SECONDS: u64 = 10;
 const MODEL_STREAM_TIMEOUT_SECONDS: u64 = 600;
-const ERROR_BODY_PREVIEW_LIMIT: usize = 256;
+const ERROR_BODY_PREVIEW_LIMIT: usize = 2048;
+const DSML_MARKER_GUARD_CHARS: usize = 32;
+const DSML_TOOL_CALL_BUFFER_LIMIT_CHARS: usize = 128_000;
 
 /**
  * Provider-resolved stream request with secure credentials already loaded.
@@ -44,18 +47,37 @@ const ERROR_BODY_PREVIEW_LIMIT: usize = 256;
 pub struct ResolvedModelStreamRequest {
     pub request_id: String,
     pub provider_type: String,
+    pub provider_profile: ProviderProfile,
     pub base_url: String,
     pub api_key: Option<String>,
+    /// Internal model ID for traceability; used in logging and ReAct loop metadata.
+    #[allow(dead_code)]
     pub model_id: String,
     pub request_model_name: String,
     pub prompt_messages: Vec<ModelPromptMessageDto>,
     pub generation_params: Option<GenerationParamsDto>,
+    pub tools: Vec<ToolDefinitionDto>,
+    pub tool_choice: Option<String>,
+    /// Conversation ID for context-aware tools (e.g. todo scoping).
+    pub conversation_id: Option<String>,
+    /// Per-conversation workspace root for file-scoped tools.
+    pub workspace_path: Option<String>,
 }
 
 /** Normalized terminal outcome of a provider streaming session. */
 #[derive(Debug, Clone)]
 pub enum ModelStreamOutcome {
-    Completed { usage: Option<TokenUsageDto> },
+    Completed {
+        usage: Option<TokenUsageDto>,
+        reasoning_content: Option<String>,
+    },
+    /// Model requested tool invocations before producing final text.
+    ToolCallsRequested {
+        tool_calls: Vec<ToolCallDto>,
+        #[allow(dead_code)]
+        usage: Option<TokenUsageDto>,
+        reasoning_content: Option<String>,
+    },
     Cancelled,
 }
 
@@ -134,6 +156,15 @@ pub async fn resolve_stream_request(
         ));
     }
 
+    for message in &input.prompt_messages {
+        if normalize_prompt_role(&message.role).is_none() {
+            return Err(ModelStreamFailure::terminal(
+                "INVALID_MODEL_REQUEST",
+                format!("Unsupported prompt message role: {}", message.role),
+            ));
+        }
+    }
+
     let provider = providers::find_by_id(pool, &input.provider_id)
         .await
         .map_err(|error| {
@@ -177,6 +208,7 @@ pub async fn resolve_stream_request(
             "Provider base URL is required",
         ));
     }
+    let provider_profile = ProviderProfile::resolve(&provider.r#type, &base_url);
 
     let request_model_name = match provider_models::find_by_id(pool, &input.model_id).await {
         Ok(Some(model_profile)) => {
@@ -198,15 +230,40 @@ pub async fn resolve_stream_request(
         }
     };
 
+    let workspace_path = if let Some(conversation_id) = input.conversation_id.as_deref() {
+        let conversation = conversations::find_by_id(pool, conversation_id)
+            .await
+            .map_err(|error| {
+                ModelStreamFailure::retriable(
+                    "CONVERSATION_LOOKUP_FAILED",
+                    format!("Failed to load conversation workspace: {error}"),
+                )
+            })?
+            .ok_or_else(|| {
+                ModelStreamFailure::terminal(
+                    "CONVERSATION_NOT_FOUND",
+                    "The active conversation no longer exists",
+                )
+            })?;
+        conversation.workspace_path
+    } else {
+        None
+    };
+
     Ok(ResolvedModelStreamRequest {
         request_id: input.request_id.clone(),
         provider_type: provider.r#type,
+        provider_profile,
         base_url,
         api_key,
         model_id: input.model_id.clone(),
         request_model_name,
         prompt_messages: input.prompt_messages.clone(),
         generation_params: input.generation_params.clone(),
+        tools: input.tools.clone(),
+        tool_choice: input.tool_choice.clone(),
+        conversation_id: input.conversation_id.clone(),
+        workspace_path,
     })
 }
 
@@ -223,6 +280,8 @@ pub async fn stream_model_response(
     channel: &Channel<ModelStreamEventDto>,
     cancel_rx: watch::Receiver<bool>,
 ) -> Result<ModelStreamOutcome, ModelStreamFailure> {
+    validate_prompt_tool_sequence(&request.prompt_messages)?;
+
     let result = tokio::time::timeout(
         Duration::from_secs(MODEL_STREAM_TIMEOUT_SECONDS),
         async {
@@ -249,13 +308,113 @@ fn normalize_base_url(base_url: &str) -> String {
 }
 
 /** Convert stored prompt roles into provider-compatible lowercase values. */
-fn normalize_prompt_role(role: &str) -> &str {
+fn normalize_prompt_role(role: &str) -> Option<&'static str> {
     match role {
-        "SYSTEM" => "system",
-        "USER" => "user",
-        "ASSISTANT" => "assistant",
-        other => other,
+        "SYSTEM" | "system" => Some("system"),
+        "USER" | "user" => Some("user"),
+        "ASSISTANT" | "assistant" => Some("assistant"),
+        "TOOL" | "tool" => Some("tool"),
+        _ => None,
     }
+}
+
+/**
+ * Validate OpenAI-compatible tool transcript ordering before sending upstream.
+ *
+ * Providers such as DeepSeek enforce this strictly: every `tool` message must
+ * answer a preceding assistant `tool_calls` entry, and all tool calls from an
+ * assistant turn must be answered before the next non-tool message.
+ */
+fn validate_prompt_tool_sequence(
+    messages: &[ModelPromptMessageDto],
+) -> Result<(), ModelStreamFailure> {
+    let mut pending_tool_call_ids: Vec<String> = Vec::new();
+
+    for (index, message) in messages.iter().enumerate() {
+        let role = normalize_prompt_role(&message.role).ok_or_else(|| {
+            ModelStreamFailure::terminal(
+                "INVALID_MODEL_REQUEST",
+                format!("Unsupported prompt message role: {}", message.role),
+            )
+        })?;
+
+        match role {
+            "assistant" => {
+                if !pending_tool_call_ids.is_empty() {
+                    return Err(ModelStreamFailure::terminal(
+                        "INVALID_TOOL_TRANSCRIPT",
+                        format!(
+                            "Assistant tool_calls at prompt index {} were not fully answered before the next assistant message",
+                            index
+                        ),
+                    ));
+                }
+
+                pending_tool_call_ids = message
+                    .tool_calls
+                    .as_ref()
+                    .map(|tool_calls| {
+                        tool_calls
+                            .iter()
+                            .map(|tool_call| tool_call.id.clone())
+                            .filter(|id| !id.trim().is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            "tool" => {
+                let tool_call_id = message
+                    .tool_call_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| {
+                        ModelStreamFailure::terminal(
+                            "INVALID_TOOL_TRANSCRIPT",
+                            format!(
+                                "Tool message at prompt index {} is missing tool_call_id",
+                                index
+                            ),
+                        )
+                    })?;
+
+                let Some(position) = pending_tool_call_ids
+                    .iter()
+                    .position(|pending_id| pending_id == tool_call_id)
+                else {
+                    return Err(ModelStreamFailure::terminal(
+                        "INVALID_TOOL_TRANSCRIPT",
+                        format!(
+                            "Tool message at prompt index {} does not match a preceding assistant tool_call_id",
+                            index
+                        ),
+                    ));
+                };
+
+                pending_tool_call_ids.remove(position);
+            }
+            _ => {
+                if !pending_tool_call_ids.is_empty() {
+                    return Err(ModelStreamFailure::terminal(
+                        "INVALID_TOOL_TRANSCRIPT",
+                        format!(
+                            "Assistant tool_calls before prompt index {} are missing tool result messages",
+                            index
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if !pending_tool_call_ids.is_empty() {
+        return Err(ModelStreamFailure::terminal(
+            "INVALID_TOOL_TRANSCRIPT",
+            "Assistant tool_calls at the end of the prompt are missing tool result messages",
+        ));
+    }
+
+    Ok(())
 }
 
 /** Build the OpenAI-compatible chat completions endpoint from a provider base URL. */
@@ -306,17 +465,56 @@ fn build_stream_client() -> Result<Client, ModelStreamFailure> {
         })
 }
 
+/** Serialize prompt messages with tool_calls and provider-specific replay fields. */
+fn serialize_prompt_message(message: &ModelPromptMessageDto, profile: ProviderProfile) -> Value {
+    let role = normalize_prompt_role(&message.role).unwrap_or("user");
+    if role == "tool" {
+        let mut m = json!({ "role": "tool", "content": &message.content });
+        if let Some(ref id) = message.tool_call_id {
+            m["tool_call_id"] = json!(id);
+        }
+        if let Some(ref name) = message.name {
+            m["name"] = json!(name);
+        }
+        m
+    } else if let Some(ref tool_calls) = message.tool_calls {
+        // Empty string is accepted by more OpenAI-compatible providers than
+        // `null` while preserving assistant tool-call semantics.
+        let content = json!(message.content);
+        let mut m = json!({ "role": role, "content": content, "tool_calls": tool_calls });
+        if role == "assistant" && profile.should_replay_reasoning_content() {
+            if let Some(reasoning_content) = message
+                .reasoning_content
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                m["reasoning_content"] = json!(reasoning_content);
+            }
+        }
+        m
+    } else {
+        let mut m = json!({ "role": role, "content": &message.content });
+        if role == "assistant" && profile.should_replay_reasoning_content() {
+            if let Some(reasoning_content) = message
+                .reasoning_content
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                m["reasoning_content"] = json!(reasoning_content);
+            }
+        }
+        m
+    }
+}
+
 /** Build an OpenAI-compatible JSON request body from the normalized request. */
 fn build_openai_request_body(request: &ResolvedModelStreamRequest) -> Value {
     let messages: Vec<Value> = request
         .prompt_messages
         .iter()
-        .map(|message| {
-            json!({
-                "role": normalize_prompt_role(&message.role),
-                "content": message.content.clone(),
-            })
-        })
+        .map(|message| serialize_prompt_message(message, request.provider_profile))
         .collect();
 
     let mut body = Map::from_iter([
@@ -327,6 +525,13 @@ fn build_openai_request_body(request: &ResolvedModelStreamRequest) -> Value {
         ("messages".to_string(), Value::Array(messages)),
         ("stream".to_string(), Value::Bool(true)),
     ]);
+
+    if !request.tools.is_empty() {
+        body.insert("tools".to_string(), json!(request.tools));
+        if let Some(ref choice) = request.tool_choice {
+            body.insert("tool_choice".to_string(), json!(choice));
+        }
+    }
 
     if let Some(params) = request.generation_params.as_ref() {
         if let Some(temperature) = params.temperature {
@@ -340,6 +545,8 @@ fn build_openai_request_body(request: &ResolvedModelStreamRequest) -> Value {
         }
     }
 
+    request.provider_profile.apply_chat_request_body(&mut body);
+
     Value::Object(body)
 }
 
@@ -350,7 +557,7 @@ fn build_ollama_request_body(request: &ResolvedModelStreamRequest) -> Value {
         .iter()
         .map(|message| {
             json!({
-                "role": normalize_prompt_role(&message.role),
+                "role": normalize_prompt_role(&message.role).unwrap_or("user"),
                 "content": message.content.clone(),
             })
         })
@@ -393,6 +600,258 @@ fn build_ollama_request_body(request: &ResolvedModelStreamRequest) -> Value {
     Value::Object(body)
 }
 
+/** Return a reasoning payload only when the provider actually streamed one. */
+fn finalize_reasoning_content(reasoning_content: &str) -> Option<String> {
+    if reasoning_content.trim().is_empty() {
+        None
+    } else {
+        Some(reasoning_content.to_string())
+    }
+}
+
+enum DsmlToolCallParseResult {
+    NotPresent,
+    Incomplete,
+    Parsed(Vec<ToolCallDto>),
+    Invalid(String),
+}
+
+fn canonicalize_dsml_markup(input: &str) -> String {
+    let mut normalized = input.replace('｜', "|");
+    for (from, to) in [
+        ("< |", "<|"),
+        ("</ |", "</|"),
+        ("| >", "|>"),
+        (" |", "|"),
+        ("| ", "|"),
+        ("||DSML||", "|DSML|"),
+        ("|DSML||", "|DSML|"),
+        ("||DSML|", "|DSML|"),
+    ] {
+        while normalized.contains(from) {
+            normalized = normalized.replace(from, to);
+        }
+    }
+    normalized
+}
+
+fn find_dsml_start(text: &str) -> Option<usize> {
+    let dsml_index = text.find("DSML")?;
+    text[..dsml_index].rfind('<')
+}
+
+fn extract_dsml_attr(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let rest = &tag[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn parse_dsml_parameter_value(raw: &str, string_attr: Option<&str>) -> Value {
+    let force_string = string_attr
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if force_string {
+        return Value::String(raw.to_string());
+    }
+    serde_json::from_str(raw.trim()).unwrap_or_else(|_| Value::String(raw.to_string()))
+}
+
+fn parse_dsml_parameters(body: &str) -> Result<Value, String> {
+    let mut cursor = 0usize;
+    let mut params = Map::new();
+    let mut direct_arguments: Option<Value> = None;
+
+    while let Some(start_rel) = body[cursor..].find("<|DSML|parameter") {
+        let start = cursor + start_rel;
+        let tag_end = body[start..]
+            .find('>')
+            .ok_or_else(|| "DSML parameter tag is incomplete".to_string())?
+            + start;
+        let tag = &body[start..=tag_end];
+        let name = extract_dsml_attr(tag, "name")
+            .ok_or_else(|| "DSML parameter is missing name".to_string())?;
+        let close_tag = "</|DSML|parameter>";
+        let value_start = tag_end + 1;
+        let close_rel = body[value_start..]
+            .find(close_tag)
+            .ok_or_else(|| "DSML parameter close tag is missing".to_string())?;
+        let value_end = value_start + close_rel;
+        let value = parse_dsml_parameter_value(
+            &body[value_start..value_end],
+            extract_dsml_attr(tag, "string").as_deref(),
+        );
+        if name == "arguments" && direct_arguments.is_none() && params.is_empty() {
+            direct_arguments = Some(value);
+        } else {
+            if let Some(arguments) = direct_arguments.take() {
+                params.insert("arguments".to_string(), arguments);
+            }
+            params.insert(name, value);
+        }
+        cursor = value_end + close_tag.len();
+    }
+
+    if params.is_empty() {
+        Ok(direct_arguments.unwrap_or_else(|| Value::Object(Map::new())))
+    } else {
+        Ok(Value::Object(params))
+    }
+}
+
+fn parse_dsml_tool_calls(markup: &str) -> DsmlToolCallParseResult {
+    let normalized = canonicalize_dsml_markup(markup);
+    let Some(open_start) = normalized.find("<|DSML|tool_calls") else {
+        return DsmlToolCallParseResult::NotPresent;
+    };
+    let Some(open_end_rel) = normalized[open_start..].find('>') else {
+        return DsmlToolCallParseResult::Incomplete;
+    };
+    let body_start = open_start + open_end_rel + 1;
+    let close_tag = "</|DSML|tool_calls>";
+    let Some(close_rel) = normalized[body_start..].find(close_tag) else {
+        return DsmlToolCallParseResult::Incomplete;
+    };
+    let body = &normalized[body_start..body_start + close_rel];
+    let mut cursor = 0usize;
+    let mut calls = Vec::new();
+
+    while let Some(start_rel) = body[cursor..].find("<|DSML|invoke") {
+        let start = cursor + start_rel;
+        let Some(tag_end_rel) = body[start..].find('>') else {
+            return DsmlToolCallParseResult::Incomplete;
+        };
+        let tag_end = start + tag_end_rel;
+        let tag = &body[start..=tag_end];
+        let Some(name) = extract_dsml_attr(tag, "name") else {
+            return DsmlToolCallParseResult::Invalid("DSML invoke is missing name".to_string());
+        };
+        let invoke_close = "</|DSML|invoke>";
+        let invoke_body_start = tag_end + 1;
+        let Some(close_rel) = body[invoke_body_start..].find(invoke_close) else {
+            return DsmlToolCallParseResult::Incomplete;
+        };
+        let invoke_body_end = invoke_body_start + close_rel;
+        let arguments_value = match parse_dsml_parameters(&body[invoke_body_start..invoke_body_end]) {
+            Ok(value) => value,
+            Err(message) => return DsmlToolCallParseResult::Invalid(message),
+        };
+        let arguments = match serde_json::to_string(&arguments_value) {
+            Ok(value) => value,
+            Err(error) => {
+                return DsmlToolCallParseResult::Invalid(format!(
+                    "Failed to serialize DSML tool arguments: {error}"
+                ))
+            }
+        };
+        let id = extract_dsml_attr(tag, "id")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("dsml_call_{}", calls.len()));
+        calls.push(ToolCallDto {
+            id,
+            call_type: "function".to_string(),
+            function: crate::dto::common::ToolCallFunctionDto { name, arguments },
+        });
+        cursor = invoke_body_end + invoke_close.len();
+    }
+
+    if calls.is_empty() {
+        DsmlToolCallParseResult::Invalid("DSML tool_calls block contains no invoke entries".to_string())
+    } else {
+        DsmlToolCallParseResult::Parsed(calls)
+    }
+}
+
+fn try_parse_dsml_tool_call_buffer(
+    buffer: &str,
+) -> Result<Option<Vec<ToolCallDto>>, ModelStreamFailure> {
+    if buffer.chars().count() > DSML_TOOL_CALL_BUFFER_LIMIT_CHARS {
+        return Err(ModelStreamFailure::terminal(
+            "MODEL_PROVIDER_TOOL_CALL_FORMAT_ERROR",
+            "Provider emitted an oversized DSML tool-call block that could not be parsed safely",
+        ));
+    }
+
+    match parse_dsml_tool_calls(buffer) {
+        DsmlToolCallParseResult::Parsed(tool_calls) => Ok(Some(tool_calls)),
+        DsmlToolCallParseResult::Invalid(message) => Err(ModelStreamFailure::terminal(
+            "MODEL_PROVIDER_TOOL_CALL_FORMAT_ERROR",
+            format!("Provider emitted invalid DSML tool-call markup: {message}"),
+        )),
+        DsmlToolCallParseResult::NotPresent | DsmlToolCallParseResult::Incomplete => Ok(None),
+    }
+}
+
+fn finalize_dsml_tool_call_buffer(
+    buffer: &mut Option<String>,
+) -> Result<Option<Vec<ToolCallDto>>, ModelStreamFailure> {
+    let Some(value) = buffer.take() else {
+        return Ok(None);
+    };
+
+    match parse_dsml_tool_calls(&value) {
+        DsmlToolCallParseResult::Parsed(tool_calls) => Ok(Some(tool_calls)),
+        DsmlToolCallParseResult::NotPresent => Ok(None),
+        DsmlToolCallParseResult::Incomplete => Err(ModelStreamFailure::terminal(
+            "MODEL_PROVIDER_TOOL_CALL_FORMAT_ERROR",
+            "Provider emitted an incomplete DSML tool-call block instead of structured tool_calls",
+        )),
+        DsmlToolCallParseResult::Invalid(message) => Err(ModelStreamFailure::terminal(
+            "MODEL_PROVIDER_TOOL_CALL_FORMAT_ERROR",
+            format!("Provider emitted invalid DSML tool-call markup: {message}"),
+        )),
+    }
+}
+
+fn flush_pending_text(
+    channel: &Channel<ModelStreamEventDto>,
+    request_id: &str,
+    pending_text: &mut String,
+) -> Result<(), ModelStreamFailure> {
+    if !pending_text.is_empty() {
+        let text = std::mem::take(pending_text);
+        emit_chunk(channel, request_id, &text)?;
+    }
+    Ok(())
+}
+
+fn process_openai_content_delta(
+    channel: &Channel<ModelStreamEventDto>,
+    request_id: &str,
+    pending_text: &mut String,
+    dsml_tool_call_buffer: &mut Option<String>,
+    text: &str,
+) -> Result<Option<Vec<ToolCallDto>>, ModelStreamFailure> {
+    if let Some(buffer) = dsml_tool_call_buffer.as_mut() {
+        buffer.push_str(text);
+        return try_parse_dsml_tool_call_buffer(buffer);
+    }
+
+    pending_text.push_str(text);
+    if let Some(start) = find_dsml_start(pending_text) {
+        let dsml_part = pending_text.split_off(start);
+        flush_pending_text(channel, request_id, pending_text)?;
+        *dsml_tool_call_buffer = Some(dsml_part);
+        if let Some(buffer) = dsml_tool_call_buffer.as_ref() {
+            return try_parse_dsml_tool_call_buffer(buffer);
+        }
+    } else if let Some(candidate_start) = pending_text.rfind('<') {
+        let candidate_chars = pending_text[candidate_start..].chars().count();
+        if candidate_chars <= DSML_MARKER_GUARD_CHARS {
+            let suffix = pending_text.split_off(candidate_start);
+            flush_pending_text(channel, request_id, pending_text)?;
+            *pending_text = suffix;
+        } else {
+            flush_pending_text(channel, request_id, pending_text)?;
+        }
+    } else {
+        flush_pending_text(channel, request_id, pending_text)?;
+    }
+
+    Ok(None)
+}
+
 /**
  * Stream an OpenAI-compatible SSE response and forward text deltas to the channel.
  *
@@ -418,6 +877,10 @@ async fn stream_openai_compatible_response(
     let mut response = response;
     let mut buffer = String::new();
     let mut usage: Option<TokenUsageDto> = None;
+    let mut reasoning_content = String::new();
+    let mut pending_tool_calls: std::collections::HashMap<usize, (String, String, String)> = std::collections::HashMap::new();
+    let mut pending_text = String::new();
+    let mut dsml_tool_call_buffer: Option<String> = None;
 
     loop {
         tokio::select! {
@@ -428,7 +891,27 @@ async fn stream_openai_compatible_response(
             }
             next_chunk = response.chunk() => {
                 let Some(bytes) = next_chunk.map_err(map_response_chunk_error)? else {
-                    return Ok(ModelStreamOutcome::Completed { usage });
+                    if !pending_tool_calls.is_empty() {
+                        flush_pending_text(channel, &request.request_id, &mut pending_text)?;
+                        let tool_calls = finalize_tool_calls(&mut pending_tool_calls);
+                        return Ok(ModelStreamOutcome::ToolCallsRequested {
+                            tool_calls,
+                            usage,
+                            reasoning_content: finalize_reasoning_content(&reasoning_content),
+                        });
+                    }
+                    if let Some(tool_calls) = finalize_dsml_tool_call_buffer(&mut dsml_tool_call_buffer)? {
+                        return Ok(ModelStreamOutcome::ToolCallsRequested {
+                            tool_calls,
+                            usage,
+                            reasoning_content: finalize_reasoning_content(&reasoning_content),
+                        });
+                    }
+                    flush_pending_text(channel, &request.request_id, &mut pending_text)?;
+                    return Ok(ModelStreamOutcome::Completed {
+                        usage,
+                        reasoning_content: finalize_reasoning_content(&reasoning_content),
+                    });
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&bytes).replace("\r\n", "\n"));
@@ -439,7 +922,27 @@ async fn stream_openai_compatible_response(
                     };
 
                     if data == "[DONE]" {
-                        return Ok(ModelStreamOutcome::Completed { usage });
+                        if !pending_tool_calls.is_empty() {
+                            flush_pending_text(channel, &request.request_id, &mut pending_text)?;
+                            let tool_calls = finalize_tool_calls(&mut pending_tool_calls);
+                            return Ok(ModelStreamOutcome::ToolCallsRequested {
+                                tool_calls,
+                                usage,
+                                reasoning_content: finalize_reasoning_content(&reasoning_content),
+                            });
+                        }
+                        if let Some(tool_calls) = finalize_dsml_tool_call_buffer(&mut dsml_tool_call_buffer)? {
+                            return Ok(ModelStreamOutcome::ToolCallsRequested {
+                                tool_calls,
+                                usage,
+                                reasoning_content: finalize_reasoning_content(&reasoning_content),
+                            });
+                        }
+                        flush_pending_text(channel, &request.request_id, &mut pending_text)?;
+                        return Ok(ModelStreamOutcome::Completed {
+                            usage,
+                            reasoning_content: finalize_reasoning_content(&reasoning_content),
+                        });
                     }
 
                     let value: Value = serde_json::from_str(&data).map_err(|error| {
@@ -457,17 +960,81 @@ async fn stream_openai_compatible_response(
                         usage = extract_openai_usage(&value);
                     }
 
+                    if let Some(reasoning_delta) = value
+                        .pointer("/choices/0/delta/reasoning_content")
+                        .and_then(Value::as_str)
+                        .or_else(|| value.pointer("/choices/0/message/reasoning_content").and_then(Value::as_str))
+                    {
+                        reasoning_content.push_str(reasoning_delta);
+                    }
+
                     if let Some(text) = value
                         .pointer("/choices/0/delta/content")
                         .and_then(Value::as_str)
                         .or_else(|| value.pointer("/choices/0/message/content").and_then(Value::as_str))
                     {
-                        emit_chunk(channel, &request.request_id, text)?;
+                        if let Some(tool_calls) = process_openai_content_delta(
+                            channel,
+                            &request.request_id,
+                            &mut pending_text,
+                            &mut dsml_tool_call_buffer,
+                            text,
+                        )? {
+                            return Ok(ModelStreamOutcome::ToolCallsRequested {
+                                tool_calls,
+                                usage,
+                                reasoning_content: finalize_reasoning_content(&reasoning_content),
+                            });
+                        }
+                    }
+
+                    // Accumulate tool_calls delta
+                    if let Some(tc_array) = value.pointer("/choices/0/delta/tool_calls").and_then(Value::as_array) {
+                        for tc in tc_array {
+                            let index = tc["index"].as_u64().unwrap_or(0) as usize;
+                            let entry = pending_tool_calls.entry(index).or_insert((String::new(), String::new(), String::new()));
+                            if let Some(id) = tc["id"].as_str() {
+                                entry.0 = id.to_string();
+                            }
+                            if let Some(name) = tc.pointer("/function/name").and_then(Value::as_str) {
+                                entry.1 = name.to_string();
+                            }
+                            if let Some(args) = tc.pointer("/function/arguments").and_then(Value::as_str) {
+                                entry.2.push_str(args);
+                            }
+                        }
+                    }
+
+                    // Check finish_reason
+                    if let Some(reason) = value.pointer("/choices/0/finish_reason").and_then(Value::as_str) {
+                        if reason == "tool_calls" {
+                            flush_pending_text(channel, &request.request_id, &mut pending_text)?;
+                            let tool_calls = finalize_tool_calls(&mut pending_tool_calls);
+                            return Ok(ModelStreamOutcome::ToolCallsRequested {
+                                tool_calls,
+                                usage,
+                                reasoning_content: finalize_reasoning_content(&reasoning_content),
+                            });
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** Convert accumulated tool_calls deltas into resolved ToolCallDto list. */
+fn finalize_tool_calls(pending: &mut std::collections::HashMap<usize, (String, String, String)>) -> Vec<ToolCallDto> {
+    let mut keys: Vec<usize> = pending.keys().copied().collect();
+    keys.sort();
+    keys.into_iter().map(|idx| {
+        let (id, name, arguments) = pending.remove(&idx).unwrap_or_default();
+        ToolCallDto {
+            id,
+            call_type: "function".to_string(),
+            function: crate::dto::common::ToolCallFunctionDto { name, arguments },
+        }
+    }).collect()
 }
 
 /** Pull the next complete SSE frame from the buffered response text. */
@@ -653,7 +1220,10 @@ async fn stream_ollama_native_response(
                         }
                     }
 
-                    return Ok(ModelStreamOutcome::Completed { usage });
+                    return Ok(ModelStreamOutcome::Completed {
+                        usage,
+                        reasoning_content: None,
+                    });
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&bytes).replace("\r\n", "\n"));
@@ -680,7 +1250,10 @@ async fn stream_ollama_native_response(
 
                     if value.get("done").and_then(Value::as_bool) == Some(true) {
                         usage = extract_ollama_usage(&value).or(usage);
-                        return Ok(ModelStreamOutcome::Completed { usage });
+                        return Ok(ModelStreamOutcome::Completed {
+                            usage,
+                            reasoning_content: None,
+                        });
                     }
                 }
             }
@@ -903,6 +1476,40 @@ mod tests {
         assert_eq!(payload.as_deref(), Some("{\"foo\":\n\"bar\"}"));
     }
 
+    /** Verify DeepSeek V4 raw DSML tool markup can be converted into tool calls. */
+    #[test]
+    fn test_parse_dsml_tool_calls_converts_fullwidth_markup() {
+        let raw = r#"<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="todo_write">
+<｜｜DSML｜｜parameter name="todos" string="false">[{"content":"calculator","id":"1","status":"completed"}]</｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+<｜｜DSML｜｜invoke name="todo_read">
+</｜｜DSML｜｜invoke>
+</｜｜DSML｜｜tool_calls>"#;
+
+        let result = parse_dsml_tool_calls(raw);
+        let DsmlToolCallParseResult::Parsed(calls) = result else {
+            panic!("expected DSML tool calls to parse");
+        };
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].function.name, "todo_write");
+        let args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        assert_eq!(args["todos"][0]["status"], "completed");
+        assert_eq!(calls[1].function.name, "todo_read");
+        assert_eq!(calls[1].function.arguments, "{}");
+    }
+
+    /** Verify incomplete DSML blocks are held instead of leaking as text. */
+    #[test]
+    fn test_parse_dsml_tool_calls_reports_incomplete_block() {
+        let result = parse_dsml_tool_calls(
+            "<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name=\"todo_read\">",
+        );
+
+        assert!(matches!(result, DsmlToolCallParseResult::Incomplete));
+    }
+
     /** Verify OpenAI usage objects map into the shared token usage DTO shape. */
     #[test]
     fn test_extract_openai_usage_maps_fields() {
@@ -941,6 +1548,150 @@ mod tests {
         assert_eq!(base, "http://127.0.0.1:11434/v1");
     }
 
+    /** Verify role normalization accepts the provider-supported tool role. */
+    #[test]
+    fn test_normalize_prompt_role_accepts_tool_role() {
+        assert_eq!(normalize_prompt_role("SYSTEM"), Some("system"));
+        assert_eq!(normalize_prompt_role("USER"), Some("user"));
+        assert_eq!(normalize_prompt_role("ASSISTANT"), Some("assistant"));
+        assert_eq!(normalize_prompt_role("TOOL"), Some("tool"));
+        assert_eq!(normalize_prompt_role("tool"), Some("tool"));
+        assert_eq!(normalize_prompt_role("FUNCTION"), None);
+    }
+
+    /** Verify valid assistant tool-call transcripts pass provider preflight. */
+    #[test]
+    fn test_validate_prompt_tool_sequence_accepts_answered_tool_call() {
+        let messages = vec![
+            ModelPromptMessageDto {
+                role: "USER".to_string(),
+                content: "Please look this up".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+            ModelPromptMessageDto {
+                role: "ASSISTANT".to_string(),
+                content: String::new(),
+                reasoning_content: None,
+                tool_calls: Some(vec![ToolCallDto {
+                    id: "call_1".to_string(),
+                    call_type: "function".to_string(),
+                    function: crate::dto::common::ToolCallFunctionDto {
+                        name: "lookup".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+            },
+            ModelPromptMessageDto {
+                role: "TOOL".to_string(),
+                content: "result".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some("call_1".to_string()),
+                name: Some("lookup".to_string()),
+            },
+        ];
+
+        assert!(validate_prompt_tool_sequence(&messages).is_ok());
+    }
+
+    /** Verify orphan tool messages are rejected before reaching strict providers. */
+    #[test]
+    fn test_validate_prompt_tool_sequence_rejects_orphan_tool_message() {
+        let messages = vec![ModelPromptMessageDto {
+            role: "tool".to_string(),
+            content: "orphan".to_string(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: Some("call_missing".to_string()),
+            name: Some("lookup".to_string()),
+        }];
+
+        let error = validate_prompt_tool_sequence(&messages).expect_err("orphan tool should fail");
+
+        assert_eq!(error.code, "INVALID_TOOL_TRANSCRIPT");
+    }
+
+    /** Verify assistant tool calls cannot be separated from their tool results. */
+    #[test]
+    fn test_validate_prompt_tool_sequence_rejects_missing_tool_result() {
+        let messages = vec![
+            ModelPromptMessageDto {
+                role: "assistant".to_string(),
+                content: String::new(),
+                reasoning_content: None,
+                tool_calls: Some(vec![ToolCallDto {
+                    id: "call_1".to_string(),
+                    call_type: "function".to_string(),
+                    function: crate::dto::common::ToolCallFunctionDto {
+                        name: "lookup".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                name: None,
+            },
+            ModelPromptMessageDto {
+                role: "user".to_string(),
+                content: "continue".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+        ];
+
+        let error = validate_prompt_tool_sequence(&messages).expect_err("missing tool result should fail");
+
+        assert_eq!(error.code, "INVALID_TOOL_TRANSCRIPT");
+    }
+
+    /** Verify assistant tool-call turns use empty string content, not JSON null. */
+    #[test]
+    fn test_serialize_assistant_tool_calls_uses_empty_string_content() {
+        let value = serialize_prompt_message(&ModelPromptMessageDto {
+            role: "ASSISTANT".to_string(),
+            content: String::new(),
+            reasoning_content: None,
+            tool_calls: Some(vec![ToolCallDto {
+                id: "call_1".to_string(),
+                call_type: "function".to_string(),
+                function: crate::dto::common::ToolCallFunctionDto {
+                    name: "lookup".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            name: None,
+        }, ProviderProfile::OpenAiCompatible);
+
+        assert_eq!(value.get("role").and_then(Value::as_str), Some("assistant"));
+        assert_eq!(value.get("content").and_then(Value::as_str), Some(""));
+        assert!(value.get("tool_calls").is_some());
+        assert!(!value.get("content").is_some_and(Value::is_null));
+    }
+
+    /** Verify stored uppercase TOOL messages serialize to provider-compatible tool role. */
+    #[test]
+    fn test_serialize_tool_message_normalizes_role() {
+        let value = serialize_prompt_message(&ModelPromptMessageDto {
+            role: "TOOL".to_string(),
+            content: "{\"ok\":true}".to_string(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: Some("call_1".to_string()),
+            name: Some("lookup".to_string()),
+        }, ProviderProfile::OpenAiCompatible);
+
+        assert_eq!(value.get("role").and_then(Value::as_str), Some("tool"));
+        assert_eq!(value.get("tool_call_id").and_then(Value::as_str), Some("call_1"));
+        assert_eq!(value.get("name").and_then(Value::as_str), Some("lookup"));
+    }
+
     /** Verify OpenAI-compatible SSE streams emit chunk events and return usage metadata. */
     #[tokio::test]
     async fn test_stream_openai_response_emits_chunks_and_usage() {
@@ -961,12 +1712,18 @@ mod tests {
         let request = ResolvedModelStreamRequest {
             request_id: "req-openai".to_string(),
             provider_type: "OPENAI_COMPATIBLE".to_string(),
+            provider_profile: ProviderProfile::OpenAiCompatible,
             base_url: format!("{}/v1", server.base_url()),
             api_key: Some("sk-live".to_string()),
             model_id: "gpt-4.1-mini".to_string(),
+            request_model_name: "gpt-4.1-mini".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
                 role: "USER".to_string(),
                 content: "Hello provider".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             }],
             generation_params: Some(GenerationParamsDto {
                 temperature: Some(0.2),
@@ -974,6 +1731,10 @@ mod tests {
                 max_tokens: Some(128),
                 stream: true,
             }),
+            tools: vec![],
+            tool_choice: None,
+            conversation_id: None,
+            workspace_path: None,
         };
 
         let (channel, events) = recording_channel();
@@ -983,7 +1744,7 @@ mod tests {
             .await
             .expect("openai-compatible stream should succeed");
 
-        let ModelStreamOutcome::Completed { usage } = outcome else {
+        let ModelStreamOutcome::Completed { usage, .. } = outcome else {
             panic!("expected completed outcome");
         };
         let usage = usage.expect("usage should be present");
@@ -1033,12 +1794,18 @@ mod tests {
         let request = ResolvedModelStreamRequest {
             request_id: "req-ollama-native".to_string(),
             provider_type: "OLLAMA".to_string(),
+            provider_profile: ProviderProfile::Ollama,
             base_url: server.base_url(),
             api_key: None,
             model_id: "llama3.1".to_string(),
+            request_model_name: "llama3.1".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
                 role: "USER".to_string(),
                 content: "Stream from ollama".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             }],
             generation_params: Some(GenerationParamsDto {
                 temperature: Some(0.4),
@@ -1046,6 +1813,10 @@ mod tests {
                 max_tokens: Some(64),
                 stream: true,
             }),
+            tools: vec![],
+            tool_choice: None,
+            conversation_id: None,
+            workspace_path: None,
         };
 
         let (channel, events) = recording_channel();
@@ -1055,7 +1826,7 @@ mod tests {
             .await
             .expect("ollama native stream should succeed");
 
-        let ModelStreamOutcome::Completed { usage } = outcome else {
+        let ModelStreamOutcome::Completed { usage, .. } = outcome else {
             panic!("expected completed outcome");
         };
         let usage = usage.expect("usage should be present");
@@ -1110,14 +1881,24 @@ mod tests {
         let request = ResolvedModelStreamRequest {
             request_id: "req-ollama-fallback".to_string(),
             provider_type: "OLLAMA".to_string(),
+            provider_profile: ProviderProfile::Ollama,
             base_url: server.base_url(),
             api_key: None,
             model_id: "llama3.1".to_string(),
+            request_model_name: "llama3.1".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
                 role: "USER".to_string(),
                 content: "Fallback please".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             }],
             generation_params: None,
+            tools: vec![],
+            tool_choice: None,
+            conversation_id: None,
+            workspace_path: None,
         };
 
         let (channel, events) = recording_channel();
@@ -1127,7 +1908,7 @@ mod tests {
             .await
             .expect("ollama fallback stream should succeed");
 
-        let ModelStreamOutcome::Completed { usage } = outcome else {
+        let ModelStreamOutcome::Completed { usage, .. } = outcome else {
             panic!("expected completed outcome");
         };
         assert!(usage.is_none());

@@ -17,9 +17,12 @@
 
 use sqlx::SqlitePool;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, oneshot};
 
 const KEYRING_SERVICE_NAME: &str = "GetChat.ProviderApiKeys";
+
+pub const TOOL_LIMITS_KV_KEY: &str = "tool_limits";
+pub const BUILTIN_DISABLED_TOOLS_KV_KEY: &str = "builtin_disabled_tools";
 
 // ============================================================================
 // Secure Key Store Trait
@@ -118,4 +121,39 @@ pub struct AppState {
     pub db: SqlitePool,
     pub key_store: Box<dyn SecureKeyStore>,
     pub active_model_streams: ActiveModelStreamRegistry,
+    pub tool_executor: Box<dyn crate::services::tool_executor::ToolExecutor>,
+    pub tool_limits: Arc<Mutex<ToolLimits>>,
+    pub pending_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    pub mcp_manager: Arc<Mutex<crate::services::mcp_client::McpManager>>,
+    pub app_handle: tauri::AppHandle,
+}
+
+/** Configuration for tool-calling loop limits. */
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolLimits {
+    /** Maximum consecutive tool call rounds (default: 10). */
+    pub max_iterations: u32,
+    /** Maximum consecutive tool failures before soft-stopping (default: 7). */
+    pub max_consecutive_failures: u32,
+    /** Approval timeout in seconds for destructive tools (default: 60). */
+    pub approval_timeout_secs: u32,
+}
+
+impl Default for ToolLimits {
+    fn default() -> Self {
+        Self {
+            max_iterations: 10,
+            max_consecutive_failures: 7,
+            approval_timeout_secs: 60,
+        }
+    }
+}
+
+impl ToolLimits {
+    pub fn normalized(mut self) -> Self {
+        self.max_iterations = self.max_iterations.clamp(1, 50);
+        self.max_consecutive_failures = self.max_consecutive_failures.clamp(1, 20);
+        self.approval_timeout_secs = self.approval_timeout_secs.clamp(10, 300);
+        self
+    }
 }

@@ -62,25 +62,16 @@ export function buildSendPlan(state: AppStore): SendPlan {
     );
   }
 
-  // --- Rule 1.5: EDIT_INLINE mode ---
-  if (state.workspace.workspaceMode === "EDIT_INLINE" && state.workspace.forkIntent) {
-    const intent = state.workspace.forkIntent;
-    const editMessageId = intent.originalEditableMessageId;
-    if (!editMessageId) {
-      throw new SendPlanError("NO_EDIT_TARGET", "EDIT_INLINE mode but no target message");
-    }
-    return {
-      conversationId,
-      sourceBranchId,
-      targetBranchId: sourceBranchId,
-      targetParentMessageId: editMessageId, // New assistant will be child of edited user msg
-      editInlineMessageId: editMessageId,
-    };
-  }
-
   // --- Rule 2: Fork intent (HISTORY_FORK / EDIT_FORK) ---
   if (state.workspace.forkIntent) {
     const intent = state.workspace.forkIntent;
+    const intentSourceBranchId = intent.sourceBranchId ?? sourceBranchId;
+    if (!snapshot.entities.branches[intentSourceBranchId]) {
+      throw new SendPlanError(
+        "BRANCH_NOT_FOUND",
+        `Fork source branch ${intentSourceBranchId} not found`
+      );
+    }
     const targetParentMessageId =
       intent.sourceType === "HISTORY_USER_EDIT"
         ? intent.sourceMessageId ?? null
@@ -92,8 +83,8 @@ export function buildSendPlan(state: AppStore): SendPlan {
 
     return {
       conversationId,
-      sourceBranchId,
-      targetBranchId: sourceBranchId, // Placeholder; replaced after branch creation
+      sourceBranchId: intentSourceBranchId,
+      targetBranchId: intentSourceBranchId, // Placeholder; replaced after branch creation
       targetParentMessageId,
       createBranch: {
         sourceType: intent.sourceType,
@@ -176,8 +167,7 @@ export class SendPlanError extends Error {
       | "NO_CURRENT_BRANCH"
       | "NO_SNAPSHOT"
       | "BRANCH_NOT_FOUND"
-      | "COMPARE_MODE_FORBIDDEN"
-      | "NO_EDIT_TARGET",
+      | "COMPARE_MODE_FORBIDDEN",
     message: string
   ) {
     super(message);

@@ -30,6 +30,7 @@ pub struct ProviderModelDto {
     pub provider_id: String,
     pub request_name: String,
     pub display_name: String,
+    pub context_window_kb: i32,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -80,6 +81,8 @@ pub struct SaveProviderModelInput {
     pub id: Option<String>,
     pub request_name: String,
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_kb: Option<i32>,
 }
 
 /**

@@ -109,6 +109,14 @@ async fn run_migrations(pool: &SqlitePool) {
         include_str!("db/migrations/0001_init.sql"),
         include_str!("db/migrations/0002_sibling_unique.sql"),
         include_str!("db/migrations/0003_provider_models_and_branch_preferences.sql"),
+        include_str!("db/migrations/0004_title_source.sql"),
+        include_str!("db/migrations/0005_tool_calling.sql"),
+        include_str!("db/migrations/0006_workspace.sql"),
+        include_str!("db/migrations/0007_mcp_servers.sql"),
+        include_str!("db/migrations/0008_skills.sql"),
+        include_str!("db/migrations/0009_skills_context_window.sql"),
+        include_str!("db/migrations/0010_mcp_transport_config.sql"),
+        include_str!("db/migrations/0011_message_reasoning_content.sql"),
     ];
 
     for migration in migrations {

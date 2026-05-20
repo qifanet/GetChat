@@ -36,8 +36,8 @@ import {
 } from "./streamRuntimeRegistry";
 import { createTextSurface } from "./surfaces/surfaceFactory";
 import type { RequestId, MessageId } from "../types/base";
-import type { StreamRuntimeSession } from "../types/stream";
 import type { ModelStreamEvent } from "./tauriTypes";
+import type { ToolCallInfo } from "../types/conversation";
 import * as tauriCmd from "./tauriCommands";
 
 /** Default flush interval in milliseconds (~24ms ≈ 40fps) */
@@ -84,6 +84,8 @@ export async function startAssistantStream(params: {
   promptMessages: Array<{ role: string; content: string }>;
   generationParams?: Record<string, unknown>;
   rendererMode?: "PRETEXT" | "DOM_TEXT";
+  tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
+  toolChoice?: string;
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
   const requestId = createRequestId();
   const now = Date.now();
@@ -127,6 +129,9 @@ export async function startAssistantStream(params: {
     flushTimer: null,
     lastEmitAt: null,
     shouldStickToBottom: true,
+    toolCalls: [],
+    contentBlocks: [],
+    currentTextChunks: [],
   });
 
   // 4) Mark composer as sending
@@ -159,6 +164,9 @@ export async function startAssistantStream(params: {
         modelId: params.modelId,
         promptMessages: params.promptMessages,
         generationParams: params.generationParams,
+        tools: params.tools,
+        toolChoice: params.toolChoice,
+        conversationId: params.conversationId,
       },
       (event) => {
         void handleModelStreamEvent(event);
@@ -188,8 +196,9 @@ export async function startAssistantVariantStream(params: {
   promptMessages: Array<{ role: string; content: string }>;
   generationParams?: Record<string, unknown>;
   hasDownstreamConflict: boolean;
-  promoteOnComplete?: boolean;
   rendererMode?: "PRETEXT" | "DOM_TEXT";
+  tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
+  toolChoice?: string;
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
   const requestId = createRequestId();
   const now = Date.now();
@@ -216,9 +225,7 @@ export async function startAssistantVariantStream(params: {
     targetMessageId: assistantMessageId,
     status: "STARTING",
     rendererMode: params.rendererMode ?? "DOM_TEXT",
-    completionMode: params.promoteOnComplete
-      ? "PROMOTE_BRANCH_HEAD"
-      : "VARIANT_PREVIEW",
+    completionMode: "VARIANT_PREVIEW",
     previewUserMessageId: params.userMessageId,
     previewHasDownstreamConflict: params.hasDownstreamConflict,
     startedAt: now,
@@ -238,6 +245,9 @@ export async function startAssistantVariantStream(params: {
     flushTimer: null,
     lastEmitAt: null,
     shouldStickToBottom: true,
+    toolCalls: [],
+    contentBlocks: [],
+    currentTextChunks: [],
   });
 
   useAppStore.getState().setSendingState({
@@ -261,6 +271,9 @@ export async function startAssistantVariantStream(params: {
         modelId: params.modelId,
         promptMessages: params.promptMessages,
         generationParams: params.generationParams,
+        tools: params.tools,
+        toolChoice: params.toolChoice,
+        conversationId: params.conversationId,
       },
       (event) => {
         void handleModelStreamEvent(event);
@@ -289,7 +302,14 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
       onStreamChunk(event.requestId, event.chunk);
       return;
     case "COMPLETED":
-      await completeStream(event.requestId, event.usage);
+      if (event.finishReason === "tool_calls" && event.toolCalls) {
+        // Backend reports tool calls requested — log for now, full ReAct loop in later phase
+        console.info(
+          `[stream] tool_calls requested request=${event.requestId} calls=${event.toolCalls.length}`,
+          event.toolCalls.map((tc) => tc.function.name)
+        );
+      }
+      await completeStream(event.requestId, event.usage, event.reasoningContent);
       return;
     case "FAILED":
       await failStream(event.requestId, {
@@ -298,6 +318,106 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
         retriable: event.retriable,
       });
       return;
+    case "TOOL_CALL": {
+      const runtime = getRuntimeSession(event.requestId);
+      if (runtime) {
+        // Flush accumulated text chunks into a text block before the tool call
+        if (runtime.currentTextChunks.length > 0) {
+          runtime.contentBlocks.push({
+            type: "text",
+            content: runtime.currentTextChunks.join(""),
+          });
+          runtime.currentTextChunks = [];
+        }
+        // Append tool_call block
+        runtime.contentBlocks.push({
+          type: "tool_call",
+          callId: event.callId,
+          functionName: event.functionName,
+          args: event.arguments,
+        });
+
+        // Legacy toolCalls array (backward compat)
+        const tc: ToolCallInfo = {
+          id: `tc_${event.callId}`,
+          callId: event.callId,
+          functionName: event.functionName,
+          argumentsJson: event.arguments,
+          resultJson: "",
+          status: "PENDING",
+        };
+        runtime.toolCalls = [...runtime.toolCalls, tc];
+        // Force a React re-render by bumping visibleVersion
+        const session = useStreamStore.getState().sessionsByRequestId[event.requestId];
+        if (session) {
+          useStreamStore.getState().patchSession(event.requestId, {
+            visibleVersion: session.visibleVersion + 1,
+          });
+        }
+      }
+      console.info(
+        `[stream] tool_call request=${event.requestId} callId=${event.callId} fn=${event.functionName}`
+      );
+      return;
+    }
+    case "TOOL_RESULT": {
+      const runtime = getRuntimeSession(event.requestId);
+      if (runtime) {
+        // Append tool_result block
+        runtime.contentBlocks.push({
+          type: "tool_result",
+          callId: event.callId,
+          result: event.result,
+          success: event.success,
+        });
+
+        // Legacy toolCalls array update (backward compat)
+        const idx = runtime.toolCalls.findIndex(
+          (tc) => tc.callId === event.callId
+        );
+        if (idx !== -1) {
+          const updated = { ...runtime.toolCalls[idx] };
+          updated.resultJson = event.result;
+          updated.status = event.success ? "COMPLETED" : "FAILED";
+          if (!event.success) {
+            updated.errorMessage = event.result;
+          }
+          runtime.toolCalls = [
+            ...runtime.toolCalls.slice(0, idx),
+            updated,
+            ...runtime.toolCalls.slice(idx + 1),
+          ];
+          const session = useStreamStore.getState().sessionsByRequestId[event.requestId];
+          if (session) {
+            useStreamStore.getState().patchSession(event.requestId, {
+              visibleVersion: session.visibleVersion + 1,
+              pendingApproval: undefined,
+            });
+          }
+        }
+      }
+      console.info(
+        `[stream] tool_result request=${event.requestId} callId=${event.callId} success=${event.success}`
+      );
+      return;
+    }
+    case "APPROVAL_REQUIRED": {
+      console.info(
+        `[stream] approval_required request=${event.requestId} approvalId=${event.approvalId} fn=${event.functionName}`
+      );
+      // Store pending approval in streamStore (drives React approval UI)
+      // Do NOT use window.confirm — Tauri blocks it in webview
+      useStreamStore.getState().patchSession(event.requestId, {
+        pendingApproval: {
+          approvalId: event.approvalId,
+          functionName: event.functionName,
+          description: event.description,
+          timeoutSecs: event.timeoutSecs,
+          receivedAt: Date.now(),
+        },
+      });
+      return;
+    }
   }
 }
 
@@ -359,6 +479,9 @@ export function onStreamChunk(requestId: RequestId, chunk: string): void {
   runtime.chunks.push(chunk);
   runtime.pendingChunks.push(chunk);
   runtime.totalChars += chunk.length;
+
+  // Also accumulate in currentTextChunks for contentBlocks (B-2 inline display)
+  runtime.currentTextChunks.push(chunk);
 
   // Schedule flush to surface if mounted
   if (runtime.surface) {
@@ -461,40 +584,62 @@ export function attachSurfaceToRequest(
  */
 export async function completeStream(
   requestId: RequestId,
-  usage?: Record<string, unknown>
+  usage?: Record<string, unknown>,
+  reasoningContent?: string
 ): Promise<void> {
   const session = useStreamStore.getState().sessionsByRequestId[requestId];
   const runtime = getRuntimeSession(requestId);
   if (!session || !runtime) return;
 
+  // Flush any remaining currentTextChunks into the final text block
+  if (runtime.currentTextChunks.length > 0) {
+    runtime.contentBlocks.push({
+      type: "text",
+      content: runtime.currentTextChunks.join(""),
+    });
+    runtime.currentTextChunks = [];
+  }
+
   const finalText = runtime.chunks.join("");
-  const now = Date.now();
+
+  // Extract tool calls from runtime session for persistence
+  const runtimeToolCalls = runtime.toolCalls.length > 0
+    ? runtime.toolCalls.map(tc => ({
+        callId: tc.callId,
+        functionName: tc.functionName,
+        argumentsJson: tc.argumentsJson,
+        resultJson: tc.resultJson,
+        status: tc.status,
+        errorMessage: tc.errorMessage,
+      }))
+    : undefined;
 
   // 1) Write to database
+  const hasContentBlocks = runtime.contentBlocks.some((block) => block.type !== "text");
   const persistedMessage = await tauriCmd.completeAssistantMessage({
     messageId: session.targetMessageId,
+    requestId,
     contentText: finalText,
+    contentBlocks: hasContentBlocks ? runtime.contentBlocks : undefined,
     usage,
+    reasoningContent,
+    toolCalls: runtimeToolCalls,
   });
 
   // 2) Update appStore with final text (triggers switch to MarkdownRenderer)
+  //    Use the canonical DTO returned by Tauri to avoid frontend/DB drift.
   useAppStore.getState().patchMessageLocal(session.targetMessageId, {
     status: persistedMessage.status,
     updatedAt: persistedMessage.updatedAt,
     content: persistedMessage.content,
     generation: persistedMessage.generation,
     error: persistedMessage.error,
+    toolCalls: persistedMessage.toolCalls,
   });
 
-  // 3) Update branch/preview state depending on the session completion mode
-  if (session.completionMode === "PROMOTE_BRANCH_HEAD") {
-    const updatedBranch = await tauriCmd.setBranchHeadMessage({
-      branchId: session.branchId,
-      messageId: session.targetMessageId,
-    });
-    useAppStore.getState().upsertBranchLocal(updatedBranch);
-    useAppStore.getState().setVariantPreview(null);
-  } else if (session.completionMode === "VARIANT_PREVIEW") {
+  // 3) Update branch/preview state depending on the session completion mode.
+  // Regenerate always stays a candidate variant; it never patches branch head.
+  if (session.completionMode === "VARIANT_PREVIEW") {
     if (session.previewUserMessageId) {
       useAppStore.getState().setVariantPreview({
         userMessageId: session.previewUserMessageId,
@@ -571,15 +716,42 @@ export async function failStream(
   if (!session || session.status === "CANCELLED") return;
 
   const runtime = getRuntimeSession(requestId);
+
+  if (runtime?.currentTextChunks.length) {
+    runtime.contentBlocks.push({
+      type: "text",
+      content: runtime.currentTextChunks.join(""),
+    });
+    runtime.currentTextChunks = [];
+  }
+
   const partialText = runtime?.chunks.join("") ?? "";
+  const partialContentBlocks = runtime?.contentBlocks.some(
+    (block) => block.type !== "text"
+  )
+    ? runtime.contentBlocks
+    : undefined;
+  const runtimeToolCalls = runtime?.toolCalls.length
+    ? runtime.toolCalls.map((tc) => ({
+        callId: tc.callId,
+        functionName: tc.functionName,
+        argumentsJson: tc.argumentsJson,
+        resultJson: tc.resultJson,
+        status: tc.status,
+        errorMessage: tc.errorMessage,
+      }))
+    : undefined;
 
   // 1) Write partial result to database
   const persistedMessage = await tauriCmd.failAssistantMessage({
     messageId: session.targetMessageId,
+    requestId,
     errorCode: error.code,
     errorMessage: error.message,
     errorRetriable: error.retriable ?? true,
     partialContentText: partialText || undefined,
+    partialContentBlocks,
+    toolCalls: runtimeToolCalls,
   });
 
   // 2) Update appStore with partial text + error
@@ -589,6 +761,7 @@ export async function failStream(
     content: persistedMessage.content,
     generation: persistedMessage.generation,
     error: persistedMessage.error,
+    toolCalls: persistedMessage.toolCalls,
   });
 
   // 3) Update branch head only for direct branch streams; variant flows remain preview-only.
@@ -637,7 +810,30 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
   const runtime = getRuntimeSession(requestId);
   if (!session) return;
 
+  if (runtime?.currentTextChunks.length) {
+    runtime.contentBlocks.push({
+      type: "text",
+      content: runtime.currentTextChunks.join(""),
+    });
+    runtime.currentTextChunks = [];
+  }
+
   const partialText = runtime?.chunks.join("") ?? "";
+  const partialContentBlocks = runtime?.contentBlocks.some(
+    (block) => block.type !== "text"
+  )
+    ? runtime.contentBlocks
+    : undefined;
+  const runtimeToolCalls = runtime?.toolCalls.length
+    ? runtime.toolCalls.map((tc) => ({
+        callId: tc.callId,
+        functionName: tc.functionName,
+        argumentsJson: tc.argumentsJson,
+        resultJson: tc.resultJson,
+        status: tc.status,
+        errorMessage: tc.errorMessage,
+      }))
+    : undefined;
   useStreamStore.getState().patchSession(requestId, {
     status: "CANCELLED",
   });
@@ -655,10 +851,13 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
 
   const persistedMessage = await tauriCmd.failAssistantMessage({
     messageId: session.targetMessageId,
+    requestId,
     errorCode: "USER_CANCELLED",
     errorMessage: "Generation cancelled by user",
     errorRetriable: true,
     partialContentText: partialText || undefined,
+    partialContentBlocks,
+    toolCalls: runtimeToolCalls,
   });
 
   // Update appStore
@@ -668,6 +867,7 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     content: persistedMessage.content,
     generation: persistedMessage.generation,
     error: persistedMessage.error,
+    toolCalls: persistedMessage.toolCalls,
   });
 
   // Update branch head only for direct branch streams; variant flows remain preview-only.

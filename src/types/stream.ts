@@ -25,6 +25,91 @@ import type {
   StreamRendererMode,
   UnixMs,
 } from "./base";
+import type { ToolCallInfo } from "./conversation";
+
+// ============================================================================
+// Content Block — Ordered content for inline tool display
+// ============================================================================
+
+/**
+ * A single block in an ordered content sequence.
+ * Replaces the old dual-array (chunks[] + toolCalls[]) to preserve
+ * the exact interleaving of text and tool calls.
+ *
+ * During streaming, blocks accumulate in order:
+ *   text → tool_call → tool_result → text → ...
+ *
+ * On completion, the full block sequence is persisted as JSON
+ * (backward-compatible with plain-text messages).
+ */
+export type ContentBlock =
+  | { type: "text"; content: string }
+  | { type: "tool_call"; callId: string; functionName: string; args: string }
+  | { type: "tool_result"; callId: string; result: string; success: boolean };
+
+/** Helper: create a text block */
+export function textBlock(content: string): ContentBlock {
+  return { type: "text", content };
+}
+
+/** Helper: create a tool_call block */
+export function toolCallBlock(
+  callId: string,
+  functionName: string,
+  args: string
+): ContentBlock {
+  return { type: "tool_call", callId, functionName, args };
+}
+
+/** Helper: create a tool_result block */
+export function toolResultBlock(
+  callId: string,
+  result: string,
+  success: boolean
+): ContentBlock {
+  return { type: "tool_result", callId, result, success };
+}
+
+/** Get all text content from a block sequence (for backward compat) */
+export function extractTextFromBlocks(blocks: ContentBlock[]): string {
+  return blocks
+    .filter((b): b is ContentBlock & { type: "text" } => b.type === "text")
+    .map((b) => b.content)
+    .join("");
+}
+
+/** Get all tool call info from a block sequence */
+export function extractToolCallsFromBlocks(blocks: ContentBlock[]): ToolCallInfo[] {
+  const results: ToolCallInfo[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.type === "tool_call") {
+      // Look ahead for the corresponding tool_result
+      let status: ToolCallInfo["status"] = "PENDING";
+      let resultJson = "";
+      let errorMessage: string | undefined;
+      for (let j = i + 1; j < blocks.length; j++) {
+        const next = blocks[j];
+        if (next.type === "tool_result" && next.callId === block.callId) {
+          status = next.success ? "COMPLETED" : "FAILED";
+          resultJson = next.result;
+          if (!next.success) errorMessage = next.result;
+          break;
+        }
+      }
+      results.push({
+        id: `tc_${block.callId}`,
+        callId: block.callId,
+        functionName: block.functionName,
+        argumentsJson: block.args,
+        resultJson,
+        status,
+        errorMessage,
+      });
+    }
+  }
+  return results;
+}
 
 // ============================================================================
 // Stream Error
@@ -69,13 +154,22 @@ export interface StreamSessionMeta {
   visibleCharCount: number;
 
   /** How completion should update workspace state after persistence succeeds. */
-  completionMode?: "BRANCH_HEAD" | "PROMOTE_BRANCH_HEAD" | "VARIANT_PREVIEW";
+  completionMode?: "BRANCH_HEAD" | "VARIANT_PREVIEW";
 
   /** Parent user message for variant preview flows. */
   previewUserMessageId?: MessageId;
 
   /** Whether previewed downstream content should stay hidden. */
   previewHasDownstreamConflict?: boolean;
+
+  /** Pending tool approval request (set by APPROVAL_REQUIRED event, cleared on response) */
+  pendingApproval?: {
+    approvalId: string;
+    functionName: string;
+    description: string;
+    timeoutSecs: number;
+    receivedAt: number;
+  };
 
   error?: StreamError;
 }
@@ -155,4 +249,21 @@ export interface StreamRuntimeSession {
 
   /** Whether to auto-scroll as new content arrives */
   shouldStickToBottom: boolean;
+
+  /** Tool calls accumulated during ReAct Loop streaming */
+  toolCalls: ToolCallInfo[];
+
+  /**
+   * Ordered content blocks preserving the exact interleaving of text
+   * and tool calls. This is the primary data structure for inline
+   * tool display (B-2).
+   */
+  contentBlocks: ContentBlock[];
+
+  /**
+   * Text chunks accumulated for the current (last) text block.
+   * When a TOOL_CALL event arrives, these are flushed into a text block
+   * before the tool_call block is appended.
+   */
+  currentTextChunks: string[];
 }

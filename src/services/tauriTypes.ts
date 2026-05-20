@@ -27,6 +27,7 @@ import type {
   ConversationSnapshot,
   MessageNode,
 } from "../types/conversation";
+import type { ContentBlock } from "../types/stream";
 
 // ============================================================================
 // Error Types
@@ -73,6 +74,7 @@ export interface BootstrapResult {
   providers: ProviderDto[];
   defaultModelId: string | null;
   helperModelId: string | null;
+  systemPrompt: string;
 }
 
 // ============================================================================
@@ -172,11 +174,6 @@ export interface SetBranchPreferredModelInput {
   modelId: ModelId | null;
 }
 
-export interface SetBranchHeadMessageInput {
-  branchId: BranchId;
-  messageId: MessageId;
-}
-
 // ============================================================================
 // Message Input Types
 // ============================================================================
@@ -187,6 +184,13 @@ export interface CreateUserMessageInput {
   contentText: string;
   parentMessageId?: MessageId;
   editedFromMessageId?: MessageId;
+}
+
+export interface DirectOverwriteUserMessageInput {
+  conversationId: ConversationId;
+  branchId: BranchId;
+  messageId: MessageId;
+  contentText: string;
 }
 
 export interface CreateAssistantPlaceholderForBranchInput {
@@ -209,22 +213,40 @@ export interface CreateAssistantVariantPlaceholderInput {
 
 export interface CompleteAssistantMessageInput {
   messageId: MessageId;
+  requestId: RequestId;
   contentText: string;
+  contentBlocks?: ContentBlock[];
   usage?: Record<string, unknown>;
+  reasoningContent?: string;
+  toolCalls?: ToolCallResultInput[];
+}
+
+/** A single tool call result to persist alongside an assistant message. */
+export interface ToolCallResultInput {
+  callId: string;
+  functionName: string;
+  argumentsJson: string;
+  resultJson: string;
+  status: string;
+  errorMessage?: string;
 }
 
 export interface FailAssistantMessageInput {
   messageId: MessageId;
+  requestId: RequestId;
   errorCode: string;
   errorMessage: string;
   errorRetriable: boolean;
   partialContentText?: string;
+  partialContentBlocks?: ContentBlock[];
+  toolCalls?: ToolCallResultInput[];
 }
 
 export interface BuildPromptMessagesInput {
   conversationId: ConversationId;
   upToMessageId: MessageId;
   maxTokensBudget?: number;
+  branchId?: BranchId;
 }
 
 // ============================================================================
@@ -233,8 +255,30 @@ export interface BuildPromptMessagesInput {
 
 /** A single message in the prompt array sent to the model API */
 export interface PromptMessage {
+  sourceMessageId?: MessageId;
   role: string;
   content: string;
+  reasoningContent?: string;
+  toolCalls?: ToolCallDto[];
+  toolCallId?: string;
+  name?: string;
+}
+
+/** Tool call returned by the model (function name + arguments). */
+export interface ToolCallDto {
+  id: string;
+  type: string;
+  function: { name: string; arguments: string };
+}
+
+/** Tool definition sent to the model API. */
+export interface ToolDefinitionDto {
+  type: string;
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 // ============================================================================
@@ -248,6 +292,9 @@ export interface StartModelStreamInput {
   modelId: string;
   promptMessages: PromptMessage[];
   generationParams?: Record<string, unknown>;
+  tools?: ToolDefinitionDto[];
+  toolChoice?: string;
+  conversationId?: string;
 }
 
 /** Runtime stream chunk event sent from the Tauri backend over Channel IPC. */
@@ -262,6 +309,9 @@ export interface ModelStreamCompletedEvent {
   kind: "COMPLETED";
   requestId: RequestId;
   usage?: Record<string, unknown>;
+  finishReason?: string;
+  toolCalls?: ToolCallDto[];
+  reasoningContent?: string;
 }
 
 /** Runtime stream failure event sent from the Tauri backend over Channel IPC. */
@@ -273,11 +323,65 @@ export interface ModelStreamFailedEvent {
   retriable: boolean;
 }
 
+/** Tool call started event — emitted when the backend begins executing a tool. */
+export interface ModelStreamToolCallEvent {
+  kind: "TOOL_CALL";
+  requestId: RequestId;
+  callId: string;
+  functionName: string;
+  arguments: string;
+}
+
+/** Tool execution result event — emitted after a tool finishes executing. */
+export interface ModelStreamToolResultEvent {
+  kind: "TOOL_RESULT";
+  requestId: RequestId;
+  callId: string;
+  result: string;
+  success: boolean;
+}
+
+/** Approval required event — emitted when a destructive tool needs user confirmation. */
+export interface ModelStreamApprovalRequiredEvent {
+  kind: "APPROVAL_REQUIRED";
+  requestId: RequestId;
+  approvalId: string;
+  functionName: string;
+  description: string;
+  timeoutSecs: number;
+}
+
 /** Union of all runtime model stream events delivered through the channel. */
 export type ModelStreamEvent =
   | ModelStreamChunkEvent
   | ModelStreamCompletedEvent
-  | ModelStreamFailedEvent;
+  | ModelStreamFailedEvent
+  | ModelStreamToolCallEvent
+  | ModelStreamToolResultEvent
+  | ModelStreamApprovalRequiredEvent;
+
+// ============================================================================
+// Context Management Types
+// ============================================================================
+
+/** Context window usage status for a conversation branch. */
+export interface ContextTokenBreakdownDto {
+  systemTokens: number;
+  toolPromptTokens: number;
+  userTokens: number;
+  assistantTokens: number;
+  toolTokens: number;
+  compressedContextTokens: number;
+  skillPromptTokens: number;
+}
+
+export interface ContextStatusDto {
+  usedTokens: number;
+  totalTokens: number;
+  percentage: number;
+  messageCount: number;
+  breakdown: ContextTokenBreakdownDto;
+}
 
 // ============================================================================
 // Type Aliases — Reuse existing domain types for outputs

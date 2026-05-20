@@ -39,7 +39,12 @@ SKIP_PATHS = {'src-tauri/gen'}
 
 
 def should_check(filepath, project_root):
-    rel = os.path.relpath(filepath, project_root).replace(os.sep, '/')
+    try:
+        rel = os.path.relpath(filepath, project_root).replace(os.sep, '/')
+    except ValueError:
+        # Windows reserved device names such as "nul" can surface through
+        # directory walks as \\.\nul; they are not real source files.
+        return False
     for sp in SKIP_PATHS:
         if rel.startswith(sp):
             return False

@@ -26,8 +26,14 @@ mod state;
 #[cfg(test)]
 mod test_support;
 
-use state::{AppState, SystemKeyStore};
-use std::{collections::HashMap, sync::Arc};
+use services::tool_executor::BuiltinToolExecutor;
+use state::{
+    AppState, SystemKeyStore, ToolLimits, BUILTIN_DISABLED_TOOLS_KV_KEY, TOOL_LIMITS_KV_KEY,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tauri::Manager;
 
 /// Run database migrations and return the SQLite pool.
@@ -43,6 +49,56 @@ async fn setup_database(app_handle: &tauri::AppHandle) -> sqlx::SqlitePool {
 
     let db_path = app_dir.join("getchat.db");
     db::init_pool(&db_path).await
+}
+
+async fn load_persisted_tool_limits(pool: &sqlx::SqlitePool) -> ToolLimits {
+    match crate::repositories::app_kv::get(pool, TOOL_LIMITS_KV_KEY).await {
+        Ok(Some(value_json)) => match serde_json::from_str::<ToolLimits>(&value_json) {
+            Ok(limits) => limits.normalized(),
+            Err(error) => {
+                tracing::warn!(
+                    key = TOOL_LIMITS_KV_KEY,
+                    error = %error,
+                    "invalid persisted tool limits, falling back to defaults"
+                );
+                ToolLimits::default()
+            }
+        },
+        Ok(None) => ToolLimits::default(),
+        Err(error) => {
+            tracing::warn!(
+                key = TOOL_LIMITS_KV_KEY,
+                error = %error,
+                "failed to load persisted tool limits, falling back to defaults"
+            );
+            ToolLimits::default()
+        }
+    }
+}
+
+async fn load_persisted_builtin_disabled_tools(pool: &sqlx::SqlitePool) -> HashSet<String> {
+    match crate::repositories::app_kv::get(pool, BUILTIN_DISABLED_TOOLS_KV_KEY).await {
+        Ok(Some(value_json)) => match serde_json::from_str::<Vec<String>>(&value_json) {
+            Ok(names) => names.into_iter().collect(),
+            Err(error) => {
+                tracing::warn!(
+                    key = BUILTIN_DISABLED_TOOLS_KV_KEY,
+                    error = %error,
+                    "invalid persisted disabled tool list, falling back to defaults"
+                );
+                HashSet::new()
+            }
+        },
+        Ok(None) => HashSet::new(),
+        Err(error) => {
+            tracing::warn!(
+                key = BUILTIN_DISABLED_TOOLS_KV_KEY,
+                error = %error,
+                "failed to load disabled tool list, falling back to defaults"
+            );
+            HashSet::new()
+        }
+    }
 }
 
 /// Initialize the tracing subscriber for structured logging.
@@ -75,10 +131,32 @@ pub fn run() {
             tauri::async_runtime::block_on(async {
                 let pool = setup_database(&app_handle).await;
                 let key_store = Box::new(SystemKeyStore::new());
+                let tool_limits = load_persisted_tool_limits(&pool).await;
+                let disabled_builtin_tools = load_persisted_builtin_disabled_tools(&pool).await;
+                let tool_executor = Box::new(BuiltinToolExecutor::new_with_disabled(
+                    disabled_builtin_tools,
+                ));
+                let mcp_manager = Arc::new(tokio::sync::Mutex::new(
+                    crate::services::mcp_client::McpManager::new(),
+                ));
+
+                // Reload persisted MCP servers from database without exposing stored secrets.
+                crate::commands::streaming::reload_mcp_servers_from_db(
+                    &pool,
+                    key_store.as_ref(),
+                    &mcp_manager,
+                )
+                .await;
+
                 app_handle.manage(AppState {
                     db: pool,
                     key_store,
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    tool_executor,
+                    tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
+                    pending_approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    mcp_manager,
+                    app_handle: app_handle.clone(),
                 });
             });
 
@@ -103,29 +181,59 @@ pub fn run() {
             commands::conversations::delete_conversation,
             commands::conversations::generate_conversation_title,
             commands::conversations::generate_branch_diff_summary,
+            commands::conversations::set_conversation_workspace,
+            commands::conversations::read_todo_items,
             // Branches (5+2)
             commands::branches::create_branch,
             commands::branches::rename_branch,
             commands::branches::set_branch_preferred_model,
-            commands::branches::set_branch_head_message,
             commands::branches::archive_branch,
             commands::branches::unarchive_branch,
+            commands::branches::delete_branch,
             commands::branches::set_mainline_branch,
             // Messages (6+2)
             commands::messages::create_user_message,
+            commands::messages::direct_overwrite_user_message,
             commands::messages::create_assistant_placeholder_for_branch,
             commands::messages::create_assistant_variant_placeholder,
             commands::messages::complete_assistant_message,
             commands::messages::fail_assistant_message,
             commands::messages::build_prompt_messages,
-            commands::messages::delete_message,
-            commands::messages::edit_user_message_inline,
+            commands::messages::delete_assistant_variant_message,
             commands::messages::search_messages,
-            // Streaming runtime (2)
+            // Streaming runtime (3+1+2)
+            commands::streaming::get_enabled_tool_definitions,
+            commands::streaming::get_builtin_tool_states,
+            commands::streaming::set_builtin_tool_enabled,
             commands::streaming::start_model_stream,
             commands::streaming::abort_model_stream,
+            commands::streaming::approve_tool_action,
+            commands::streaming::get_tool_settings,
+            commands::streaming::update_tool_settings,
+            // MCP Server management (4)
+            commands::streaming::list_mcp_servers,
+            commands::streaming::add_mcp_server,
+            commands::streaming::remove_mcp_server,
+            commands::streaming::get_mcp_tool_definitions,
+            commands::streaming::set_mcp_server_enabled,
+            commands::streaming::get_context_status,
+            commands::streaming::compress_context,
+            // Skills management (8)
+            commands::streaming::list_skills,
+            commands::streaming::create_skill,
+            commands::streaming::update_skill,
+            commands::streaming::delete_skill,
+            commands::streaming::set_skill_enabled,
+            commands::streaming::list_slash_items,
+            commands::streaming::execute_skill,
+            commands::streaming::execute_mcp_prompt,
+            commands::streaming::get_skills_directory,
+            commands::streaming::import_skill,
+            commands::streaming::refresh_skills_from_disk,
             // Settings (4)
             commands::settings::list_providers,
+            commands::settings::get_system_prompt,
+            commands::settings::set_system_prompt,
             commands::settings::save_provider,
             commands::settings::delete_provider,
             commands::settings::test_provider_connection,

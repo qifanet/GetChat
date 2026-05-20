@@ -9,7 +9,7 @@
 import { useTranslation } from "react-i18next";
 import { memo, useState } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
-import { IconCopy, IconCheck, IconPencilSquare, IconBranch } from "../common/Icon";
+import { IconCopy, IconCheck, IconPencilSquare } from "../common/Icon";
 import {
   MessageActionButton,
   MessageActionMoreMenu,
@@ -20,8 +20,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
 const _sel_setDraft = (s: import("../../stores/appStore.types").AppStore) => s.setDraft;
-const _sel_startEditInline = (s: import("../../stores/appStore.types").AppStore) => s.startEditInline;
-const _sel_startHistoryFork = (s: import("../../stores/appStore.types").AppStore) => s.startHistoryFork;
+const _sel_startEditFork = (s: import("../../stores/appStore.types").AppStore) => s.startEditFork;
 
 interface UserMessageBubbleProps {
   /** The user message to render. */
@@ -43,8 +42,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
   const { t, i18n } = useTranslation();
   const currentBranchId = useAppStore(_sel_workspace_currentBranchId);
   const setDraft = useAppStore(_sel_setDraft);
-  const startEditInline = useAppStore(_sel_startEditInline);
-  const startHistoryFork = useAppStore(_sel_startHistoryFork);
+  const startEditFork = useAppStore(_sel_startEditFork);
 
   const [copied, setCopied] = useState(false);
 
@@ -57,27 +55,15 @@ export const UserMessageBubble = memo(function UserMessageBubble({
   function handleReEdit(): void {
     if (!currentBranchId) return;
     setDraft(message.content.text);
-    startEditInline(message.id);
-  }
-
-  function handleContinueFromHere(): void {
-    if (!currentBranchId) return;
-    startHistoryFork({
+    startEditFork({
       sourceType: "HISTORY_USER_EDIT",
       sourceBranchId: currentBranchId,
-      sourceMessageId: message.id,
+      sourceMessageId: message.parentId,
+      originalEditableMessageId: message.id,
     });
   }
 
-  const moreMenuItems = currentBranchId
-    ? [
-        {
-          label: t("message.continueFromHere"),
-          onClick: handleContinueFromHere,
-          icon: <IconBranch size={14} />,
-        },
-      ]
-    : [];
+  const moreMenuItems: never[] = [];
 
   return (
     <div className="app-message-card group/message flex flex-col items-end" data-message-id={message.id}>

@@ -13,7 +13,8 @@ use serde_json::{json, Value};
 
 use crate::dto::common::ProviderType;
 use crate::error::AppError;
-use crate::repositories::{app_kv, provider_models, providers};
+use crate::repositories::{app_kv, compressed_contexts, provider_models, providers};
+use crate::services::prompt_service::PromptMessage;
 use crate::state::AppState;
 
 // ============================================================================
@@ -35,18 +36,26 @@ const TITLE_MAX_ASSISTANT_CHARS: usize = 300;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TitleGenerationResult {
-    pub title: String,
+    pub title: Option<String>,
+    /** When generation is skipped or fails, contains a human-readable reason. */
+    pub skip_reason: Option<String>,
+}
+
+impl TitleGenerationResult {
+    fn skipped(reason: &str) -> Self {
+        Self { title: None, skip_reason: Some(reason.to_string()) }
+    }
+
+    fn success(title: String) -> Self {
+        Self { title: Some(title), skip_reason: None }
+    }
 }
 
 /**
  * Auto-generate a conversation title using the configured helper model.
  *
- * Prerequisites:
- *   - helper_model_id must be configured in app_kv
- *   - The conversation must exist and have title_source = 'DEFAULT'
- *   - The conversation must have at least one user message
- *
- * On failure, returns silently (caller should fall back to default title).
+ * Returns TitleGenerationResult with either a new title or a skip_reason
+ * explaining what happened. The frontend can use skip_reason for diagnostics.
  */
 pub async fn generate_conversation_title(
     state: &tauri::State<'_, AppState>,
@@ -64,8 +73,8 @@ pub async fn generate_conversation_title(
             id
         }
         None => {
-            tracing::info!("generate_conversation_title: no helper model configured, skipping");
-            return Ok(None);
+            tracing::info!("generate_conversation_title: no helper model configured");
+            return Ok(Some(TitleGenerationResult::skipped("NO_HELPER_MODEL")));
         }
     };
 
@@ -74,13 +83,6 @@ pub async fn generate_conversation_title(
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::not_found("Conversation not found"))?;
-
-    tracing::info!(
-        conv_id = %conversation_id,
-        title_source = %conversation.title_source,
-        title = %conversation.title,
-        "generate_conversation_title: checking conversation"
-    );
 
     if conversation.title_source != "DEFAULT" {
         tracing::info!(
@@ -101,9 +103,9 @@ pub async fn generate_conversation_title(
         None => {
             tracing::warn!(
                 helper_model_id = %helper_model_id,
-                "generate_conversation_title: helper model not found in DB, skipping"
+                "generate_conversation_title: helper model not found in DB"
             );
-            return Ok(None);
+            return Ok(Some(TitleGenerationResult::skipped("MODEL_NOT_FOUND")));
         }
     };
 
@@ -116,9 +118,9 @@ pub async fn generate_conversation_title(
         None => {
             tracing::warn!(
                 provider_id = %model_row.provider_id,
-                "generate_conversation_title: provider not found, skipping"
+                "generate_conversation_title: provider not found"
             );
-            return Ok(None);
+            return Ok(Some(TitleGenerationResult::skipped("PROVIDER_NOT_FOUND")));
         }
     };
 
@@ -132,15 +134,22 @@ pub async fn generate_conversation_title(
     );
 
     if messages.is_empty() {
-        tracing::info!("generate_conversation_title: no messages found, skipping");
-        return Ok(None);
+        tracing::info!("generate_conversation_title: no completed messages found");
+        return Ok(Some(TitleGenerationResult::skipped("NO_MESSAGES")));
     }
 
     // 5. Make non-streaming AI call
     let api_key = if provider_row.r#type == "OLLAMA" {
         None
     } else {
-        state.key_store.load(&provider_row.id).ok().flatten()
+        let key = state.key_store.load(&provider_row.id).ok().flatten();
+        if key.is_none() {
+            tracing::warn!(
+                provider_id = %provider_row.id,
+                "generate_conversation_title: API key not found in key store"
+            );
+        }
+        key
     };
 
     let provider_type = match provider_row.r#type.as_str() {
@@ -152,6 +161,7 @@ pub async fn generate_conversation_title(
         provider_type = ?provider_type,
         model = %model_row.request_name,
         base_url = %provider_row.base_url,
+        has_api_key = api_key.is_some(),
         "generate_conversation_title: calling helper model"
     );
 
@@ -166,16 +176,16 @@ pub async fn generate_conversation_title(
     {
         Ok(t) => t,
         Err(e) => {
-            tracing::warn!(error = %e.message, "generate_conversation_title: helper model call failed, skipping");
-            return Ok(None);
+            tracing::warn!(error = %e.message, "generate_conversation_title: helper model call failed");
+            return Ok(Some(TitleGenerationResult::skipped(&format!("API_ERROR: {}", e.message))));
         }
     };
 
     let title = truncate_title(&title);
 
     if title.is_empty() {
-        tracing::info!("generate_conversation_title: empty title returned, skipping");
-        return Ok(None);
+        tracing::info!("generate_conversation_title: empty title returned from model");
+        return Ok(Some(TitleGenerationResult::skipped("EMPTY_RESPONSE")));
     }
 
     // 6. Update conversation title
@@ -194,14 +204,13 @@ pub async fn generate_conversation_title(
         "generate_conversation_title: title updated"
     );
 
-    Ok(Some(TitleGenerationResult { title }))
+    Ok(Some(TitleGenerationResult::success(title)))
 }
 
 // ============================================================================
 // Prompt Building
 // ============================================================================
 
-/** A simple message for the title generation prompt. */
 struct TitlePromptMessage {
     role: String,
     content: String,
@@ -249,21 +258,37 @@ async fn call_helper_model(
     model_name: &str,
     messages: &[TitlePromptMessage],
 ) -> Result<String, AppError> {
-    let prompt_messages: Vec<Value> = std::iter::once(json!({
-        "role": "system",
-        "content": TITLE_SYSTEM_PROMPT
-    }))
-    .chain(messages.iter().map(|m| {
-        json!({
-            "role": m.role,
-            "content": m.content
-        })
-    }))
-    .collect();
+    let has_explicit_system_prompt = messages.iter().any(|m| m.role == "system");
+    let prompt_messages: Vec<Value> = if has_explicit_system_prompt {
+        messages
+            .iter()
+            .map(|m| {
+                json!({
+                    "role": m.role,
+                    "content": m.content
+                })
+            })
+            .collect()
+    } else {
+        std::iter::once(json!({
+            "role": "system",
+            "content": TITLE_SYSTEM_PROMPT
+        }))
+        .chain(messages.iter().map(|m| {
+            json!({
+                "role": m.role,
+                "content": m.content
+            })
+        }))
+        .collect()
+    };
 
     match provider_type {
         ProviderType::Ollama => call_ollama(base_url, model_name, &prompt_messages).await,
-        ProviderType::OpenaiCompatible => {
+        ProviderType::OpenaiCompatible
+        | ProviderType::DeepSeek
+        | ProviderType::OpenRouter
+        | ProviderType::Groq => {
             call_openai_compatible(base_url, api_key, model_name, &prompt_messages).await
         }
     }
@@ -286,7 +311,6 @@ async fn call_ollama(
         "messages": messages,
         "stream": false,
         "think": false,
-        // Keep the helper context window aligned with streaming to avoid unexpected truncation.
         "options": { "num_ctx": 32768 }
     });
 
@@ -308,7 +332,9 @@ async fn call_ollama(
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
         tracing::warn!(status = %status, body = %text, "Ollama title generation failed");
-        return Ok(String::new());
+        return Err(AppError::invalid_argument(format!(
+            "Ollama returned {}: {}", status, text
+        )));
     }
 
     let json: Value = response
@@ -341,19 +367,24 @@ async fn call_openai_compatible(
         base_url.trim_end_matches('/')
     );
 
+    // max_tokens must be generous enough for models with built-in reasoning
+    // (e.g. DeepSeek V4 Flash uses reasoning_content + content; if max_tokens
+    // is too small, the reasoning chain consumes all tokens and content is empty).
     let mut request = reqwest::Client::new()
         .post(&url)
         .json(&json!({
             "model": model_name,
             "messages": messages,
             "stream": false,
-            "max_tokens": 50,
+            "max_tokens": 256,
         }))
         .timeout(std::time::Duration::from_secs(30));
 
     if let Some(key) = api_key {
         request = request.bearer_auth(key);
     }
+
+    tracing::info!(url = %url, model = %model_name, has_api_key = api_key.is_some(), "call_openai_compatible: sending request");
 
     let response = request
         .send()
@@ -363,8 +394,16 @@ async fn call_openai_compatible(
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        tracing::warn!(status = %status, body = %text, "OpenAI title generation failed");
-        return Ok(String::new());
+        tracing::warn!(
+            status = %status,
+            body = %text,
+            model = %model_name,
+            url = %url,
+            "call_openai_compatible: API returned non-2xx"
+        );
+        return Err(AppError::invalid_argument(format!(
+            "API returned HTTP {}: {}", status, &text[..text.len().min(200)]
+        )));
     }
 
     let json: Value = response
@@ -372,13 +411,30 @@ async fn call_openai_compatible(
         .await
         .map_err(|e| AppError::invalid_argument(format!("API response parse failed: {e}")))?;
 
+    // Some models (e.g. DeepSeek V4 Flash) return reasoning_content (thinking chain)
+    // alongside content. We only use content — reasoning_content is the model's internal
+    // thought process, not the answer.
     let content = json["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
-        .trim()
-        .to_string();
+        .trim();
 
-    Ok(content)
+    if content.is_empty() {
+        // Log the full response structure for diagnostics
+        let has_reasoning = json["choices"][0]["message"]["reasoning_content"]
+            .as_str()
+            .map_or(false, |s| !s.trim().is_empty());
+        tracing::warn!(
+            content_empty = true,
+            has_reasoning_content = has_reasoning,
+            response_preview = %serde_json::to_string(&json).unwrap_or_default().chars().take(300).collect::<String>(),
+            "call_openai_compatible: content is empty in API response"
+        );
+    }
+
+    tracing::info!(content = %content, "call_openai_compatible: extracted title");
+
+    Ok(content.to_string())
 }
 
 fn truncate_title(title: &str) -> String {
@@ -406,27 +462,22 @@ pub struct DiffSummaryResult {
     pub summary: String,
 }
 
-/// Generate an AI summary of the differences between two branches.
+/**
+ * Generate an AI summary of differences between two branches.
+ */
 pub async fn generate_branch_diff_summary(
-    state: &AppState,
+    state: &tauri::State<'_, AppState>,
     conversation_id: &str,
     left_branch_id: &str,
     right_branch_id: &str,
 ) -> Result<Option<DiffSummaryResult>, AppError> {
-    tracing::info!(
-        conv_id = %conversation_id,
-        left = %left_branch_id,
-        right = %right_branch_id,
-        "generate_branch_diff_summary: start"
-    );
-
     // 1. Resolve helper model
     let helper_model_id = app_kv::get(&state.db, "helper_model_id")
         .await
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<String>(&raw).ok());
-    let model_id = match helper_model_id {
+        .map_err(AppError::from)?
+        .and_then(|v| serde_json::from_str::<String>(&v).ok());
+
+    let helper_model_id = match helper_model_id {
         Some(id) => id,
         None => {
             tracing::info!("generate_branch_diff_summary: no helper model configured");
@@ -434,15 +485,41 @@ pub async fn generate_branch_diff_summary(
         }
     };
 
-    let model_row = provider_models::find_by_id(&state.db, &model_id)
+    let model_row = provider_models::find_by_id(&state.db, &helper_model_id)
         .await
-        .map_err(|e| AppError::db_error(format!("Failed to query model: {e}")))?
-        .ok_or_else(|| AppError::not_found(format!("Model not found: {model_id}")))?;
+        .map_err(AppError::from)?;
+
+    let model_row = match model_row {
+        Some(row) => row,
+        None => {
+            tracing::warn!("generate_branch_diff_summary: helper model not found in DB");
+            return Ok(None);
+        }
+    };
 
     let provider_row = providers::find_by_id(&state.db, &model_row.provider_id)
         .await
-        .map_err(|e| AppError::db_error(format!("Failed to query provider: {e}")))?
-        .ok_or_else(|| AppError::not_found("Provider not found"))?;
+        .map_err(AppError::from)?;
+
+    let provider_row = match provider_row {
+        Some(row) => row,
+        None => {
+            tracing::warn!("generate_branch_diff_summary: provider not found");
+            return Ok(None);
+        }
+    };
+
+    // 2. Collect messages from both branches
+    let left_messages = collect_branch_messages(&state.db, conversation_id, left_branch_id).await?;
+    let right_messages = collect_branch_messages(&state.db, conversation_id, right_branch_id).await?;
+
+    if left_messages.is_empty() && right_messages.is_empty() {
+        tracing::info!("generate_branch_diff_summary: no messages in either branch");
+        return Ok(None);
+    }
+
+    // 3. Build diff prompt
+    let user_prompt = build_diff_user_prompt(&left_messages, &right_messages);
 
     let api_key = if provider_row.r#type == "OLLAMA" {
         None
@@ -450,211 +527,406 @@ pub async fn generate_branch_diff_summary(
         state.key_store.load(&provider_row.id).ok().flatten()
     };
 
-    // 2. Collect messages from both branches
-    let all_messages = crate::repositories::messages::list_by_conversation(&state.db, conversation_id)
-        .await
-        .map_err(|e| AppError::db_error(format!("Failed to load messages: {e}")))?;
+    let provider_type = match provider_row.r#type.as_str() {
+        "OLLAMA" => ProviderType::Ollama,
+        _ => ProviderType::OpenaiCompatible,
+    };
 
-    let left_branch = crate::repositories::branches::find_by_id(&state.db, left_branch_id)
-        .await
-        .map_err(|e| AppError::db_error(format!("Failed to load left branch: {e}")))?;
+    let diff_messages = vec![
+        TitlePromptMessage { role: "system".to_string(), content: DIFF_SUMMARY_SYSTEM_PROMPT.to_string() },
+        TitlePromptMessage { role: "user".to_string(), content: user_prompt },
+    ];
 
-    let right_branch = crate::repositories::branches::find_by_id(&state.db, right_branch_id)
-        .await
-        .map_err(|e| AppError::db_error(format!("Failed to load right branch: {e}")))?;
+    let summary = call_helper_model(
+        provider_type,
+        &provider_row.base_url,
+        api_key.as_deref(),
+        &model_row.request_name,
+        &diff_messages,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(error = %e.message, "generate_branch_diff_summary: call failed");
+        e
+    })?;
 
-    let left_text = collect_branch_text(&all_messages, left_branch.and_then(|b| b.head_message_id).as_deref());
-    let right_text = collect_branch_text(&all_messages, right_branch.and_then(|b| b.head_message_id).as_deref());
-
-    if left_text.is_empty() && right_text.is_empty() {
-        tracing::info!("generate_branch_diff_summary: both branches empty");
+    if summary.is_empty() {
         return Ok(None);
     }
 
-    // 3. Build prompt and call helper model
-    let user_content = format!(
-        "## 左分支内容\n{}\n\n## 右分支内容\n{}",
-        if left_text.is_empty() { "（空）" } else { &left_text },
-        if right_text.is_empty() { "（空）" } else { &right_text },
-    );
+    Ok(Some(DiffSummaryResult { summary }))
+}
 
-    let messages = vec![TitlePromptMessage {
-        role: "user".to_string(),
-        content: user_content,
-    }];
+async fn collect_branch_messages(
+    pool: &sqlx::SqlitePool,
+    conversation_id: &str,
+    branch_id: &str,
+) -> Result<Vec<String>, AppError> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT m.role, m.content_text \
+         FROM messages m \
+         JOIN branches b ON b.conversation_id = m.conversation_id \
+         WHERE m.conversation_id = ? AND b.id = ? AND m.status = 'COMPLETED' \
+         ORDER BY m.created_at ASC",
+    )
+    .bind(conversation_id)
+    .bind(branch_id)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(role, content)| format!("{}: {}", role, content))
+        .collect())
+}
+
+fn build_diff_user_prompt(left: &[String], right: &[String]) -> String {
+    let left_text = if left.is_empty() {
+        "(无消息)".to_string()
+    } else {
+        left.join("\n")
+    };
+    let right_text = if right.is_empty() {
+        "(无消息)".to_string()
+    } else {
+        right.join("\n")
+    };
+    format!(
+        "分支A:\n{}\n\n分支B:\n{}\n\n请分析两条分支的差异。",
+        left_text, right_text
+    )
+}
+
+// ============================================================================
+// Context Compression
+// ============================================================================
+
+const COMPRESS_SYSTEM_PROMPT: &str = concat!(
+    "你是一个对话总结助手。用户会给你一段对话历史，请生成简洁的摘要。\n",
+    "要求：\n",
+    "- 保留关键信息、决策和结论\n",
+    "- 保留技术细节（变量名、函数名、配置值等）\n",
+    "- 使用与原文相同的语言\n",
+    "- 摘要长度约为原文的 20-30%\n",
+    "- 只输出摘要，不要添加额外说明"
+);
+
+const COMPRESS_KEEP_RECENT_SOURCE_MESSAGES: usize = 4;
+const COMPRESS_MIN_SOURCE_MESSAGES: usize = 3;
+const COMPRESS_MAX_MESSAGE_CHARS: usize = 2_000;
+const COMPRESS_MIN_INPUT_CHARS: usize = 6_000;
+const COMPRESS_MAX_INPUT_CHARS: usize = 60_000;
+
+struct CompressionSourceGroup<'a> {
+    source_message_id: String,
+    messages: Vec<&'a PromptMessage>,
+}
+
+fn compression_input_char_budget(context_window_kb: i32) -> usize {
+    let context_tokens = context_window_kb.max(8) as usize * 1_000;
+    context_tokens
+        .saturating_mul(2)
+        .clamp(COMPRESS_MIN_INPUT_CHARS, COMPRESS_MAX_INPUT_CHARS)
+}
+
+fn should_retry_compression_error(error: &AppError) -> bool {
+    let mut text = error.message.to_ascii_lowercase();
+    if let Some(details) = &error.details {
+        text.push_str(&details.to_ascii_lowercase());
+    }
+    [
+        "context",
+        "token",
+        "length",
+        "too large",
+        "maximum",
+        "payload",
+        "400",
+        "413",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+fn role_label(role: &str) -> &str {
+    match role {
+        "USER" => "用户",
+        "ASSISTANT" => "助手",
+        "SYSTEM" => "系统",
+        "TOOL" => "工具",
+        _ => role,
+    }
+}
+
+fn append_limited(buf: &mut String, used_chars: &mut usize, max_chars: usize, text: &str) -> bool {
+    if *used_chars >= max_chars {
+        return false;
+    }
+
+    let remaining = max_chars - *used_chars;
+    let text_chars = text.chars().count();
+    if text_chars <= remaining {
+        buf.push_str(text);
+        *used_chars += text_chars;
+        true
+    } else {
+        let chunk: String = text.chars().take(remaining).collect();
+        buf.push_str(&chunk);
+        *used_chars = max_chars;
+        false
+    }
+}
+
+fn build_compression_prompt_text(
+    prior_summary: Option<&str>,
+    groups: &[CompressionSourceGroup<'_>],
+    max_chars: usize,
+) -> (String, Vec<String>) {
+    let mut text = String::new();
+    let mut used_chars = 0usize;
+    let mut included_ids = Vec::new();
+
+    if let Some(summary) = prior_summary.filter(|value| !value.trim().is_empty()) {
+        let summary_limit = (max_chars / 3).max(COMPRESS_MIN_INPUT_CHARS / 2);
+        let capped_summary: String = summary.chars().take(summary_limit).collect();
+        let prior_block = format!("【已有压缩摘要】\n{}\n\n", capped_summary);
+        append_limited(&mut text, &mut used_chars, max_chars, &prior_block);
+    }
+
+    for group in groups {
+        if used_chars >= max_chars {
+            break;
+        }
+
+        let before_group = used_chars;
+        for msg in &group.messages {
+            if used_chars >= max_chars {
+                break;
+            }
+            let content_preview: String = msg
+                .content
+                .chars()
+                .take(COMPRESS_MAX_MESSAGE_CHARS)
+                .collect();
+            let entry = format!("【{}】{}\n\n", role_label(&msg.role), content_preview);
+            append_limited(&mut text, &mut used_chars, max_chars, &entry);
+        }
+
+        if used_chars > before_group {
+            included_ids.push(group.source_message_id.clone());
+        }
+    }
+
+    (text, included_ids)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressContextResult {
+    pub compressed_id: String,
+    pub summary_text: String,
+    pub compressed_message_count: u32,
+    pub estimated_tokens: u32,
+}
+
+pub async fn compress_context(
+    state: &tauri::State<'_, AppState>,
+    conversation_id: &str,
+    branch_id: &str,
+    model_id: &str,
+) -> Result<CompressContextResult, AppError> {
+    // 1. Resolve the model to use for compression
+    let model_row = provider_models::find_by_id(&state.db, model_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::not_found("Model not found"))?;
+
+    let provider_row = providers::find_by_id(&state.db, &model_row.provider_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::not_found("Provider not found"))?;
+
+    // 2. Collect all messages in the branch path
+    let branch = crate::repositories::branches::find_by_id(&state.db, branch_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::not_found("Branch not found"))?;
+
+    let up_to_id = branch.head_message_id.unwrap_or_default();
+    if up_to_id.is_empty() {
+        return Err(AppError::invalid_argument("Branch has no messages"));
+    }
+
+    let prompt_input = crate::dto::messages::BuildPromptMessagesInput {
+        conversation_id: conversation_id.to_string(),
+        up_to_message_id: up_to_id.clone(),
+        max_tokens_budget: None,
+        branch_id: Some(branch_id.to_string()),
+    };
+
+    let latest_context = compressed_contexts::find_latest_by_branch(
+        &state.db,
+        conversation_id,
+        branch_id,
+    )
+    .await
+    .map_err(AppError::from)?;
+    let prior_summary = latest_context
+        .as_ref()
+        .map(|row| row.summary_text.as_str())
+        .filter(|summary| !summary.trim().is_empty());
+    let mut prior_compressed_ids = latest_context
+        .as_ref()
+        .and_then(|row| serde_json::from_str::<Vec<String>>(&row.compressed_message_ids).ok())
+        .unwrap_or_default();
+
+    let messages = crate::services::prompt_service::build_prompt_messages(&state.db, &prompt_input).await?;
+    let mut source_groups: Vec<CompressionSourceGroup<'_>> = Vec::new();
+    for msg in messages.iter().filter(|msg| msg.source_message_id.is_some()) {
+        let source_message_id = msg.source_message_id.clone().unwrap_or_default();
+        if source_groups
+            .last()
+            .is_some_and(|group| group.source_message_id == source_message_id)
+        {
+            if let Some(group) = source_groups.last_mut() {
+                group.messages.push(msg);
+            }
+        } else {
+            source_groups.push(CompressionSourceGroup {
+                source_message_id,
+                messages: vec![msg],
+            });
+        }
+    }
+
+    if source_groups.len() < COMPRESS_MIN_SOURCE_MESSAGES {
+        return Err(AppError::invalid_argument("Not enough messages to compress"));
+    }
+
+    // Keep the recent tail verbatim; compression only targets older persisted
+    // conversation/tool transcript groups and never rewrites system/tool prompts.
+    let keep_recent = if source_groups.len() > COMPRESS_KEEP_RECENT_SOURCE_MESSAGES + COMPRESS_MIN_SOURCE_MESSAGES {
+        COMPRESS_KEEP_RECENT_SOURCE_MESSAGES
+    } else {
+        2
+    };
+    let max_compress_group_count = source_groups.len().saturating_sub(keep_recent);
+    if max_compress_group_count == 0 {
+        return Err(AppError::invalid_argument("No compressible content"));
+    }
+
+    // 3. Call the helper model for compression. If the helper provider rejects
+    // an oversized request, retry with a smaller oldest-message batch; the DB is
+    // only written after a summary succeeds, so failed attempts are atomic.
+    let api_key = if provider_row.r#type == "OLLAMA" {
+        None
+    } else {
+        state.key_store.load(&provider_row.id).ok().flatten()
+    };
 
     let provider_type = match provider_row.r#type.as_str() {
         "OLLAMA" => ProviderType::Ollama,
         _ => ProviderType::OpenaiCompatible,
     };
 
-    let summary = match call_diff_summary_model(
-        provider_type,
-        &provider_row.base_url,
-        api_key.as_deref(),
-        &model_row.request_name,
-        &messages,
-    )
-    .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(error = %e.message, "generate_branch_diff_summary: helper model call failed");
-            return Ok(None);
+    let input_char_budget = compression_input_char_budget(model_row.context_window_kb);
+    let mut attempt_group_count = max_compress_group_count;
+    let (summary, compressed_ids, compressed_count) = loop {
+        let (conversation_text, new_compressed_ids) = build_compression_prompt_text(
+            prior_summary,
+            &source_groups[..attempt_group_count],
+            input_char_budget,
+        );
+
+        if conversation_text.trim().is_empty() || new_compressed_ids.is_empty() {
+            return Err(AppError::invalid_argument("No compressible content"));
+        }
+
+        let compress_messages = vec![
+            TitlePromptMessage { role: "system".to_string(), content: COMPRESS_SYSTEM_PROMPT.to_string() },
+            TitlePromptMessage { role: "user".to_string(), content: conversation_text },
+        ];
+
+        match call_helper_model(
+            provider_type,
+            &provider_row.base_url,
+            api_key.as_deref(),
+            &model_row.request_name,
+            &compress_messages,
+        )
+        .await
+        {
+            Ok(summary) if !summary.trim().is_empty() => {
+                for id in new_compressed_ids {
+                    if !prior_compressed_ids.contains(&id) {
+                        prior_compressed_ids.push(id);
+                    }
+                }
+                let compressed_count = prior_compressed_ids.len();
+                break (summary, prior_compressed_ids, compressed_count);
+            }
+            Ok(_) => {
+                if attempt_group_count <= 1 {
+                    return Err(AppError::invalid_argument(
+                        "Compression helper returned an empty summary",
+                    ));
+                }
+                attempt_group_count = (attempt_group_count / 2).max(1);
+                tracing::warn!(
+                    attempt_group_count,
+                    "compress_context: empty helper summary, retrying with smaller batch"
+                );
+            }
+            Err(error) => {
+                if attempt_group_count <= 1 || !should_retry_compression_error(&error) {
+                    return Err(error);
+                }
+                attempt_group_count = (attempt_group_count / 2).max(1);
+                tracing::warn!(
+                    error = %error.message,
+                    attempt_group_count,
+                    "compress_context: helper rejected request, retrying with smaller batch"
+                );
+            }
         }
     };
 
-    if summary.is_empty() {
-        tracing::info!("generate_branch_diff_summary: empty summary returned");
-        return Ok(None);
-    }
+    // 5. Estimate tokens for the summary
+    let estimated_tokens = crate::services::token_estimator::estimate_tokens(&summary);
 
-    tracing::info!(len = summary.len(), "generate_branch_diff_summary: success");
-    Ok(Some(DiffSummaryResult { summary }))
-}
+    // 6. Store in compressed_contexts
+    let compressed_id = format!("cc_{}", uuid::Uuid::new_v4());
+    let compressed_msg_ids_json = serde_json::to_string(&compressed_ids).unwrap_or_else(|_| "[]".to_string());
 
-/// Collect text content from a branch by walking from head towards root.
-fn collect_branch_text(messages: &[crate::repositories::messages::MessageRow], head_id: Option<&str>) -> String {
-    let Some(head_id) = head_id else { return String::new() };
-    let msg_map: std::collections::HashMap<&str, &crate::repositories::messages::MessageRow> =
-        messages.iter().map(|m| (m.id.as_str(), m)).collect();
+    let row = crate::repositories::compressed_contexts::CompressedContextRow {
+        id: compressed_id.clone(),
+        conversation_id: conversation_id.to_string(),
+        branch_id: branch_id.to_string(),
+        summary_text: summary.clone(),
+        compressed_message_ids: compressed_msg_ids_json,
+        token_count: estimated_tokens as i64,
+        created_at: format!("{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()),
+    };
 
-    let mut path = Vec::new();
-    let mut current_id = head_id;
-    let mut count = 0;
-    const MAX_MESSAGES: usize = 10;
+    crate::repositories::compressed_contexts::create(&state.db, &row).await.map_err(AppError::from)?;
 
-    while let Some(msg) = msg_map.get(current_id) {
-        path.push(format!("[{}] {}", msg.role, &msg.content_text.chars().take(300).collect::<String>()));
-        current_id = match &msg.parent_message_id {
-            Some(pid) => pid.as_str(),
-            None => break,
-        };
-        count += 1;
-        if count >= MAX_MESSAGES {
-            break;
-        }
-    }
-
-    path.reverse();
-    path.join("\n")
-}
-
-/// Call the helper model for diff summary (higher token limit than title generation).
-async fn call_diff_summary_model(
-    provider_type: ProviderType,
-    base_url: &str,
-    api_key: Option<&str>,
-    model_name: &str,
-    messages: &[TitlePromptMessage],
-) -> Result<String, AppError> {
-    let prompt_messages: Vec<Value> = std::iter::once(json!({
-        "role": "system",
-        "content": DIFF_SUMMARY_SYSTEM_PROMPT
-    }))
-    .chain(messages.iter().map(|m| {
-        json!({
-            "role": m.role,
-            "content": m.content
-        })
-    }))
-    .collect();
-
-    match provider_type {
-        ProviderType::Ollama => call_ollama_summary(base_url, model_name, &prompt_messages).await,
-        ProviderType::OpenaiCompatible => {
-            call_openai_compatible_summary(base_url, api_key, model_name, &prompt_messages).await
-        }
-    }
-}
-
-async fn call_ollama_summary(
-    base_url: &str,
-    model_name: &str,
-    messages: &[Value],
-) -> Result<String, AppError> {
-    let url = format!(
-        "{}/api/chat",
-        base_url.trim_end_matches("/v1").trim_end_matches('/')
+    tracing::info!(
+        conv_id = %conversation_id,
+        branch_id = %branch_id,
+        compressed_id = %compressed_id,
+        msg_count = compressed_count,
+        estimated_tokens,
+        "compress_context: compression complete"
     );
 
-    let body = json!({
-        "model": model_name,
-        "messages": messages,
-        "stream": false,
-        "think": false,
-        "options": { "num_ctx": 32768 }
-    });
-
-    let response = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .timeout(std::time::Duration::from_secs(60))
-        .send()
-        .await
-        .map_err(|e| AppError::invalid_argument(format!("Ollama request failed: {e}")))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        tracing::warn!(status = %status, body = %text, "Ollama diff summary failed");
-        return Ok(String::new());
-    }
-
-    let json: Value = response.json().await.map_err(|e| {
-        AppError::invalid_argument(format!("Ollama response parse failed: {e}"))
-    })?;
-
-    Ok(json["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .trim()
-        .to_string())
-}
-
-async fn call_openai_compatible_summary(
-    base_url: &str,
-    api_key: Option<&str>,
-    model_name: &str,
-    messages: &[Value],
-) -> Result<String, AppError> {
-    let url = format!(
-        "{}/chat/completions",
-        base_url.trim_end_matches('/')
-    );
-
-    let mut request = reqwest::Client::new()
-        .post(&url)
-        .json(&json!({
-            "model": model_name,
-            "messages": messages,
-            "stream": false,
-            "max_tokens": 1024,
-        }))
-        .timeout(std::time::Duration::from_secs(60));
-
-    if let Some(key) = api_key {
-        request = request.bearer_auth(key);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::invalid_argument(format!("API request failed: {e}")))?;
-
-    if !response.status().is_success() {
-        let text = response.text().await.unwrap_or_default();
-        tracing::warn!(body = %text, "OpenAI diff summary failed");
-        return Ok(String::new());
-    }
-
-    let json: Value = response.json().await.map_err(|e| {
-        AppError::invalid_argument(format!("API response parse failed: {e}"))
-    })?;
-
-    Ok(json["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .trim()
-        .to_string())
+    Ok(CompressContextResult {
+        compressed_id,
+        summary_text: summary,
+        compressed_message_count: compressed_count as u32,
+        estimated_tokens,
+    })
 }

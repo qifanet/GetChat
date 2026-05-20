@@ -14,7 +14,7 @@ use tauri::State;
 use crate::dto::messages::{
     BuildPromptMessagesInput, CompleteAssistantMessageInput,
     CreateAssistantPlaceholderForBranchInput, CreateAssistantVariantPlaceholderInput,
-    CreateUserMessageInput, FailAssistantMessageInput, MessageDto,
+    CreateUserMessageInput, DirectOverwriteUserMessageInput, FailAssistantMessageInput, MessageDto,
 };
 use crate::error::AppError;
 use crate::services::{prompt_service, snapshot_service};
@@ -46,6 +46,43 @@ pub async fn create_user_message(
             cmd = "create_user_message", conv_id = %conv_id, branch_id = %branch_id,
             error_code = %e.code, message = %e.message, details = ?e.details,
             duration_ms = start.elapsed().as_millis() as u64, "error"
+        ),
+    }
+    result
+}
+
+/** Destructively overwrite a completed historical USER message. */
+#[tauri::command]
+pub async fn direct_overwrite_user_message(
+    state: State<'_, AppState>,
+    input: DirectOverwriteUserMessageInput,
+) -> Result<MessageDto, AppError> {
+    let start = std::time::Instant::now();
+    let conv_id = input.conversation_id.clone();
+    let branch_id = input.branch_id.clone();
+    let msg_id = input.message_id.clone();
+    let content_length = input.content_text.len();
+    let result = snapshot_service::direct_overwrite_user_message(&state.db, &input).await;
+    match &result {
+        Ok(msg) => tracing::info!(
+            cmd = "direct_overwrite_user_message",
+            conv_id = %conv_id,
+            branch_id = %branch_id,
+            msg_id = %msg.id,
+            content_length,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "ok"
+        ),
+        Err(e) => tracing::warn!(
+            cmd = "direct_overwrite_user_message",
+            conv_id = %conv_id,
+            branch_id = %branch_id,
+            msg_id = %msg_id,
+            error_code = %e.code,
+            message = %e.message,
+            details = ?e.details,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "error"
         ),
     }
     result
@@ -212,45 +249,21 @@ pub async fn build_prompt_messages(
     result
 }
 
-/** Hard delete a variant/candidate assistant message. */
+/** Delete a constrained assistant variant/candidate message. */
 #[tauri::command]
-pub async fn delete_message(
+pub async fn delete_assistant_variant_message(
     state: State<'_, AppState>,
     message_id: String,
 ) -> Result<(), AppError> {
     let start = std::time::Instant::now();
-    let result = snapshot_service::delete_variant_message(&state.db, &message_id).await;
+    let result = snapshot_service::delete_assistant_variant_message(&state.db, &message_id).await;
     match &result {
         Ok(()) => tracing::info!(
-            cmd = "delete_message", msg_id = %message_id,
+            cmd = "delete_assistant_variant_message", msg_id = %message_id,
             duration_ms = start.elapsed().as_millis() as u64, "ok"
         ),
         Err(e) => tracing::warn!(
-            cmd = "delete_message", msg_id = %message_id,
-            error_code = %e.code, message = %e.message,
-            duration_ms = start.elapsed().as_millis() as u64, "error"
-        ),
-    }
-    result
-}
-
-/** Edit a user message inline — replaces content and deletes assistant children. */
-#[tauri::command]
-pub async fn edit_user_message_inline(
-    state: State<'_, AppState>,
-    message_id: String,
-    new_content: String,
-) -> Result<MessageDto, AppError> {
-    let start = std::time::Instant::now();
-    let result = snapshot_service::edit_user_message_inline(&state.db, &message_id, &new_content).await;
-    match &result {
-        Ok(_) => tracing::info!(
-            cmd = "edit_user_message_inline", msg_id = %message_id,
-            content_length = new_content.len(),
-            duration_ms = start.elapsed().as_millis() as u64, "ok"
-        ),
-        Err(e) => tracing::warn!(
-            cmd = "edit_user_message_inline", msg_id = %message_id,
+            cmd = "delete_assistant_variant_message", msg_id = %message_id,
             error_code = %e.code, message = %e.message,
             duration_ms = start.elapsed().as_millis() as u64, "error"
         ),

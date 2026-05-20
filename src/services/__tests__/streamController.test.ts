@@ -360,6 +360,14 @@ describe("completeStream", () => {
     // Complete the stream
     await completeStream(result.requestId);
 
+    expect(mockTauriCommands.completeAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: result.assistantMessageId,
+        requestId: result.requestId,
+        contentText: "Hello world!",
+      })
+    );
+
     // Final text should be committed exactly ONCE
     expect(mockAppStoreActions.patchMessageLocal).toHaveBeenCalledWith(
       result.assistantMessageId,
@@ -418,6 +426,15 @@ describe("failStream", () => {
       code: "RATE_LIMIT",
       message: "Rate limit exceeded",
     });
+
+    expect(mockTauriCommands.failAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: result.assistantMessageId,
+        requestId: result.requestId,
+        errorCode: "RATE_LIMIT",
+        partialContentText: "Partial ",
+      })
+    );
 
     // Should preserve partial text
     expect(mockAppStoreActions.patchMessageLocal).toHaveBeenCalledWith(

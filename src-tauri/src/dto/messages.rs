@@ -29,6 +29,38 @@ use super::common::{ContentFormat, MessageRole, MessageStatus, TokenUsageDto};
 pub struct MessageContentDto {
     pub text: String,
     pub format: ContentFormat,
+
+    /**
+     * Ordered content blocks used to render inline tool calls at their
+     * original stream positions. Omitted for plain text-only messages.
+     */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<ContentBlockDto>>,
+}
+
+/**
+ * Ordered content block persisted with a completed assistant message.
+ * Matches frontend ContentBlock exactly.
+ */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlockDto {
+    Text {
+        content: String,
+    },
+    ToolCall {
+        #[serde(rename = "callId")]
+        call_id: String,
+        #[serde(rename = "functionName")]
+        function_name: String,
+        args: String,
+    },
+    ToolResult {
+        #[serde(rename = "callId")]
+        call_id: String,
+        result: String,
+        success: bool,
+    },
 }
 
 /**
@@ -82,8 +114,12 @@ pub struct MessageErrorDto {
  *   - childIds is built at snapshot load time by inverting parentId
  *   - depth is computed during tree walk
  *
- * Immutability: once created, content and parentId never change.
- * "Edits" create new nodes with edited_from_message_id pointing to the original.
+ * Default immutability: once created, content and parentId do not change.
+ * Normal "edits" create new nodes with edited_from_message_id pointing to the original.
+ *
+ * Exception: direct_overwrite_user_message is a deliberately destructive,
+ * user-selected command that may mutate a historical USER node. Keep that
+ * exception narrow; do not expose generic message patch commands.
  */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +163,10 @@ pub struct MessageDto {
      */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_from_message_id: Option<String>,
+
+    /** Tool calls associated with this assistant message (populated from tool_calls table). */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<crate::dto::common::ToolCallResultDto>>,
 }
 
 // ============================================================================
@@ -161,6 +201,23 @@ pub struct CreateUserMessageInput {
      */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_from_message_id: Option<String>,
+}
+
+/**
+ * Input for the explicit destructive history-edit exception.
+ *
+ * This is intentionally narrower than a generic update_message command:
+ *   - only USER/COMPLETED messages can be overwritten
+ *   - service layer verifies conversation + branch path membership
+ *   - downstream current-path descendants may be truncated before regenerate
+ */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectOverwriteUserMessageInput {
+    pub conversation_id: String,
+    pub branch_id: String,
+    pub message_id: String,
+    pub content_text: String,
 }
 
 /**
@@ -228,12 +285,40 @@ pub struct CreateAssistantVariantPlaceholderInput {
 pub struct CompleteAssistantMessageInput {
     pub message_id: String,
 
+    /** Runtime request id that owns this streaming placeholder. */
+    pub request_id: String,
+
     /** Final accumulated text from the stream */
     pub content_text: String,
+
+    /** Ordered text/tool blocks captured during streaming. */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blocks: Option<Vec<ContentBlockDto>>,
 
     /** Token usage statistics from the API response */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<serde_json::Value>,
+
+    /** Hidden reasoning payload required by some provider thinking modes. */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+
+    /** Tool calls to persist from the ReAct Loop */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallResultInput>>,
+}
+
+/** A single tool call result to persist alongside an assistant message. */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallResultInput {
+    pub call_id: String,
+    pub function_name: String,
+    pub arguments_json: String,
+    pub result_json: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }
 
 /**
@@ -247,6 +332,9 @@ pub struct CompleteAssistantMessageInput {
 pub struct FailAssistantMessageInput {
     pub message_id: String,
 
+    /** Runtime request id that owns this streaming placeholder. */
+    pub request_id: String,
+
     pub error_code: String,
     pub error_message: String,
 
@@ -256,6 +344,14 @@ pub struct FailAssistantMessageInput {
     /** Partial text streamed before the error occurred */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_content_text: Option<String>,
+
+    /** Partial ordered text/tool blocks captured before the failure. */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_content_blocks: Option<Vec<ContentBlockDto>>,
+
+    /** Tool calls that completed or failed before the stream failed. */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallResultInput>>,
 }
 
 /**
@@ -275,4 +371,8 @@ pub struct BuildPromptMessagesInput {
     /** Optional token budget to limit context length */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens_budget: Option<i32>,
+
+    /** Optional branch ID for loading compressed context summary */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
 }

@@ -124,14 +124,7 @@ function selectVisibleMessagesForWorkspaceImpl(
   if (state.workspace.workspaceMode === "NORMAL") {
     return fullPath;
   }
-  // HISTORY_FORK or EDIT_FORK: show only up to the source message
-  if (state.workspace.workspaceMode === "EDIT_INLINE") {
-    const editMsgId = state.workspace.forkIntent?.originalEditableMessageId;
-    if (!editMsgId) return fullPath;
-    const index = fullPath.findIndex((m) => m.id === editMsgId);
-    if (index < 0) return fullPath;
-    return fullPath.slice(0, index + 1);
-  }
+  // HISTORY_FORK or EDIT_FORK: show only up to the source message.
   const sourceMessageId = state.workspace.forkIntent?.sourceMessageId;
   if (!sourceMessageId) return fullPath;
   const index = fullPath.findIndex((m) => m.id === sourceMessageId);
