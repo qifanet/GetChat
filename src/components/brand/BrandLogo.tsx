@@ -4,9 +4,10 @@
  *
  * The desktop shell uses one canonical logo component so favicon assets,
  * startup states, navigation chrome, and empty states stay visually aligned.
+ *
+ * The SVG is inlined as a React component to avoid <img src> loading failures
+ * that can occur in Tauri WebView2 (HMR invalidation, CSP, cold-start race).
  */
-
-import brandLogoUrl from "../../assets/brand/getchat-logo.svg";
 
 interface BrandLogoProps {
   /** Whether to render the icon alone or together with the wordmark. */
@@ -44,14 +45,29 @@ export function BrandLogo({
         .filter(Boolean)
         .join(" ")}
     >
-      <img
-        src={brandLogoUrl}
-        alt="GetChat"
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 32 32"
+        fill="none"
+        role="img"
+        aria-label="GetChat"
         width={size}
         height={size}
         className={["block shrink-0", iconClassName].filter(Boolean).join(" ")}
         style={{ width: size, height: size }}
-      />
+      >
+        <title>GetChat Logo</title>
+        <path
+          d="M27.2 27.9 24.4 22.3A5.6 5.6 0 0 0 30 16.7v-7a5.6 5.6 0 0 0-5.6-5.6H7.6A5.6 5.6 0 0 0 2 9.7v7a5.6 5.6 0 0 0 5.6 5.6H16Z"
+          stroke="#4E5AEA"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="9" cy="13.2" r="1.4" fill="#959CF2" />
+        <circle cx="16" cy="13.2" r="1.4" fill="#959CF2" />
+        <circle cx="23" cy="13.2" r="1.4" fill="#959CF2" />
+      </svg>
     </span>
   );
 

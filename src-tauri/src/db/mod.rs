@@ -112,6 +112,34 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0004: Add title_source to conversations (DEFAULT / AI_GENERATED / USER_SET)
     let sql_0004 = include_str!("migrations/0004_title_source.sql");
     execute_migration_sql(pool, sql_0004, "Migration 0004").await;
+
+    // 0005: Tool Calling support — tool_definitions, tool_calls tables + messages/provider_models extensions
+    let sql_0005 = include_str!("migrations/0005_tool_calling.sql");
+    execute_migration_sql(pool, sql_0005, "Migration 0005").await;
+
+    // 0006: Workspace support for file-system tools
+    let sql_0006 = include_str!("migrations/0006_workspace.sql");
+    execute_migration_sql(pool, sql_0006, "Migration 0006").await;
+
+    // 0007: MCP server configuration persistence
+    let sql_0007 = include_str!("migrations/0007_mcp_servers.sql");
+    execute_migration_sql(pool, sql_0007, "Migration 0007").await;
+
+    // 0008: Skill definitions (Rules + Skill Prompts)
+    let sql_0008 = include_str!("migrations/0008_skills.sql");
+    execute_migration_sql(pool, sql_0008, "Migration 0008").await;
+
+    // 0009: Context window + skills local_path + compressed_contexts
+    let sql_0009 = include_str!("migrations/0009_skills_context_window.sql");
+    execute_migration_sql(pool, sql_0009, "Migration 0009").await;
+
+    // 0010: MCP transport-aware configuration
+    let sql_0010 = include_str!("migrations/0010_mcp_transport_config.sql");
+    execute_migration_sql(pool, sql_0010, "Migration 0010").await;
+
+    // 0011: Provider reasoning content persistence for thinking models
+    let sql_0011 = include_str!("migrations/0011_message_reasoning_content.sql");
+    execute_migration_sql(pool, sql_0011, "Migration 0011").await;
 }
 
 /**

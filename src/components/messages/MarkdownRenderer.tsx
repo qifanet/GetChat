@@ -191,15 +191,46 @@ function buildMarkdownComponents(
       return <MermaidBlock code={rawCode} />;
     }
 
+    // For registered languages, use SyntaxHighlighter (via children → code component)
+    // For unregistered languages, render as plain text with proper whitespace
+    if (language) {
+      return (
+        <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
+          <CodeBlockHeader
+            language={language}
+            rawCode={rawCode}
+            copyLabel={copyLabel}
+            copiedLabel={copiedLabel}
+          />
+          <div className="overflow-x-auto">{children}</div>
+        </div>
+      );
+    }
+
+    // Unregistered / plain text code block — render directly to preserve newlines
+    const displayLang = (() => {
+      const m = /language-([\w+-]+)/.exec(
+        (typeof children === "object" && children !== null && "props" in children
+          ? (children as { props?: { className?: string } }).props?.className
+          : "") ?? ""
+      );
+      return m ? m[1] : null;
+    })();
+
     return (
       <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
         <CodeBlockHeader
-          language={language}
+          language={displayLang}
           rawCode={rawCode}
           copyLabel={copyLabel}
           copiedLabel={copiedLabel}
         />
-        <div className="overflow-x-auto">{children}</div>
+        <div
+          className="overflow-x-auto px-4 py-3 font-mono text-sm leading-relaxed text-miro-text"
+          style={{ whiteSpace: "pre", overflowWrap: "normal" }}
+        >
+          {rawCode}
+        </div>
       </div>
     );
   },
@@ -243,9 +274,18 @@ function buildMarkdownComponents(
     }
     if (className?.includes("language-")) {
       return (
-        <pre className="p-4 text-sm">
-          <code className={className} {...props}>{children}</code>
-        </pre>
+        <div className="overflow-x-auto px-4 py-3 font-mono text-sm leading-relaxed text-miro-text" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+          {codeText}
+        </div>
+      );
+    }
+
+    // Inline code — detect multi-line content and render as block
+    if (codeText.includes("\n")) {
+      return (
+        <div className="my-2 overflow-x-auto rounded-lg bg-[#f6f7fb] px-4 py-3 font-mono text-[0.85em] leading-relaxed text-miro-text">
+          {codeText}
+        </div>
       );
     }
     return <code className={className} {...props}>{children}</code>;

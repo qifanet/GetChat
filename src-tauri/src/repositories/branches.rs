@@ -125,24 +125,22 @@ where
     Ok(())
 }
 
-/** Point a branch head at a specific persisted message. */
-pub async fn update_head_optional<'e, E>(
+/** Count branches whose head points at the given message. */
+pub async fn count_heads_by_message<'e, E>(
     executor: E,
-    branch_id: &str,
-    head_message_id: Option<&str>,
-) -> sqlx::Result<()>
+    conversation_id: &str,
+    message_id: &str,
+) -> sqlx::Result<i64>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    sqlx::query(
-        "UPDATE branches SET head_message_id = ?, updated_at = unixepoch() WHERE id = ?",
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM branches WHERE conversation_id = ? AND head_message_id = ?",
     )
-    .bind(head_message_id)
-    .bind(branch_id)
-    .execute(executor)
-    .await?;
-
-    Ok(())
+    .bind(conversation_id)
+    .bind(message_id)
+    .fetch_one(executor)
+    .await
 }
 
 /** Rename a branch. */
@@ -200,59 +198,30 @@ where
     Ok(())
 }
 
-/**
- * Redirect any branch head that points to a message in the given set.
- * Used before deleting descendants to avoid FK RESTRICT violations.
- * Returns the number of branches updated.
- */
-pub async fn redirect_heads_from_descendants<'e, E>(
-    executor: E,
-    conversation_id: &str,
-    descendant_ids: &[String],
-    new_head_id: &str,
-) -> sqlx::Result<u64>
+/** Hard-delete a branch row by ID. Callers must handle orphan cleanup first. */
+pub async fn delete_by_id<'e, E>(executor: E, branch_id: &str) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    if descendant_ids.is_empty() {
-        return Ok(0);
-    }
-    let placeholders: Vec<&str> = descendant_ids.iter().map(|_| "?").collect();
-    let sql = format!(
-        "UPDATE branches SET head_message_id = ?, updated_at = unixepoch()          WHERE conversation_id = ? AND head_message_id IN ({})",
-        placeholders.join(",")
-    );
-    let mut query = sqlx::query(&sql).bind(new_head_id).bind(conversation_id);
-    for id in descendant_ids {
-        query = query.bind(id);
-    }
-    let result = query.execute(executor).await?;
-    Ok(result.rows_affected())
+    sqlx::query("DELETE FROM branches WHERE id = ?")
+        .bind(branch_id)
+        .execute(executor)
+        .await?;
+    Ok(())
 }
 
-/**
- * Count branches whose fork point references one of the provided messages.
- * Used to prevent deleting messages required by branch FK constraints.
- */
-pub async fn count_fork_points_in_set<'e, E>(
+/** List all branches that have the given branch as their source_branch_id. */
+pub async fn list_child_branches<'e, E>(
     executor: E,
-    conversation_id: &str,
-    message_ids: &[String],
-) -> sqlx::Result<i64>
+    branch_id: &str,
+) -> sqlx::Result<Vec<BranchRow>>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    if message_ids.is_empty() {
-        return Ok(0);
-    }
-    let placeholders: Vec<&str> = message_ids.iter().map(|_| "?").collect();
-    let sql = format!(
-        "SELECT COUNT(*) FROM branches WHERE conversation_id = ? AND fork_point_message_id IN ({})",
-        placeholders.join(",")
-    );
-    let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(conversation_id);
-    for id in message_ids {
-        query = query.bind(id);
-    }
-    query.fetch_one(executor).await
+    sqlx::query_as::<_, BranchRow>(
+        "SELECT * FROM branches WHERE source_branch_id = ?",
+    )
+    .bind(branch_id)
+    .fetch_all(executor)
+    .await
 }

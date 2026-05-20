@@ -108,6 +108,11 @@ export function ConversationGlobalView({ onClose }: Props) {
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
+  // Management mode state
+  const [managementMode, setManagementMode] = useState(false);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
   const [tooltip, setTooltip] = useState<{
     visible: boolean;
     text: string;
@@ -258,6 +263,67 @@ export function ConversationGlobalView({ onClose }: Props) {
     });
   }, [bounds]);
 
+  // Management mode: click node to toggle branch selection
+  const handleNodeClickManage = useCallback(
+    (node: GlobalViewNode) => {
+      if (!managementMode) return;
+      const branchId = node.branchId;
+      const branch = data.branchesById[branchId];
+      if (!branch || branch.isMainline) return; // Cannot select mainline
+
+      setSelectedBranchIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(branchId)) {
+          next.delete(branchId);
+        } else {
+          next.add(branchId);
+        }
+        return next;
+      });
+    },
+    [managementMode, data.branchesById],
+  );
+
+  // Delete selected branches
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedBranchIds.size === 0) return;
+    const branchNames = [...selectedBranchIds]
+      .map((id) => data.branchesById[id]?.name ?? id)
+      .join(", ");
+
+    const { confirmDialog } = await import("../common/confirmDialog");
+    const confirmed = await confirmDialog({
+      message: t("globalView.confirmDelete", { branches: branchNames }),
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      const tauriCmd = await import("../../services/tauriCommands");
+      for (const branchId of selectedBranchIds) {
+        // Backend cascade-deletes child branches, so some may already be gone
+        try {
+          await tauriCmd.deleteBranch(branchId);
+        } catch (e) {
+          if (!(e instanceof Error && e.message.includes("NOT_FOUND"))) {
+            throw e;
+          }
+        }
+      }
+      setSelectedBranchIds(new Set());
+      const { useAppStore: getStore } = await import("../../stores/useAppStoreSelector");
+      const store = getStore.getState();
+      if (store.workspace.activeConversationId) {
+        await store.openConversation(store.workspace.activeConversationId);
+      }
+    } catch (err) {
+      console.error("[globalView] delete failed:", err);
+    } finally {
+      setDeleting(false);
+    }
+  }, [selectedBranchIds, data.branchesById, t]);
+
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex flex-col bg-miro-surface-high backdrop-blur-xl">
       {/* Top bar */}
@@ -274,6 +340,32 @@ export function ConversationGlobalView({ onClose }: Props) {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setManagementMode((m) => !m);
+              setSelectedBranchIds(new Set());
+            }}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              managementMode
+                ? "bg-red-500 text-white hover:bg-red-600"
+                : "app-secondary-button"
+            }`}
+          >
+            {managementMode ? t("globalView.exitManage") : t("globalView.manageMode")}
+          </button>
+          {managementMode && selectedBranchIds.size > 0 && (
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => void handleDeleteSelected()}
+              className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+            >
+              {deleting
+                ? t("globalView.deleting")
+                : t("globalView.deleteSelected", { count: selectedBranchIds.size })}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleFitView}
@@ -354,6 +446,7 @@ export function ConversationGlobalView({ onClose }: Props) {
             const isSystem = n.role === "SYSTEM";
             const isCurrentBranch = n.branchId === currentBranchId;
             const hasForks = n.forkBranches.length > 0;
+            const isSelected = managementMode && selectedBranchIds.has(n.branchId);
             const nodeFill = isUser ? "#eef1ff" : isSystem ? "#fff4e5" : "#edfcf2";
             const nodeStroke = isUser ? "#c7d2fe" : isSystem ? "#fbcf8b" : "#bbf7d0";
             const roleColor = isUser ? "#5b76fe" : isSystem ? "#d97706" : "#16a34a";
@@ -365,21 +458,39 @@ export function ConversationGlobalView({ onClose }: Props) {
                 transform={`translate(${l.x}, ${l.y})`}
                 onMouseEnter={(e) => handleNodeMouseEnter(n.id, e)}
                 onMouseLeave={handleNodeMouseLeave}
-                onDoubleClick={() => handleNodeDoubleClick(n)}
-                style={{ cursor: "pointer" }}
+                onDoubleClick={managementMode ? undefined : () => handleNodeDoubleClick(n)}
+                onClick={managementMode ? () => handleNodeClickManage(n) : undefined}
+                style={{ cursor: managementMode ? "pointer" : "pointer" }}
               >
+                {/* Selection highlight in management mode */}
+                {managementMode && isSelected && (
+                  <rect
+                    x={-3}
+                    y={-3}
+                    width={NODE_W + 6}
+                    height={NODE_H + 6}
+                    rx={BORDER_RADIUS + 2}
+                    fill="none"
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    strokeDasharray="4 2"
+                    opacity={0.8}
+                  />
+                )}
                 {/* Node background */}
                 <rect
                   width={NODE_W}
                   height={NODE_H}
                   rx={BORDER_RADIUS}
-                  fill={nodeFill}
+                  fill={managementMode && isSelected ? "#fee2e2" : nodeFill}
                   stroke={
-                    isCurrentBranch
-                      ? "#5b76fe"
-                      : hasForks
+                    managementMode && isSelected
+                      ? "#ef4444"
+                      : isCurrentBranch
                         ? "#5b76fe"
-                        : nodeStroke
+                        : hasForks
+                          ? "#5b76fe"
+                          : nodeStroke
                   }
                   strokeWidth={isCurrentBranch ? 1.5 : 1}
                 />

@@ -15,11 +15,16 @@
  * direct serialization to any model API format.
  */
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::dto::common::ToolCallDto;
 use crate::error::AppError;
-use crate::repositories::messages;
+use crate::repositories::{compressed_contexts, messages, skills, tool_calls};
+use crate::services::system_prompt_service;
+use crate::services::token_estimator::estimate_prompt_message_tokens;
 
 // ============================================================================
 // Output Types
@@ -27,18 +32,128 @@ use crate::repositories::messages;
 
 /**
  * A single message in the prompt array sent to the model API.
- * Lightweight: only role and text, no tree metadata.
+ * Extended to support tool_calls and tool results for the ReAct loop.
  */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptMessage {
+    /// Source DB message id when this prompt entry comes from a persisted message.
+    /// Synthetic system prefixes have no source id and must not be used as
+    /// compressed-context traceability records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_message_id: Option<String>,
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallDto>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+fn prompt_group_tokens(group: &[PromptMessage]) -> u32 {
+    group.iter().map(estimate_prompt_message_tokens).sum()
+}
+
+fn flatten_prompt(prefix_messages: Vec<PromptMessage>, message_groups: Vec<Vec<PromptMessage>>) -> Vec<PromptMessage> {
+    let message_count: usize = message_groups.iter().map(Vec::len).sum();
+    let mut result = Vec::with_capacity(prefix_messages.len() + message_count);
+    result.extend(prefix_messages);
+    for mut group in message_groups {
+        result.append(&mut group);
+    }
+    result
+}
+
+fn apply_prompt_budget(
+    prefix_messages: Vec<PromptMessage>,
+    message_groups: Vec<Vec<PromptMessage>>,
+    max_tokens_budget: Option<i32>,
+) -> Vec<PromptMessage> {
+    let Some(max_tokens_budget) = max_tokens_budget else {
+        return flatten_prompt(prefix_messages, message_groups);
+    };
+
+    if max_tokens_budget <= 0 || message_groups.is_empty() {
+        return flatten_prompt(prefix_messages, message_groups);
+    }
+
+    let budget = max_tokens_budget as u32;
+    let prefix_tokens = prompt_group_tokens(&prefix_messages);
+    let mut used_tokens = prefix_tokens;
+    let mut kept_reversed: Vec<Vec<PromptMessage>> = Vec::new();
+    let mut dropped_groups = 0usize;
+    let mut dropped_tokens = 0u32;
+
+    for (index, group) in message_groups.into_iter().enumerate().rev() {
+        let group_tokens = prompt_group_tokens(&group);
+        let is_latest_group = kept_reversed.is_empty();
+        if is_latest_group || used_tokens.saturating_add(group_tokens) <= budget {
+            used_tokens = used_tokens.saturating_add(group_tokens);
+            kept_reversed.push(group);
+        } else {
+            dropped_groups += 1;
+            dropped_tokens = dropped_tokens.saturating_add(group_tokens);
+            tracing::debug!(
+                group_index = index,
+                group_tokens,
+                budget,
+                used_tokens,
+                "build_prompt_messages: dropping older prompt group for token budget"
+            );
+        }
+    }
+
+    if dropped_groups > 0 {
+        tracing::warn!(
+            max_tokens_budget = budget,
+            prefix_tokens,
+            final_tokens = used_tokens,
+            dropped_groups,
+            dropped_tokens,
+            "build_prompt_messages: prompt trimmed to fit configured token budget"
+        );
+    }
+
+    kept_reversed.reverse();
+    flatten_prompt(prefix_messages, kept_reversed)
 }
 
 // ============================================================================
 // Prompt Building
 // ============================================================================
+
+/// Load ALWAYS-triggered skill prompts for system prompt injection.
+async fn load_always_skills_prompt(pool: &SqlitePool) -> String {
+    let rows = match skills::list_enabled_always(pool).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error, "Failed to load always skills");
+            return String::new();
+        }
+    };
+
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let mut parts = vec!["[Always-Active Rules]".to_string()];
+    for skill in rows {
+        if skill.prompt_template.trim().is_empty() {
+            continue;
+        }
+        parts.push(format!("--- {} ---\n{}", skill.display_name, skill.prompt_template));
+    }
+
+    if parts.len() == 1 {
+        String::new()
+    } else {
+        parts.join("\n\n")
+    }
+}
 
 /**
  * Build the prompt message array by walking the tree from a leaf to root.
@@ -55,25 +170,25 @@ pub struct PromptMessage {
  *   - STREAMING messages are excluded (content is incomplete)
  *   - ABORTED messages are excluded (user intentionally stopped)
  *
- * TODO: Implement max_tokens_budget trimming (needs token estimation).
+ * max_tokens_budget is applied after compressed-context injection. Synthetic
+ * prefixes are preserved, and older persisted message groups are dropped from
+ * the front while keeping the latest user turn intact.
  */
 pub async fn build_prompt_messages(
     pool: &SqlitePool,
     input: &crate::dto::messages::BuildPromptMessagesInput,
 ) -> Result<Vec<PromptMessage>, AppError> {
-    // Load all messages for the conversation (one query, then walk in memory)
     let all_rows = messages::list_by_conversation(pool, &input.conversation_id).await?;
 
     if all_rows.is_empty() {
         return Ok(vec![]);
     }
 
-    // Build a lookup map for fast parent chain walking
-    let msg_map: std::collections::HashMap<String, &messages::MessageRow> =
+    let msg_map: HashMap<String, &messages::MessageRow> =
         all_rows.iter().map(|r| (r.id.clone(), r)).collect();
 
     // Walk from leaf to root
-    let mut path = Vec::new();
+    let mut path_ids: Vec<String> = Vec::new();
     let mut current_id = Some(input.up_to_message_id.as_str());
 
     tracing::info!(
@@ -86,10 +201,9 @@ pub async fn build_prompt_messages(
     while let Some(id) = current_id {
         match msg_map.get(id) {
             Some(row) => {
-                // Include only messages suitable for prompt
                 let include = match row.status.as_str() {
                     "COMPLETED" => true,
-                    "FAILED" => true, // Failed messages may have partial useful content
+                    "FAILED" => true,
                     "STREAMING" => false,
                     "ABORTED" => false,
                     _ => false,
@@ -105,11 +219,12 @@ pub async fn build_prompt_messages(
                     "walk_step"
                 );
 
-                if include && !row.content_text.is_empty() {
-                    path.push(PromptMessage {
-                        role: row.role.clone(),
-                        content: row.content_text.clone(),
-                    });
+                if include {
+                    // TOOL_RESULT messages may have empty content_text but are still valid
+                    let is_tool_result = row.content_type == "TOOL_RESULT";
+                    if !row.content_text.is_empty() || is_tool_result {
+                        path_ids.push(row.id.clone());
+                    }
                 }
 
                 current_id = row.parent_message_id.as_deref();
@@ -119,13 +234,237 @@ pub async fn build_prompt_messages(
                     current_id = %id,
                     "walk_broken_chain: message not found in conversation"
                 );
-                break; // Broken chain — stop walking
+                break;
             }
         }
     }
 
-    // Reverse: root first → leaf last (chronological order for the API)
-    path.reverse();
+    // Reverse: root first → leaf last
+    path_ids.reverse();
 
-    Ok(path)
+    // Inject stable system-level prefixes first for provider prompt-cache friendliness.
+    let mut prefix_messages: Vec<PromptMessage> = Vec::new();
+    let system_prompt = system_prompt_service::get_system_prompt(pool).await?;
+    if !system_prompt.is_empty() {
+        prefix_messages.push(PromptMessage {
+            source_message_id: None,
+            role: "SYSTEM".to_string(),
+            content: system_prompt,
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
+
+    let always_skills_prompt = load_always_skills_prompt(pool).await;
+    if !always_skills_prompt.is_empty() {
+        prefix_messages.push(PromptMessage {
+            source_message_id: None,
+            role: "SYSTEM".to_string(),
+            content: always_skills_prompt,
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
+
+    let mut compressed_source_ids: HashSet<String> = HashSet::new();
+
+    if let Some(ref branch_id) = input.branch_id {
+        if let Ok(Some(cc)) = compressed_contexts::find_latest_by_branch(
+            pool, &input.conversation_id, branch_id,
+        ).await {
+            match serde_json::from_str::<Vec<String>>(&cc.compressed_message_ids) {
+                Ok(ids) if !ids.is_empty() => {
+                    compressed_source_ids.extend(ids);
+                    if !cc.summary_text.is_empty() {
+                        tracing::info!(
+                            conv_id = %input.conversation_id,
+                            branch_id = %branch_id,
+                            compressed_id = %cc.id,
+                            summary_len = cc.summary_text.len(),
+                            compressed_ids = compressed_source_ids.len(),
+                            "build_prompt_messages: injecting compressed context"
+                        );
+                        prefix_messages.push(PromptMessage {
+                            source_message_id: None,
+                            role: "SYSTEM".to_string(),
+                            content: format!("[Compressed Context Summary]\n{}", cc.summary_text),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                }
+                Ok(_) => tracing::warn!(
+                    conv_id = %input.conversation_id,
+                    branch_id = %branch_id,
+                    compressed_id = %cc.id,
+                    "build_prompt_messages: ignored compressed context with empty message id set"
+                ),
+                Err(error) => tracing::warn!(
+                    conv_id = %input.conversation_id,
+                    branch_id = %branch_id,
+                    compressed_id = %cc.id,
+                    error = %error,
+                    "build_prompt_messages: ignored compressed context with invalid message ids"
+                ),
+            }
+        }
+    }
+
+    // Build prompt groups with tool_calls enrichment. A group maps to one
+    // persisted message so budget trimming never splits assistant tool calls
+    // from their rehydrated tool results.
+    let mut message_groups: Vec<Vec<PromptMessage>> = Vec::with_capacity(path_ids.len());
+    for msg_id in &path_ids {
+        if compressed_source_ids.contains(msg_id) {
+            tracing::debug!(
+                msg_id = %msg_id,
+                "build_prompt_messages: skipping raw message covered by compressed context"
+            );
+            continue;
+        }
+
+        let row = msg_map[msg_id].clone();
+
+        let prompt_msg = match row.role.as_str() {
+            "TOOL" => {
+                // Tool result message: role=tool, with tool_call_id and name
+                PromptMessage {
+                    source_message_id: Some(row.id.clone()),
+                    role: "TOOL".to_string(),
+                    content: row.content_text.clone(),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: row.tool_call_id.clone(),
+                    name: row.tool_name.clone(),
+                }
+            }
+            "ASSISTANT" => {
+                // Check for associated tool_calls
+                let tc_rows = tool_calls::list_by_message(pool, &row.id).await.unwrap_or_default();
+                let tool_calls_dto: Vec<ToolCallDto> = tc_rows.iter().map(|tc| {
+                    ToolCallDto {
+                        id: tc.call_id.clone(),
+                        call_type: "function".to_string(),
+                        function: crate::dto::common::ToolCallFunctionDto {
+                            name: tc.function_name.clone(),
+                            arguments: tc.arguments_json.clone(),
+                        },
+                    }
+                }).collect();
+
+                let mut group = vec![PromptMessage {
+                    source_message_id: Some(row.id.clone()),
+                    role: "ASSISTANT".to_string(),
+                    content: row.content_text.clone(),
+                    reasoning_content: if row.reasoning_content.trim().is_empty() {
+                        None
+                    } else {
+                        Some(row.reasoning_content.clone())
+                    },
+                    tool_calls: if tool_calls_dto.is_empty() { None } else { Some(tool_calls_dto) },
+                    tool_call_id: None,
+                    name: None,
+                }];
+
+                // Persisted tool results are stored in tool_calls.result_json.
+                // Rehydrate them as role=TOOL prompt entries so the next model
+                // turn sees a valid tool-call transcript.
+                for tc in tc_rows {
+                    if tc.result_json.is_empty() && tc.status == "PENDING" {
+                        continue;
+                    }
+                    group.push(PromptMessage {
+                        source_message_id: Some(row.id.clone()),
+                        role: "TOOL".to_string(),
+                        content: tc.result_json,
+                        reasoning_content: None,
+                        tool_calls: None,
+                        tool_call_id: Some(tc.call_id),
+                        name: Some(tc.function_name),
+                    });
+                }
+
+                message_groups.push(group);
+                continue;
+            }
+            _ => {
+                // USER or SYSTEM — standard role + content
+                PromptMessage {
+                    source_message_id: Some(row.id.clone()),
+                    role: row.role.clone(),
+                    content: row.content_text.clone(),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                }
+            }
+        };
+
+        message_groups.push(vec![prompt_msg]);
+    }
+
+    Ok(apply_prompt_budget(
+        prefix_messages,
+        message_groups,
+        input.max_tokens_budget,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_msg(id: &str, role: &str, content: &str) -> PromptMessage {
+        PromptMessage {
+            source_message_id: Some(id.to_string()),
+            role: role.to_string(),
+            content: content.to_string(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    #[test]
+    fn budget_trimming_preserves_latest_group() {
+        let older = vec![test_msg("old", "USER", &"older context ".repeat(200))];
+        let latest = vec![test_msg("latest", "USER", "current question")];
+
+        let result = apply_prompt_budget(vec![], vec![older, latest], Some(20));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].source_message_id.as_deref(), Some("latest"));
+    }
+
+    #[test]
+    fn budget_trimming_keeps_assistant_tool_group_together() {
+        let older = vec![test_msg("old", "USER", &"older context ".repeat(200))];
+        let assistant_group = vec![
+            test_msg("assistant", "ASSISTANT", "I will call a tool"),
+            PromptMessage {
+                source_message_id: Some("assistant".to_string()),
+                role: "TOOL".to_string(),
+                content: "{\"ok\":true}".to_string(),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some("call_1".to_string()),
+                name: Some("demo_tool".to_string()),
+            },
+        ];
+
+        let result = apply_prompt_budget(vec![], vec![older, assistant_group], Some(20));
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].role, "ASSISTANT");
+        assert_eq!(result[1].role, "TOOL");
+        assert_eq!(result[1].tool_call_id.as_deref(), Some("call_1"));
+    }
 }

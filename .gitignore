@@ -169,3 +169,5 @@ CLAUDE.md
 
 # Private development documents (not for public repo)
 docs/private/
+# Cursor IDE local metadata
+.cursor/

@@ -38,6 +38,7 @@ import type {
   CompareState,
   ComposerState,
   ForkIntent,
+  HistoryEditMode,
   UiState,
   VariantPreviewContext,
   WorkspaceState,
@@ -74,12 +75,14 @@ export interface SettingsSlice {
   providerOrder: string[];
   defaultModelId: ModelId | null;
   helperModelId: ModelId | null;
+  systemPrompt: string;
 
   loadSettings: () => Promise<void>;
   saveProvider: (input: ProviderSaveInput) => Promise<ProviderConfig>;
   removeProvider: (providerId: string) => Promise<void>;
   setDefaultModel: (modelId: ModelId | null) => Promise<void>;
   setHelperModel: (modelId: ModelId | null) => Promise<void>;
+  setSystemPrompt: (prompt: string) => Promise<string>;
 }
 
 // ============================================================================
@@ -113,10 +116,6 @@ export interface ConversationSlice {
     branchId: BranchId,
     modelId: ModelId | null
   ) => Promise<BranchEntity>;
-  setBranchHeadMessage: (
-    branchId: BranchId,
-    messageId: MessageId
-  ) => Promise<BranchEntity>;
   archiveBranch: (branchId: BranchId) => Promise<BranchEntity>;
   unarchiveBranch: (branchId: BranchId) => Promise<BranchEntity>;
   setMainlineBranch: (
@@ -128,8 +127,7 @@ export interface ConversationSlice {
   upsertMessageLocal: (message: MessageNode) => void;
   upsertBranchLocal: (branch: BranchEntity) => void;
   patchMessageLocal: (messageId: MessageId, patch: Partial<MessageNode>) => void;
-  deleteMessageHard: (messageId: MessageId) => Promise<void>;
-  editUserMessageInline: (messageId: MessageId, newContent: string) => Promise<void>;
+  deleteAssistantVariantMessage: (messageId: MessageId) => Promise<void>;
   patchBranchLocal: (branchId: BranchId, patch: Partial<BranchEntity>) => void;
   replaceActiveSnapshot: (snapshot: ConversationSnapshot) => void;
 }
@@ -151,11 +149,11 @@ export interface WorkspaceSlice {
   /** Enter EDIT_FORK mode with a fork intent */
   startEditFork: (intent: ForkIntent) => void;
 
-  /** Enter EDIT_INLINE mode — edit a user message without creating a branch */
-  startEditInline: (messageId: MessageId) => void;
-
   /** Clear fork intent and return to NORMAL mode */
   clearForkIntent: () => void;
+
+  /** Select whether a historical user edit creates a branch or overwrites in place. */
+  setHistoryEditMode: (mode: HistoryEditMode) => void;
 
   /** Enter COMPARE mode (disables composer) */
   enterCompare: (compareState: CompareState) => void;

@@ -20,6 +20,7 @@ pub struct ProviderModelRow {
     pub provider_id: String,
     pub request_name: String,
     pub display_name: String,
+    pub context_window_kb: i32,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -65,18 +66,20 @@ pub async fn insert<'e, E>(
     provider_id: &str,
     request_name: &str,
     display_name: &str,
+    context_window_kb: i32,
 ) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
 {
     sqlx::query(
-        "INSERT INTO provider_models (id, provider_id, request_name, display_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, unixepoch(), unixepoch())",
+        "INSERT INTO provider_models (id, provider_id, request_name, display_name, context_window_kb, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch())",
     )
     .bind(id)
     .bind(provider_id)
     .bind(request_name)
     .bind(display_name)
+    .bind(context_window_kb)
     .execute(executor)
     .await?;
 
@@ -89,22 +92,37 @@ pub async fn update<'e, E>(
     id: &str,
     request_name: &str,
     display_name: &str,
+    context_window_kb: i32,
 ) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
 {
     sqlx::query(
         "UPDATE provider_models
-         SET request_name = ?, display_name = ?, updated_at = unixepoch()
+         SET request_name = ?, display_name = ?, context_window_kb = ?, updated_at = unixepoch()
          WHERE id = ?",
     )
     .bind(request_name)
     .bind(display_name)
+    .bind(context_window_kb)
     .bind(id)
     .execute(executor)
     .await?;
 
     Ok(())
+}
+
+/** Get the context window size in K tokens for a specific model. Returns default 64 if not found. */
+pub async fn get_context_window_kb<'e, E>(executor: E, id: &str) -> sqlx::Result<i32>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let row: Option<(i32,)> =
+        sqlx::query_as("SELECT context_window_kb FROM provider_models WHERE id = ?")
+            .bind(id)
+            .fetch_optional(executor)
+            .await?;
+    Ok(row.map(|(kb,)| kb).unwrap_or(64))
 }
 
 /** Delete all models for a provider that are not present in the keep-set. */

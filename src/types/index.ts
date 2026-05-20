@@ -56,6 +56,7 @@ export type { DerivedVariantGroup } from "./variant";
 // Workspace types
 export type {
   ForkIntent,
+  HistoryEditMode,
   CompareState,
   VariantPreviewContext,
   WorkspaceState,

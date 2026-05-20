@@ -142,6 +142,7 @@ export function createSnapshot(
       activeBranchCount: branches.filter((b) => b.status === "ACTIVE").length,
       archivedBranchCount: branches.filter((b) => b.status === "ARCHIVED").length,
       totalMessageCount: messages.length,
+      workspacePath: null,
     },
     entities: {
       messages: Object.fromEntries(messages.map((m) => [m.id, m])),
@@ -264,6 +265,7 @@ export function createStoreState(
     startHistoryFork: () => {},
     startEditFork: () => {},
     clearForkIntent: () => {},
+    setHistoryEditMode: () => {},
     enterCompare: () => {},
     exitCompare: () => {},
     setVariantPreview: () => {},

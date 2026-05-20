@@ -84,6 +84,11 @@ pub enum ContentFormat {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ProviderType {
     OpenaiCompatible,
+    #[serde(rename = "DEEPSEEK")]
+    DeepSeek,
+    #[serde(rename = "OPENROUTER")]
+    OpenRouter,
+    Groq,
     Ollama,
 }
 
@@ -126,4 +131,58 @@ pub struct GenerationParamsDto {
 
     #[serde(default)]
     pub stream: bool,
+}
+
+// ============================================================================
+// Tool Calling Types
+// ============================================================================
+
+/** A resolved tool call returned by the model (function name + arguments). */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallDto {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolCallFunctionDto,
+}
+
+/** Function details within a tool call. */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallFunctionDto {
+    pub name: String,
+    pub arguments: String,
+}
+
+/** Tool definition sent to the model API. */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDefinitionDto {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ToolFunctionDefDto,
+}
+
+/** Function schema within a tool definition. */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolFunctionDefDto {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/** Persisted tool call result associated with an assistant message. */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallResultDto {
+    pub id: String,
+    pub call_id: String,
+    pub function_name: String,
+    pub arguments_json: String,
+    pub result_json: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }

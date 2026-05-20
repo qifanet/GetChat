@@ -42,6 +42,33 @@ describe("browserDebugRuntime", () => {
     expect(summaries[0].title).toBe("架构方案评审");
   });
 
+  it("persists and resets the application system prompt", async () => {
+    const bootstrap =
+      await invokeBrowserDebugCommand<BootstrapResult>("bootstrap_app");
+    expect(bootstrap.systemPrompt).toContain("local-first desktop AI assistant");
+
+    const savedPrompt = await invokeBrowserDebugCommand<string>(
+      "set_system_prompt",
+      {
+        prompt: "Custom browser debug prompt",
+      }
+    );
+    expect(savedPrompt).toBe("Custom browser debug prompt");
+
+    const reloadedPrompt = await invokeBrowserDebugCommand<string>(
+      "get_system_prompt"
+    );
+    expect(reloadedPrompt).toBe("Custom browser debug prompt");
+
+    const resetPrompt = await invokeBrowserDebugCommand<string>(
+      "set_system_prompt",
+      {
+        prompt: "   ",
+      }
+    );
+    expect(resetPrompt).toContain("local-first desktop AI assistant");
+  });
+
   it("persists provider settings and default model", async () => {
     const provider = await invokeBrowserDebugCommand<ProviderDto>("save_provider", {
       input: {
@@ -160,17 +187,35 @@ describe("browserDebugRuntime", () => {
     await abortBrowserDebugModelStream("req_debug_stream_ok");
   });
 
-  it("supports inline user edit by removing descendants and redirecting heads", async () => {
+  it("supports non-destructive history user edit by creating a fork", async () => {
     const snapshotBefore = await invokeBrowserDebugCommand<ConversationSnapshot>(
       "load_conversation_snapshot",
       { input: { conversationId: "conv_seed_architecture_review" } }
     );
 
-    const updated = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
-      "edit_user_message_inline",
+    const branch = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["branches"][string]>(
+      "create_branch",
       {
-        messageId: "msg_seed_user_request",
-        newContent: "新的问题描述",
+        input: {
+          conversationId: "conv_seed_architecture_review",
+          sourceBranchId: "branch_seed_mainline",
+          forkPointMessageId: null,
+          forkSourceType: "HISTORY_USER_EDIT",
+          forkSourceMessageId: "msg_seed_user_request",
+        },
+      }
+    );
+
+    const edited = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
+      "create_user_message",
+      {
+        input: {
+          conversationId: "conv_seed_architecture_review",
+          branchId: branch.id,
+          contentText: "新的问题描述",
+          parentMessageId: null,
+          editedFromMessageId: "msg_seed_user_request",
+        },
       }
     );
 
@@ -179,17 +224,16 @@ describe("browserDebugRuntime", () => {
       { input: { conversationId: "conv_seed_architecture_review" } }
     );
 
-    expect(updated.content.text).toBe("新的问题描述");
+    expect(edited.content.text).toBe("新的问题描述");
+    expect(edited.editedFromMessageId).toBe("msg_seed_user_request");
     expect(Object.keys(snapshotBefore.entities.messages).length).toBe(3);
-    expect(Object.keys(snapshotAfter.entities.messages)).toEqual(["msg_seed_user_request"]);
-    expect(
-      Object.values(snapshotAfter.entities.branches).every(
-        (branch) => branch.headMessageId === "msg_seed_user_request"
-      )
-    ).toBe(true);
+    expect(snapshotAfter.entities.messages.msg_seed_user_request.content.text).toBe(
+      "请给出两套后端重构路径，并说明差异。"
+    );
+    expect(snapshotAfter.entities.branches[branch.id].headMessageId).toBe(edited.id);
   });
 
-  it("supports delete_message for non-head assistant leaf variants", async () => {
+  it("supports assistant variant deletion for non-head assistant leaf variants", async () => {
     const summary = await invokeBrowserDebugCommand<ConversationSummary>("create_conversation", {
       input: {
         title: "delete-message-test",
@@ -201,6 +245,28 @@ describe("browserDebugRuntime", () => {
       { input: { conversationId: summary.id } }
     );
     const userId = snapshot.indexes.rootMessageIds[0];
+    const branchId = Object.values(snapshot.entities.branches)[0].id;
+
+    const mainAssistant = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
+      "create_assistant_placeholder_for_branch",
+      {
+        input: {
+          conversationId: summary.id,
+          branchId,
+          providerId: "provider.debug",
+          modelId: "model.debug",
+          requestId: "req_keep_candidate",
+        },
+      }
+    );
+    await invokeBrowserDebugCommand("complete_assistant_message", {
+      input: {
+        messageId: mainAssistant.id,
+        requestId: "req_keep_candidate",
+        contentText: "keep",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+    });
 
     const variant = await invokeBrowserDebugCommand<ConversationSnapshot["entities"]["messages"][string]>(
       "create_assistant_variant_placeholder",
@@ -217,12 +283,13 @@ describe("browserDebugRuntime", () => {
     await invokeBrowserDebugCommand("complete_assistant_message", {
       input: {
         messageId: variant.id,
+        requestId: "req_delete_variant",
         contentText: "done",
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       },
     });
 
-    await invokeBrowserDebugCommand("delete_message", { messageId: variant.id });
+    await invokeBrowserDebugCommand("delete_assistant_variant_message", { messageId: variant.id });
     const afterDelete = await invokeBrowserDebugCommand<ConversationSnapshot>(
       "load_conversation_snapshot",
       { input: { conversationId: summary.id } }

@@ -103,6 +103,27 @@ export function IconTrash({ size = 16, ...props }: IconBaseProps) {
   );
 }
 
+/** Folder icon — used for workspace directory indicator */
+export function IconFolder({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2" />
+      <rect x="3" y="7" width="18" height="14" rx="2" />
+    </svg>
+  );
+}
+
+/** Folder open icon — used when workspace is configured */
+export function IconFolderOpen({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2" />
+      <path d="M3 7h13l4 8H7L3 7z" />
+      <path d="M3 7l4 8v4a2 2 0 002 2h10a2 2 0 002-2v-4" />
+    </svg>
+  );
+}
+
 /**
  * Close / dismiss icon (X).
  */

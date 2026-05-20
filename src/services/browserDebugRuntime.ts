@@ -26,6 +26,7 @@ import {
   type CreateBranchInput,
   type CreateConversationInput,
   type CreateUserMessageInput,
+  type DirectOverwriteUserMessageInput,
   type FailAssistantMessageInput,
   type InvariantCheckResult,
   type LastWorkspaceSelection,
@@ -34,7 +35,6 @@ import {
   type ProviderDto,
   type RenameBranchInput,
   type SaveProviderInput,
-  type SetBranchHeadMessageInput,
   type SetBranchPreferredModelInput,
   type SetMainlineBranchInput,
   type SetMainlineResult,
@@ -49,6 +49,8 @@ export type BrowserDebugCommandName =
   | "set_default_model"
   | "get_helper_model"
   | "set_helper_model"
+  | "get_system_prompt"
+  | "set_system_prompt"
   | "list_providers"
   | "save_provider"
   | "delete_provider"
@@ -65,21 +67,46 @@ export type BrowserDebugCommandName =
   | "create_branch"
   | "rename_branch"
   | "set_branch_preferred_model"
-  | "set_branch_head_message"
   | "archive_branch"
   | "unarchive_branch"
+  | "delete_branch"
   | "set_mainline_branch"
   | "create_user_message"
+  | "direct_overwrite_user_message"
   | "create_assistant_placeholder_for_branch"
   | "create_assistant_variant_placeholder"
   | "complete_assistant_message"
   | "fail_assistant_message"
   | "build_prompt_messages"
   | "check_db_invariants"
-  | "delete_message"
-  | "edit_user_message_inline"
+  | "delete_assistant_variant_message"
   | "search_messages"
-  | "generate_branch_diff_summary";
+  | "generate_branch_diff_summary"
+  | "set_conversation_workspace"
+  | "read_todo_items"
+  | "approve_tool_action"
+  | "get_tool_settings"
+  | "update_tool_settings"
+  | "get_builtin_tool_states"
+  | "set_builtin_tool_enabled"
+  | "list_mcp_servers"
+  | "add_mcp_server"
+  | "remove_mcp_server"
+  | "get_mcp_tool_definitions"
+  | "list_skills"
+  | "create_skill"
+  | "update_skill"
+  | "delete_skill"
+  | "set_skill_enabled"
+  | "list_slash_items"
+  | "execute_skill"
+  | "execute_mcp_prompt"
+  | "set_mcp_server_enabled"
+  | "get_context_status"
+  | "get_skills_directory"
+  | "import_skill"
+  | "refresh_skills_from_disk"
+  | "compress_context";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {
@@ -102,6 +129,7 @@ interface BrowserDebugState {
   lastWorkspace: LastWorkspaceSelection | null;
   defaultModelId: string | null;
   helperModelId: string | null;
+  systemPrompt: string;
   providersById: Record<string, ProviderDto>;
   providerOrder: string[];
   conversationsById: Record<string, BrowserDebugConversationRecord>;
@@ -120,6 +148,14 @@ const BROWSER_DEBUG_DIFF_SUMMARY_ZH =
   "## 分支差异分析\n\n两条分支在重构方向上有明显差异。\n\n### 左分支\n- 聚合边界拆分优先\n- 渐进式推进\n\n### 右分支\n- 事件总线优先\n- 解耦与异步化\n\n### 建议\n根据团队规模和交付节奏选择合适方案。";
 const BROWSER_DEBUG_DIFF_SUMMARY_EN =
   "## Branch Diff Summary\n\nThe two branches diverge in refactoring strategy.\n\n### Left branch\n- Boundary decomposition first\n- Incremental rollout\n\n### Right branch\n- Event bus first\n- Decoupling and async focus\n\n### Recommendation\nPick the approach that fits team size and delivery pace.";
+const BROWSER_DEBUG_DEFAULT_SYSTEM_PROMPT = `You are GetChat, a local-first desktop AI assistant.
+
+Core behavior:
+- Reply in the user's language unless the user explicitly asks for another language.
+- Be concise, accurate, and practical.
+- Use available tools when they materially improve correctness, inspect local project state, or complete the user's task. Do not invent tool results.
+- Treat destructive file, database, branch, or message-history operations as high risk.
+- Never request, reveal, or log secrets.`;
 const browserDebugStreams = new Map<RequestId, BrowserDebugStreamController>();
 let browserDebugMemoryState: BrowserDebugState | null = null;
 
@@ -213,6 +249,7 @@ function createSeedConversation(now: number): BrowserDebugConversationRecord {
       activeBranchCount: 2,
       archivedBranchCount: 0,
       totalMessageCount: 3,
+      workspacePath: null,
     },
     messages: {
       [rootUserMessageId]: {
@@ -326,6 +363,7 @@ function createInitialBrowserDebugState(): BrowserDebugState {
     },
     defaultModelId: null,
     helperModelId: null,
+    systemPrompt: BROWSER_DEBUG_DEFAULT_SYSTEM_PROMPT,
     providersById: {},
     providerOrder: [],
     conversationsById: {
@@ -360,6 +398,9 @@ function readBrowserDebugState(): BrowserDebugState {
       typeof parsed.providersById === "object" &&
       typeof parsed.conversationsById === "object"
     ) {
+      if (typeof parsed.systemPrompt !== "string" || parsed.systemPrompt.trim().length === 0) {
+        parsed.systemPrompt = BROWSER_DEBUG_DEFAULT_SYSTEM_PROMPT;
+      }
       browserDebugMemoryState = cloneBrowserDebugValue(parsed);
       return cloneBrowserDebugValue(parsed);
     }
@@ -579,6 +620,10 @@ function buildProviderDto(
       providerId,
       requestName: model.requestName.trim(),
       displayName: model.displayName.trim(),
+      contextWindowKb: Math.max(
+        1,
+        Math.min(2048, Math.round(model.contextWindowKb ?? existingModel?.contextWindowKb ?? 64))
+      ),
       createdAt: existingModel?.createdAt ?? now,
       updatedAt: now,
     };
@@ -839,6 +884,7 @@ export async function invokeBrowserDebugCommand<T>(
           providers: listOrderedProviders(state),
           defaultModelId: state.defaultModelId,
           helperModelId: state.helperModelId,
+          systemPrompt: state.systemPrompt,
         })
       ) as T;
 
@@ -864,6 +910,16 @@ export async function invokeBrowserDebugCommand<T>(
       return mutateBrowserDebugState((state) => {
         state.helperModelId = (args?.modelId as string | null) ?? null;
         return undefined;
+      }) as T;
+
+    case "get_system_prompt":
+      return readBrowserDebugCommand((state) => state.systemPrompt) as T;
+
+    case "set_system_prompt":
+      return mutateBrowserDebugState((state) => {
+        const prompt = typeof args?.prompt === "string" ? args.prompt.trim() : "";
+        state.systemPrompt = prompt || BROWSER_DEBUG_DEFAULT_SYSTEM_PROMPT;
+        return state.systemPrompt;
       }) as T;
 
     case "list_providers":
@@ -1014,6 +1070,7 @@ export async function invokeBrowserDebugCommand<T>(
             activeBranchCount: 1,
             archivedBranchCount: 0,
             totalMessageCount: rootMessage ? 1 : 0,
+            workspacePath: null,
           },
           messages,
           branches: {
@@ -1168,11 +1225,12 @@ export async function invokeBrowserDebugCommand<T>(
     case "create_branch":
     case "rename_branch":
     case "set_branch_preferred_model":
-    case "set_branch_head_message":
     case "archive_branch":
     case "unarchive_branch":
+    case "delete_branch":
     case "set_mainline_branch":
     case "create_user_message":
+    case "direct_overwrite_user_message":
     case "create_assistant_placeholder_for_branch":
     case "create_assistant_variant_placeholder":
     case "complete_assistant_message":
@@ -1249,28 +1307,6 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         return branch;
       }) as T;
 
-    case "set_branch_head_message":
-      return mutateBrowserDebugState((state) => {
-        const input = args?.input as SetBranchHeadMessageInput | undefined;
-        if (!input?.branchId || !input.messageId) {
-          throwBrowserDebugError(
-            "INVALID_ARGUMENT",
-            "branchId and messageId are required"
-          );
-        }
-
-        const { conversation, branch } = requireBranchRecord(state, input.branchId);
-        const message = conversation.messages[input.messageId];
-        if (!message) {
-          throwBrowserDebugError("NOT_FOUND", `Message ${input.messageId} was not found`);
-        }
-
-        branch.headMessageId = message.id;
-        branch.updatedAt = Date.now();
-        syncConversationSummary(conversation, branch.updatedAt);
-        return branch;
-      }) as T;
-
     case "rename_branch":
       return mutateBrowserDebugState((state) => {
         const input = args?.input as RenameBranchInput | undefined;
@@ -1323,6 +1359,72 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         branch.updatedAt = Date.now();
         syncConversationSummary(conversation, branch.updatedAt);
         return branch;
+      }) as T;
+
+    case "delete_branch":
+      return mutateBrowserDebugState((state) => {
+        const branchId = args?.branchId as string | undefined;
+        if (!branchId) {
+          throwBrowserDebugError("INVALID_ARGUMENT", "branchId is required");
+        }
+
+        const { conversation, branch } = requireBranchRecord(state, branchId);
+        if (branch.isMainline) {
+          throwBrowserDebugError("CONFLICT", "Cannot delete the mainline branch");
+        }
+
+        const deletedBranchIds: string[] = [branchId];
+        const deletedMessageIds: string[] = [];
+
+        // Collect exclusive messages (on this branch path but not on other branches)
+        const headId = branch.headMessageId;
+        if (headId) {
+          const otherBranchPaths = new Set<string>();
+          for (const [bid, b] of Object.entries(conversation.branches)) {
+            if (bid === branchId || b.status === "ARCHIVED") continue;
+            // Collect all message IDs on other branches' paths
+            let cursor: string | null = b.headMessageId;
+            while (cursor) {
+              otherBranchPaths.add(cursor);
+              const msg = conversation.messages[cursor];
+              cursor = msg?.parentId ?? null;
+            }
+            if (b.forkPointMessageId) otherBranchPaths.add(b.forkPointMessageId);
+          }
+
+          // Collect messages on this branch path
+          let cursor: string | null = headId;
+          while (cursor) {
+            if (cursor === branch.forkPointMessageId) break;
+            if (!otherBranchPaths.has(cursor)) {
+              deletedMessageIds.push(cursor);
+            }
+            const pathMsg: MessageNode | undefined = conversation.messages[cursor];
+            cursor = pathMsg?.parentId ?? null;
+          }
+        }
+
+        // Delete messages (reverse order for safety)
+        for (const mid of [...deletedMessageIds].reverse()) {
+          const msg = conversation.messages[mid];
+          if (msg?.parentId && conversation.messages[msg.parentId]) {
+            const parent = conversation.messages[msg.parentId];
+            parent.childIds = parent.childIds.filter((id: string) => id !== mid);
+          }
+          delete conversation.messages[mid];
+        }
+
+        // Delete branch
+        delete conversation.branches[branchId];
+
+        const now = Date.now();
+        syncConversationSummary(conversation, now);
+
+        return {
+          deletedBranchIds,
+          deletedMessageIds,
+          conversationId: conversation.summary.id,
+        };
       }) as T;
 
     case "set_mainline_branch":
@@ -1403,6 +1505,184 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         return message;
       }) as T;
 
+    case "direct_overwrite_user_message":
+      return mutateBrowserDebugState((state) => {
+        const input = args?.input as DirectOverwriteUserMessageInput | undefined;
+        if (
+          !input?.conversationId ||
+          !input.branchId ||
+          !input.messageId ||
+          !input.contentText.trim()
+        ) {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "conversationId, branchId, messageId and contentText are required"
+          );
+        }
+
+        const conversation = requireConversationRecord(state, input.conversationId);
+        const branch = conversation.branches[input.branchId];
+        if (!branch) {
+          throwBrowserDebugError("NOT_FOUND", `Branch ${input.branchId} was not found`);
+        }
+
+        const target = conversation.messages[input.messageId];
+        if (!target) {
+          throwBrowserDebugError("NOT_FOUND", `Message ${input.messageId} was not found`);
+        }
+        if (target.role !== "USER") {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Only USER messages can be directly overwritten"
+          );
+        }
+        if (target.status !== "COMPLETED") {
+          throwBrowserDebugError(
+            "CONFLICT",
+            "Only completed USER messages can be directly overwritten"
+          );
+        }
+
+        let cursor = branch.headMessageId ?? null;
+        let foundOnPath = false;
+        const pathGuard = new Set<string>();
+        while (cursor) {
+          if (pathGuard.has(cursor)) {
+            throwBrowserDebugError(
+              "INVARIANT_VIOLATION",
+              "Branch path contains a cycle"
+            );
+          }
+          pathGuard.add(cursor);
+          const row = conversation.messages[cursor];
+          if (!row) {
+            throwBrowserDebugError("NOT_FOUND", "Branch path message was not found");
+          }
+          if (row.id === input.messageId) {
+            foundOnPath = true;
+            break;
+          }
+          cursor = row.parentId;
+        }
+        if (!foundOnPath) {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Message is not on the selected branch path"
+          );
+        }
+
+        const descendantIds: string[] = [];
+        const visitedDescendants = new Set<string>();
+        const collectDescendants = (messageId: string): void => {
+          const childIds = [
+            ...(conversation.indexes.childMessageIdsByParentId[messageId] ?? []),
+          ];
+          for (const childId of childIds) {
+            if (visitedDescendants.has(childId)) {
+              continue;
+            }
+            visitedDescendants.add(childId);
+            collectDescendants(childId);
+            descendantIds.push(childId);
+          }
+        };
+        collectDescendants(input.messageId);
+        const descendantSet = new Set(descendantIds);
+
+        for (const descendantId of descendantIds) {
+          if (conversation.messages[descendantId]?.status === "STREAMING") {
+            throwBrowserDebugError(
+              "CONFLICT",
+              "Cannot direct overwrite while a downstream generation is streaming"
+            );
+          }
+        }
+
+        for (const row of Object.values(conversation.branches)) {
+          const forkPointRefsDeleted = Boolean(
+            row.forkPointMessageId && descendantSet.has(row.forkPointMessageId)
+          );
+          const forkSourceRefsDeleted = Boolean(
+            row.forkSourceMessageId && descendantSet.has(row.forkSourceMessageId)
+          );
+
+          if (row.id === input.branchId) {
+            if (forkPointRefsDeleted || forkSourceRefsDeleted) {
+              throwBrowserDebugError(
+                "CONFLICT",
+                "Cannot direct overwrite because the selected branch metadata points into downstream history"
+              );
+            }
+            continue;
+          }
+
+          const headRefsDeleted = Boolean(
+            row.headMessageId && descendantSet.has(row.headMessageId)
+          );
+          if (headRefsDeleted || forkPointRefsDeleted || forkSourceRefsDeleted) {
+            throwBrowserDebugError(
+              "CONFLICT",
+              "Cannot direct overwrite because downstream messages are referenced by another branch"
+            );
+          }
+        }
+
+        const now = Date.now();
+        target.content = {
+          ...target.content,
+          text: input.contentText.trim(),
+        };
+        target.updatedAt = now;
+        target.childIds = [];
+        delete conversation.indexes.childMessageIdsByParentId[input.messageId];
+
+        for (const descendantId of descendantIds) {
+          const message = conversation.messages[descendantId];
+          if (!message) {
+            continue;
+          }
+
+          if (message.parentId) {
+            const parent = conversation.messages[message.parentId];
+            if (parent) {
+              parent.childIds = parent.childIds.filter((id) => id !== descendantId);
+            }
+            const siblings = conversation.indexes.childMessageIdsByParentId[message.parentId];
+            if (siblings) {
+              conversation.indexes.childMessageIdsByParentId[message.parentId] = siblings.filter(
+                (id) => id !== descendantId
+              );
+              if (conversation.indexes.childMessageIdsByParentId[message.parentId].length === 0) {
+                delete conversation.indexes.childMessageIdsByParentId[message.parentId];
+              }
+            }
+          } else {
+            conversation.indexes.rootMessageIds = conversation.indexes.rootMessageIds.filter(
+              (id) => id !== descendantId
+            );
+          }
+
+          delete conversation.indexes.childMessageIdsByParentId[descendantId];
+          delete conversation.messages[descendantId];
+        }
+
+        for (const forkPointId of Object.keys(conversation.indexes.branchIdsByForkPointId)) {
+          if (descendantSet.has(forkPointId)) {
+            delete conversation.indexes.branchIdsByForkPointId[forkPointId];
+          }
+        }
+
+        branch.headMessageId = input.messageId;
+        branch.updatedAt = now;
+        syncConversationSummary(conversation, now);
+        state.lastWorkspace = {
+          conversationId: input.conversationId,
+          branchId: input.branchId,
+        };
+
+        return target;
+      }) as T;
+
     case "create_assistant_placeholder_for_branch":
       return mutateBrowserDebugState((state) => {
         const input = args?.input as CreateAssistantPlaceholderForBranchInput | undefined;
@@ -1481,11 +1761,17 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
     case "complete_assistant_message":
       return mutateBrowserDebugState((state) => {
         const input = args?.input as CompleteAssistantMessageInput | undefined;
-        if (!input?.messageId) {
-          throwBrowserDebugError("INVALID_ARGUMENT", "messageId is required");
+        if (!input?.messageId || !input.requestId) {
+          throwBrowserDebugError("INVALID_ARGUMENT", "messageId and requestId are required");
         }
 
         const { conversation, message } = requireMessageRecord(state, input.messageId);
+        if (message.generation?.requestId !== input.requestId) {
+          throwBrowserDebugError(
+            "INVARIANT_VIOLATION",
+            `Message ${input.messageId} does not belong to request ${input.requestId}`
+          );
+        }
         const now = Date.now();
         message.status = "COMPLETED";
         message.content = {
@@ -1511,11 +1797,17 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
     case "fail_assistant_message":
       return mutateBrowserDebugState((state) => {
         const input = args?.input as FailAssistantMessageInput | undefined;
-        if (!input?.messageId) {
-          throwBrowserDebugError("INVALID_ARGUMENT", "messageId is required");
+        if (!input?.messageId || !input.requestId) {
+          throwBrowserDebugError("INVALID_ARGUMENT", "messageId and requestId are required");
         }
 
         const { conversation, message } = requireMessageRecord(state, input.messageId);
+        if (message.generation?.requestId !== input.requestId) {
+          throwBrowserDebugError(
+            "INVARIANT_VIOLATION",
+            `Message ${input.messageId} does not belong to request ${input.requestId}`
+          );
+        }
         const now = Date.now();
         message.status = "FAILED";
         message.content = {
@@ -1556,6 +1848,7 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
 
         while (cursor) {
           promptMessages.push({
+            sourceMessageId: cursor.id,
             role: cursor.role.toLowerCase(),
             content: cursor.content.text,
           });
@@ -1567,7 +1860,7 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         return promptMessages.reverse();
       }) as T;
 
-    case "delete_message":
+    case "delete_assistant_variant_message":
       return mutateBrowserDebugState((state) => {
         const messageId = args?.messageId as string | undefined;
         if (!messageId) {
@@ -1589,6 +1882,28 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
             "Cannot delete a message that has child messages"
           );
         }
+        if (!message.parentId) {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Only assistant variants with a user parent can be deleted"
+          );
+        }
+        const parent = conversation.messages[message.parentId];
+        if (!parent || parent.role !== "USER") {
+          throwBrowserDebugError(
+            "INVALID_ARGUMENT",
+            "Only assistant variants under USER messages can be deleted"
+          );
+        }
+        const assistantSiblingCount = (conversation.indexes.childMessageIdsByParentId[message.parentId] ?? [])
+          .map((id) => conversation.messages[id])
+          .filter((sibling): sibling is MessageNode => sibling?.role === "ASSISTANT").length;
+        if (assistantSiblingCount <= 1) {
+          throwBrowserDebugError(
+            "CONFLICT",
+            "Cannot delete the only assistant candidate for this user message"
+          );
+        }
         const isBranchHead = Object.values(conversation.branches).some(
           (branch) => branch.headMessageId === messageId
         );
@@ -1599,7 +1914,6 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
           );
         }
         if (message.parentId) {
-          const parent = conversation.messages[message.parentId];
           if (parent) {
             parent.childIds = parent.childIds.filter((id) => id !== messageId);
           }
@@ -1617,62 +1931,6 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
         delete conversation.messages[messageId];
         syncConversationSummary(conversation, Date.now());
         return undefined;
-      }) as T;
-
-    case "edit_user_message_inline":
-      return mutateBrowserDebugState((state) => {
-        const messageId = args?.messageId as string | undefined;
-        const newContent = args?.newContent as string | undefined;
-        if (!messageId || typeof newContent !== "string") {
-          throwBrowserDebugError("INVALID_ARGUMENT", "messageId and newContent are required");
-        }
-        const { conversation, message } = requireMessageRecord(state, messageId);
-        if (message.role !== "USER") {
-          throwBrowserDebugError(
-            "INVALID_ARGUMENT",
-            "Only USER messages can be edited inline"
-          );
-        }
-        const descendants = collectDescendantMessageIds(conversation, messageId);
-        const hasForkPointReference = Object.values(conversation.branches).some(
-          (branch) =>
-            branch.forkPointMessageId !== null &&
-            descendants.has(branch.forkPointMessageId)
-        );
-        if (hasForkPointReference) {
-          throwBrowserDebugError(
-            "CONFLICT",
-            "Cannot edit inline when downstream messages are fork points of existing branches"
-          );
-        }
-        const now = Date.now();
-        for (const descendantId of descendants) {
-          const descendant = conversation.messages[descendantId];
-          if (descendant?.parentId) {
-            const siblings = conversation.indexes.childMessageIdsByParentId[descendant.parentId] ?? [];
-            conversation.indexes.childMessageIdsByParentId[descendant.parentId] = siblings.filter(
-              (id) => id !== descendantId
-            );
-          }
-          conversation.indexes.rootMessageIds = conversation.indexes.rootMessageIds.filter(
-            (id) => id !== descendantId
-          );
-          delete conversation.indexes.childMessageIdsByParentId[descendantId];
-          delete conversation.indexes.branchIdsByForkPointId[descendantId];
-          delete conversation.messages[descendantId];
-        }
-        Object.values(conversation.branches).forEach((branch) => {
-          if (branch.headMessageId && descendants.has(branch.headMessageId)) {
-            branch.headMessageId = messageId;
-            branch.updatedAt = now;
-          }
-        });
-        message.content = { text: newContent, format: "MARKDOWN" };
-        message.childIds = [];
-        message.updatedAt = now;
-        conversation.indexes.childMessageIdsByParentId[messageId] = [];
-        syncConversationSummary(conversation, now);
-        return message;
       }) as T;
 
     case "check_db_invariants":
@@ -1727,6 +1985,55 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
     case "generate_branch_diff_summary":
       return readBrowserDebugCommand((_state): T => {
         return { summary: buildBrowserDebugDiffSummary() } as T;
+      });
+
+    case "set_mcp_server_enabled":
+      return readBrowserDebugCommand((_state): T => {
+        return { success: true } as T;
+      });
+
+    case "get_context_status":
+      return readBrowserDebugCommand((_state): T => {
+        return {
+          usedTokens: 0,
+          totalTokens: 65536,
+          percentage: 0,
+          messageCount: 0,
+          breakdown: {
+            systemTokens: 0,
+            toolPromptTokens: 0,
+            userTokens: 0,
+            assistantTokens: 0,
+            toolTokens: 0,
+            compressedContextTokens: 0,
+            skillPromptTokens: 0,
+          },
+        } as T;
+      });
+
+    case "get_skills_directory":
+      return readBrowserDebugCommand((_state): T => {
+        return "/mock/skills" as T;
+      });
+
+    case "import_skill":
+      return readBrowserDebugCommand((_state): T => {
+        return { success: true } as T;
+      });
+
+    case "refresh_skills_from_disk":
+      return readBrowserDebugCommand((_state): T => {
+        return { success: true } as T;
+      });
+
+    case "compress_context":
+      return readBrowserDebugCommand((_state): T => {
+        return {
+          compressedId: "cc_mock",
+          summaryText: "Mock compressed summary",
+          compressedMessageCount: 3,
+          estimatedTokens: 150,
+        } as T;
       });
 
     default:

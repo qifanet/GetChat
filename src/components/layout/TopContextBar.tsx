@@ -6,7 +6,8 @@
  * long titles, breadcrumbs, and sidebars crush the main reading area.
  */
 import { useTranslation } from "react-i18next";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   getModelDisplayName,
   listAvailableModelOptions,
@@ -22,11 +23,15 @@ import { selectSuggestedCompareTargetBranchId } from "../../selectors/branchSele
 import { PathBreadcrumb } from "./PathBreadcrumb";
 import { MainlineBadge } from "./MainlineBadge";
 import { PendingConvergePill } from "./PendingConvergePill";
+import * as tauriCmd from "../../services/tauriCommands";
 import {
   IconColumns,
   IconExport,
   IconChevronLeft,
   IconChevronRight,
+  IconFolderOpen,
+  IconFolder,
+  IconX,
 } from "../common/Icon";
 const _sel_workspace_workspaceMode = (s: import("../../stores/appStore.types").AppStore) => s.workspace.workspaceMode;
 const _sel_workspace_currentBranchId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.currentBranchId;
@@ -71,6 +76,47 @@ export function TopContextBar() {
     providerModels,
     t("shell.modelUnset")
   );
+  const handleSetWorkspace = useCallback(async () => {
+    if (!summary?.id) return;
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("workspaceDir.dirPickerTitle"),
+    });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : selected;
+    await tauriCmd.setConversationWorkspace(summary.id, path);
+    useAppStore.setState(
+      (s) => {
+        if (s.activeSnapshot) {
+          s.activeSnapshot.summary.workspacePath = path;
+        }
+        if (s.summariesById[summary.id]) {
+          s.summariesById[summary.id].workspacePath = path;
+        }
+      },
+      undefined,
+      "workspace/dirSet"
+    );
+  }, [summary?.id, t]);
+
+  const handleClearWorkspace = useCallback(async () => {
+    if (!summary?.id) return;
+    await tauriCmd.setConversationWorkspace(summary.id, null);
+    useAppStore.setState(
+      (s) => {
+        if (s.activeSnapshot) {
+          s.activeSnapshot.summary.workspacePath = null;
+        }
+        if (s.summariesById[summary.id]) {
+          s.summariesById[summary.id].workspacePath = null;
+        }
+      },
+      undefined,
+      "workspace/dirClear"
+    );
+  }, [summary?.id]);
+
   /** Toggle the conversation sidebar while preventing two overlay drawers from overlapping. */
   function handleToggleLeftSidebar(): void {
     const nextCollapsed = !leftCollapsed;
@@ -176,6 +222,33 @@ export function TopContextBar() {
               </button>
             </>
           )}
+          {summary?.id ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className={`app-secondary-button gap-1.5 px-3 py-2 text-xs ${summary.workspacePath ? "border-emerald-200 bg-emerald-50/60 text-emerald-700" : ""}`}
+                onClick={() => void handleSetWorkspace()}
+                title={summary.workspacePath ? t("workspaceDir.pathTooltip", { path: summary.workspacePath }) : t("workspaceDir.setWorkspace")}
+              >
+                {summary.workspacePath ? <IconFolderOpen size={12} /> : <IconFolder size={12} />}
+                <span className="hidden max-w-[160px] truncate sm:inline">
+                  {summary.workspacePath
+                    ? summary.workspacePath.split(/[\\/]/).pop()
+                    : t("workspaceDir.setWorkspace")}
+                </span>
+              </button>
+              {summary.workspacePath ? (
+                <button
+                  type="button"
+                  className="app-icon-button h-7 w-7 text-xs text-miro-text-secondary hover:text-red-500"
+                  onClick={() => void handleClearWorkspace()}
+                  title={t("workspaceDir.clearWorkspace")}
+                >
+                  <IconX size={10} />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={handleToggleRightSidebar}

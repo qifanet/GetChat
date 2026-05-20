@@ -13,7 +13,11 @@
 
 pub mod app_kv;
 pub mod branches;
+pub mod compressed_contexts;
 pub mod conversations;
+pub mod mcp_servers;
 pub mod messages;
 pub mod provider_models;
 pub mod providers;
+pub mod skills;
+pub mod tool_calls;

@@ -11,7 +11,12 @@ import type { ModelId, ProviderId, UnixMs } from "./base";
 // ============================================================================
 
 /** Supported provider types */
-export type ProviderType = "OPENAI_COMPATIBLE" | "OLLAMA";
+export type ProviderType =
+  | "OPENAI_COMPATIBLE"
+  | "DEEPSEEK"
+  | "OPENROUTER"
+  | "GROQ"
+  | "OLLAMA";
 
 /** Model provider configuration */
 export interface ProviderConfig {
@@ -58,6 +63,7 @@ export interface ProviderModelSaveInput {
   id?: ModelId;
   requestName: string;
   displayName: string;
+  contextWindowKb?: number;
 }
 
 /** Model profile associated with a provider */
@@ -66,6 +72,7 @@ export interface ModelProfile {
   providerId: ProviderId;
   requestName: string; // e.g., "gpt-4.1-mini"
   displayName: string; // e.g., "GPT-4.1 Mini"
+  contextWindowKb: number; // Context window size in K tokens, default 64
   createdAt: UnixMs;
   updatedAt: UnixMs;
 }

@@ -14,20 +14,31 @@
  * call. This prevents intermediate inconsistent renders where the workspace
  * moves to a branch or message that the backend has not actually accepted.
  *
- * Non-destructive guarantee:
- *   - Original messages are NEVER modified
- *   - Branch creation always creates a NEW entity
- *   - editedFromMessageId links to the original without changing it
+ * Default behavior is non-destructive: edits create a new branch and preserve
+ * original messages. DIRECT_OVERWRITE is the explicit exception and is handled
+ * before the normal SendPlan path.
  */
 import { useAppStore } from "../../stores/useAppStore";
-import { buildSendPlan, SendPlanError } from "./buildSendPlan";
+import { buildSendPlan } from "./buildSendPlan";
 import { startAssistantStream } from "../../services/streamController";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { AppStore } from "../../stores/appStore.types";
 import type { BranchEntity, MessageNode } from "../../types/conversation";
+import type { PromptMessage } from "../../services/tauriTypes";
 // ============================================================================
 // Helpers
 // ============================================================================
+const PASSIVE_COMPRESSION_THRESHOLD_PERCENT = 75;
+const SEND_CONTEXT_BUDGET_RATIO = 0.9;
+const MIN_PROMPT_BUDGET_TOKENS = 1000;
+
+type EnabledTools = Awaited<ReturnType<typeof tauriCmd.getEnabledToolDefinitions>>;
+
+interface PreparedPromptForSend {
+  promptMessages: PromptMessage[];
+  tools: EnabledTools;
+}
+
 /** Resolve the provider that should serve the currently selected model. */
 export function resolveProviderIdForModel(state: AppStore, modelId: string): string {
   const selectedModel = state.providerModels[modelId];
@@ -51,6 +62,109 @@ export function resolveProviderIdForModel(state: AppStore, modelId: string): str
   }
   return fallbackProviderId;
 }
+
+function getModelContextTokens(state: AppStore, modelId: string): number {
+  const configuredKb = state.providerModels[modelId]?.contextWindowKb;
+  if (typeof configuredKb === "number" && Number.isFinite(configuredKb) && configuredKb > 0) {
+    return Math.round(configuredKb * 1000);
+  }
+  return 64_000;
+}
+
+function readNumberParam(params: unknown, keys: string[]): number | null {
+  if (!params || typeof params !== "object") return null;
+  const source = params as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
+function getOutputTokenReserve(state: AppStore, totalTokens: number): number {
+  const configuredMax = readNumberParam(state.composer.params, ["maxTokens", "max_tokens"]);
+  const defaultReserve = Math.max(512, Math.floor(totalTokens * 0.1));
+  const reserve = Math.max(configuredMax ?? defaultReserve, defaultReserve);
+  return Math.min(reserve, Math.floor(totalTokens * 0.4));
+}
+
+function getPromptTokenBudget(
+  state: AppStore,
+  modelId: string,
+  status: tauriCmd.ContextStatusDto | null
+): number {
+  const totalTokens = Math.max(status?.totalTokens ?? getModelContextTokens(state, modelId), 1000);
+  const toolPromptTokens = Math.max(status?.breakdown?.toolPromptTokens ?? 0, 0);
+  const outputReserve = getOutputTokenReserve(state, totalTokens);
+  const sendBudget = Math.floor(totalTokens * SEND_CONTEXT_BUDGET_RATIO);
+  return Math.max(MIN_PROMPT_BUDGET_TOKENS, sendBudget - toolPromptTokens - outputReserve);
+}
+
+function shouldAttemptPassiveCompression(
+  status: tauriCmd.ContextStatusDto | null,
+  promptTokenBudget: number
+): boolean {
+  if (!status || status.messageCount < 6) {
+    return false;
+  }
+  return (
+    status.percentage >= PASSIVE_COMPRESSION_THRESHOLD_PERCENT ||
+    status.usedTokens > promptTokenBudget
+  );
+}
+
+async function preparePromptForSend(params: {
+  state: AppStore;
+  conversationId: string;
+  branchId: string;
+  upToMessageId: string;
+  modelId: string;
+}): Promise<PreparedPromptForSend> {
+  const { state, conversationId, branchId, upToMessageId, modelId } = params;
+  const [tools, initialStatus] = await Promise.all([
+    tauriCmd.getEnabledToolDefinitions(),
+    tauriCmd.getContextStatus(conversationId, branchId, modelId).catch((error) => {
+      console.warn("[context] failed to read context status before send", error);
+      return null;
+    }),
+  ]);
+
+  let status = initialStatus;
+  let promptTokenBudget = getPromptTokenBudget(state, modelId, status);
+
+  if (shouldAttemptPassiveCompression(status, promptTokenBudget)) {
+    try {
+      await tauriCmd.compressContext(conversationId, branchId, modelId);
+      status = await tauriCmd.getContextStatus(conversationId, branchId, modelId).catch((error) => {
+        console.warn("[context] failed to refresh context status after compression", error);
+        return status;
+      });
+      promptTokenBudget = getPromptTokenBudget(state, modelId, status);
+    } catch (error) {
+      // Sending should still proceed with deterministic prompt trimming. The
+      // backend only stores a compressed summary after the helper call succeeds.
+      console.warn("[context] passive compression failed; falling back to budget trimming", error);
+    }
+  }
+
+  const promptMessages = await tauriCmd.buildPromptMessages({
+    conversationId,
+    upToMessageId,
+    branchId,
+    maxTokensBudget: promptTokenBudget,
+  });
+
+  return { promptMessages, tools };
+}
+
 /**
  * Execute the unified send action.
  *
@@ -76,103 +190,90 @@ export async function sendMessageAction(): Promise<void> {
   if (!modelId) {
     throw new Error("No model selected");
   }
-  // --- Build plan (pure computation) ---
-  const plan = buildSendPlan(state);
-  // --- Determine provider ---
-  const providerId = resolveProviderIdForModel(state, modelId);
-  // --- EDIT_INLINE: special fast path ---
-  if (plan.editInlineMessageId) {
-    // Edit user message in place, delete all downstream messages
-    const updatedMsg = await tauriCmd.editUserMessageInline(plan.editInlineMessageId, draft);
-    const promptMessages = await tauriCmd.buildPromptMessages({
-      conversationId: plan.conversationId,
-      upToMessageId: updatedMsg.id,
-    });
-    // Collect all descendant IDs from the frontend snapshot before mutation
-    const snapshot = state.activeSnapshot;
-    const deletedIds = new Set<string>();
-    const redirectedBranchIds = new Set<string>();
-    if (snapshot) {
-      const collectDescendants = (parentId: string) => {
-        const children = snapshot.indexes.childMessageIdsByParentId[parentId] ?? [];
-        for (const childId of children) {
-          deletedIds.add(childId);
-          collectDescendants(childId);
-        }
-      };
-      collectDescendants(plan.editInlineMessageId);
-      for (const branch of Object.values(snapshot.entities.branches)) {
-        if (branch.headMessageId && deletedIds.has(branch.headMessageId)) {
-          redirectedBranchIds.add(branch.id);
-        }
-      }
+
+  const directOverwriteIntent =
+    state.workspace.forkIntent?.sourceType === "HISTORY_USER_EDIT" &&
+    state.workspace.forkIntent.editMode === "DIRECT_OVERWRITE"
+      ? state.workspace.forkIntent
+      : null;
+
+  if (directOverwriteIntent) {
+    const conversationId = state.workspace.activeConversationId;
+    const targetBranchId = directOverwriteIntent.sourceBranchId;
+    const messageId = directOverwriteIntent.originalEditableMessageId;
+
+    if (!conversationId) {
+      throw new Error("No active conversation");
     }
-    // Single atomic set
+    if (!targetBranchId) {
+      throw new Error("No current branch selected");
+    }
+    if (!messageId) {
+      throw new Error("No editable message selected");
+    }
+
+    const providerId = resolveProviderIdForModel(state, modelId);
+    const userMessage = await tauriCmd.directOverwriteUserMessage({
+      conversationId,
+      branchId: targetBranchId,
+      messageId,
+      contentText: draft,
+    });
+    const [{ promptMessages, tools }, snapshot] = await Promise.all([
+      preparePromptForSend({
+        state,
+        conversationId,
+        branchId: targetBranchId,
+        upToMessageId: userMessage.id,
+        modelId,
+      }),
+      tauriCmd.loadConversationSnapshot(conversationId),
+    ]);
+
     useAppStore.setState(
       (s) => {
-        if (!s.activeSnapshot) return;
-        const snap = s.activeSnapshot;
-        // Remove all deleted descendants from entities and indexes
-        for (const id of deletedIds) {
-          const msg = snap.entities.messages[id];
-          if (msg?.parentId) {
-            const siblings = snap.indexes.childMessageIdsByParentId[msg.parentId];
-            if (siblings) {
-              const idx = siblings.indexOf(id);
-              if (idx !== -1) siblings.splice(idx, 1);
-            }
-          }
-          snap.indexes.rootMessageIds = snap.indexes.rootMessageIds.filter((rootId) => rootId !== id);
-          delete snap.indexes.childMessageIdsByParentId[id];
-          delete snap.indexes.branchIdsByForkPointId[id];
-          delete snap.entities.messages[id];
-        }
-        // Update the edited message with fresh DTO (empty childIds)
-        snap.entities.messages[updatedMsg.id] = updatedMsg;
-        snap.indexes.childMessageIdsByParentId[updatedMsg.id] = [];
-        // Update branch head to point to the edited message
-        const branch = snap.entities.branches[plan.targetBranchId];
-        if (branch) {
-          branch.headMessageId = updatedMsg.id;
-          branch.updatedAt = updatedMsg.updatedAt;
-        }
-        for (const branchId of redirectedBranchIds) {
-          const redirected = snap.entities.branches[branchId];
-          if (redirected) {
-            redirected.headMessageId = updatedMsg.id;
-            redirected.updatedAt = updatedMsg.updatedAt;
-          }
-        }
-        snap.summary.totalMessageCount = Math.max(
-          0,
-          snap.summary.totalMessageCount - deletedIds.size
-        );
-        snap.summary.updatedAt = updatedMsg.updatedAt;
-        s.summariesById[plan.conversationId] = {
-          ...(s.summariesById[plan.conversationId] ?? snap.summary),
-          ...snap.summary,
+        s.activeSnapshot = snapshot;
+        s.activeSnapshotStatus = "READY";
+        s.activeSnapshotError = undefined;
+        s.summariesById[conversationId] = {
+          ...(s.summariesById[conversationId] ?? snapshot.summary),
+          ...snapshot.summary,
         };
+        if (!s.summaryOrder.includes(conversationId)) {
+          s.summaryOrder.unshift(conversationId);
+        }
+        s.workspace.activeConversationId = conversationId;
+        s.workspace.currentBranchId = targetBranchId;
         s.composer.draft = "";
         s.workspace.workspaceMode = "NORMAL";
         s.workspace.forkIntent = null;
         s.workspace.variantPreview = null;
       },
       undefined,
-      "conversation/messageEditedInline"
+      "conversation/directOverwriteMessageSent"
     );
+
     await startAssistantStream({
-      conversationId: plan.conversationId,
-      branchId: plan.targetBranchId,
-      parentMessageId: updatedMsg.id,
+      conversationId,
+      branchId: targetBranchId,
+      parentMessageId: userMessage.id,
       providerId,
       modelId,
       promptMessages,
-      generationParams: { ...state.composer.params },
+      generationParams: {
+        ...state.composer.params,
+      },
       rendererMode: "DOM_TEXT",
+      tools: tools.length > 0 ? tools : undefined,
+      toolChoice: tools.length > 0 ? "auto" : undefined,
     });
     return;
   }
 
+  // --- Build plan (pure computation) ---
+  const plan = buildSendPlan(state);
+  // --- Determine provider ---
+  const providerId = resolveProviderIdForModel(state, modelId);
   // --- Persist branch/message entities via Tauri BEFORE local store sync ---
   let newBranch: BranchEntity | null = null;
   let targetBranchId = plan.targetBranchId;
@@ -196,9 +297,12 @@ export async function sendMessageAction(): Promise<void> {
     parentMessageId: plan.targetParentMessageId ?? undefined,
     editedFromMessageId: plan.editedFromMessageId ?? undefined,
   });
-  const promptMessages = await tauriCmd.buildPromptMessages({
+  const { promptMessages, tools } = await preparePromptForSend({
+    state,
     conversationId: plan.conversationId,
+    branchId: targetBranchId,
     upToMessageId: userMessage.id,
+    modelId,
   });
   // --- SINGLE ATOMIC SET: all mutations in one immer transaction ---
   useAppStore.setState(
@@ -276,5 +380,7 @@ export async function sendMessageAction(): Promise<void> {
       ...state.composer.params,
     },
     rendererMode: "DOM_TEXT",
+    tools: tools.length > 0 ? tools : undefined,
+    toolChoice: tools.length > 0 ? "auto" : undefined,
   });
 }
