@@ -532,6 +532,28 @@ export async function setBuiltinToolEnabled(
 }
 
 // ============================================================================
+// Security Policy Commands
+// ============================================================================
+
+export interface SecurityPolicyDto {
+  level: "permissive" | "standard" | "strict";
+  terminalBlacklist: string[];
+  fileWriteBlacklist: string[];
+}
+
+export async function getSecurityPolicy(): Promise<SecurityPolicyDto> {
+  return executeCommand<SecurityPolicyDto>("get_security_policy");
+}
+
+export async function updateSecurityPolicy(params: {
+  level?: string;
+  terminalBlacklist?: string[];
+  fileWriteBlacklist?: string[];
+}): Promise<SecurityPolicyDto> {
+  return executeCommand<SecurityPolicyDto>("update_security_policy", params);
+}
+
+// ============================================================================
 // MCP Server Management Commands
 // ============================================================================
 

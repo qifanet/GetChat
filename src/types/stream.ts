@@ -171,6 +171,15 @@ export interface StreamSessionMeta {
     receivedAt: number;
   };
 
+  /** Active retry state (set by RETRYING event, cleared on CHUNK/COMPLETED/FAILED) */
+  retrying?: {
+    attempt: number;
+    maxAttempts: number;
+    nextRetryInSecs: number;
+    errorSummary: string;
+    receivedAt: number;
+  };
+
   error?: StreamError;
 }
 

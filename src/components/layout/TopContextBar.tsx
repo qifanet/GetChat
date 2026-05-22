@@ -23,6 +23,7 @@ import { selectSuggestedCompareTargetBranchId } from "../../selectors/branchSele
 import { PathBreadcrumb } from "./PathBreadcrumb";
 import { MainlineBadge } from "./MainlineBadge";
 import { PendingConvergePill } from "./PendingConvergePill";
+import { ModelSelector } from "../common/ModelSelector";
 import * as tauriCmd from "../../services/tauriCommands";
 import {
   IconColumns,
@@ -164,24 +165,14 @@ export function TopContextBar() {
               <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary 2xl:inline">
                 {t("shell.currentModel")}
               </span>
-              <select
-                value={selectedModelId ?? ""}
-                onChange={(event) =>
-                  void setBranchPreferredModel(
-                    currentBranchId,
-                    event.target.value || null
-                  )
+              <ModelSelector
+                options={availableModelOptions}
+                value={selectedModelId}
+                onChange={(modelId) =>
+                  void setBranchPreferredModel(currentBranchId, modelId)
                 }
-                className="min-w-[132px] max-w-[220px] bg-transparent text-sm text-miro-text focus:outline-none"
-                title={currentBranch?.preferredModelId ? currentModelLabel : undefined}
-              >
-                <option value="">{t("shell.modelUnset")}</option>
-                {availableModelOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.providerName} / {option.displayName}
-                  </option>
-                ))}
-              </select>
+                placeholder={t("shell.modelUnset")}
+              />
             </div>
           ) : null}
           {workspaceMode === "COMPARE" ? (

@@ -105,12 +105,8 @@ impl BuiltinToolExecutor {
             disabled_tools: Arc::new(Mutex::new(HashSet::new())),
         };
         executor.register_calculator();
-        executor.register_file_read();
-        executor.register_file_write();
-        executor.register_file_list();
-        executor.register_grep();
-        executor.register_todo_read();
-        executor.register_todo_write();
+        executor.register_file();
+        executor.register_todo();
         executor.register_terminal();
         executor.register_web_search();
         let known_disabled_tools = disabled_tools
@@ -739,115 +735,77 @@ fn get_legacy_todo_key() -> String {
 // ============================================================================
 
 impl BuiltinToolExecutor {
-    fn register_file_read(&mut self) {
+    /** Unified file tool — merges file_read, file_write, file_list, grep. */
+    fn register_file(&mut self) {
         let definition = ToolDefinitionDto {
             tool_type: "function".to_string(),
             function: ToolFunctionDefDto {
-                name: "file_read".to_string(),
-                description: "Read the contents of a file within the workspace. Returns file content with line numbers. Supports multiple character encodings (utf-8, gbk, gb2312, gb18030, big5, shift_jis, latin1). Default encoding is utf-8. Use offset and limit to read specific line ranges. Output is capped at 50000 characters to prevent context overflow.".to_string(),
+                name: "file".to_string(),
+                description: "File operations within the workspace sandbox. All paths must be within the configured workspace directory.\n\nActions:\n- read: Read file contents with line numbers. Supports offset/limit and multiple encodings (utf-8, gbk, gb2312, gb18030, big5, shift_jis, latin1).\n- write: Create or overwrite a file. Creates parent directories if needed. Max 100KB.\n- list: List directory contents with sizes and types. Supports recursive listing.\n- search: Search file contents with regex pattern. Limited to 50 results.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "File path relative to workspace root, or absolute path within workspace" },
-                        "offset": { "type": "integer", "description": "Starting line number (0-indexed). Default: 0" },
-                        "limit": { "type": "integer", "description": "Maximum number of lines to read. Default: 2000" },
-                        "encoding": { "type": "string", "description": "Character encoding. Supported: utf-8, gbk, gb2312, gb18030, big5, shift_jis, latin1. Default: utf-8" }
+                        "action": {
+                            "type": "string",
+                            "enum": ["read", "write", "list", "search"],
+                            "description": "The file operation to perform"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "File or directory path (relative to workspace root, or absolute path within workspace)"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write (required for write action)"
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting line number for read (0-indexed, default: 0)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum lines to read (default: 2000)"
+                        },
+                        "encoding": {
+                            "type": "string",
+                            "description": "Character encoding for read (utf-8, gbk, gb2312, gb18030, big5, shift_jis, latin1, default: utf-8)"
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Recurse into subdirectories (for list/search)"
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "Regex pattern to search for (required for search action)"
+                        },
+                        "include": {
+                            "type": "string",
+                            "description": "File extension filter for search, e.g. 'ts' or 'rs'"
+                        }
                     },
-                    "required": ["path"]
+                    "required": ["action", "path"]
                 }),
             },
         };
-        self.register(definition, |args, context| file_read_handler(args, &context));
+
+        self.register(definition, |args, context| file_tool_handler(args, &context));
     }
 
-    fn register_file_write(&mut self) {
+    /** Unified todo tool — merges todo_read and todo_write. */
+    fn register_todo(&mut self) {
         let definition = ToolDefinitionDto {
             tool_type: "function".to_string(),
             function: ToolFunctionDefDto {
-                name: "file_write".to_string(),
-                description: "Create or overwrite a file within the workspace. Creates parent directories if needed.".to_string(),
+                name: "todo".to_string(),
+                description: "Manage a todo checklist for multi-step tasks. Use 'read' to list current items, 'write' to update the full list. Proactively create a todo list when the user's request involves multiple steps.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "File path relative to workspace root, or absolute path within workspace" },
-                        "content": { "type": "string", "description": "Content to write to the file" }
-                    },
-                    "required": ["path", "content"]
-                }),
-            },
-        };
-        self.register(definition, |args, context| file_write_handler(args, &context));
-    }
-
-    fn register_file_list(&mut self) {
-        let definition = ToolDefinitionDto {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDefDto {
-                name: "file_list".to_string(),
-                description: "List files and directories within the workspace. Returns names, sizes, and types.".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Directory path relative to workspace root. Default: '.' (workspace root)" },
-                        "recursive": { "type": "boolean", "description": "Whether to list recursively. Default: false" }
-                    },
-                    "required": []
-                }),
-            },
-        };
-        self.register(definition, |args, context| file_list_handler(args, &context));
-    }
-
-    fn register_grep(&mut self) {
-        let definition = ToolDefinitionDto {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDefDto {
-                name: "grep".to_string(),
-                description: "Search file contents using a regex pattern within the workspace. Returns matching lines with file paths and line numbers. Limited to 50 results.".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Regex pattern to search for" },
-                        "path": { "type": "string", "description": "Directory to search in (relative to workspace). Default: workspace root" },
-                        "include": { "type": "string", "description": "File extension filter, e.g. '.rs' or '.ts'. Default: all files" }
-                    },
-                    "required": ["pattern"]
-                }),
-            },
-        };
-        self.register(definition, |args, context| grep_handler(args, &context));
-    }
-
-    fn register_todo_read(&mut self) {
-        let definition = ToolDefinitionDto {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDefDto {
-                name: "todo_read".to_string(),
-                description: "Read the current todo list for this conversation. Returns all todo items with their IDs, content, and status.".to_string(),
-                parameters: json!({ "type": "object", "properties": {}, "required": [] }),
-            },
-        };
-        self.register(definition, |_args, context| {
-            let store = TODO_STORE.lock().unwrap();
-            let items = store.get(&get_todo_key(&context)).cloned().unwrap_or_default();
-            let output = if items.is_empty() {
-                "No todo items.".to_string()
-            } else {
-                items.iter().map(|t| format!("- [{}] {} ({})", t.status, t.content, t.id)).collect::<Vec<_>>().join("\n")
-            };
-            ToolExecutionResult { success: true, output }
-        });
-    }
-
-    fn register_todo_write(&mut self) {
-        let definition = ToolDefinitionDto {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDefDto {
-                name: "todo_write".to_string(),
-                description: "Manage a todo checklist for multi-step tasks. IMPORTANT: Proactively use this tool when the user's request involves multiple steps or sequential operations. Create a todo list at the start of complex tasks, update item statuses as you progress, and mark items completed when done. This helps track progress and ensures nothing is missed.".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["read", "write"],
+                            "description": "read = list current items, write = replace the full list"
+                        },
                         "todos": {
                             "type": "array",
                             "items": {
@@ -858,33 +816,16 @@ impl BuiltinToolExecutor {
                                     "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
                                 },
                                 "required": ["id", "content", "status"]
-                            }
+                            },
+                            "description": "Full todo list (required for write action). Replaces all existing items."
                         }
                     },
-                    "required": ["todos"]
+                    "required": ["action"]
                 }),
             },
         };
-        self.register(definition, |args, context| {
-            let todos_val = match args.get("todos") {
-                Some(v) => v,
-                None => return ToolExecutionResult { success: false, output: "Missing required parameter: todos".to_string() },
-            };
-            let todos: Vec<TodoItem> = match serde_json::from_value(todos_val.clone()) {
-                Ok(v) => v,
-                Err(e) => return ToolExecutionResult { success: false, output: format!("Invalid todos format: {}", e) },
-            };
-            let key = get_todo_key(&context);
-            let mut store = TODO_STORE.lock().unwrap();
-            store.insert(key, todos.clone());
-            let output = if todos.is_empty() {
-                "Todo list cleared.".to_string()
-            } else {
-                let lines: Vec<String> = todos.iter().map(|t| format!("- [{}] {} ({})", t.status, t.content, t.id)).collect();
-                format!("Todo list updated ({} items):\n{}", todos.len(), lines.join("\n"))
-            };
-            ToolExecutionResult { success: true, output }
-        });
+
+        self.register(definition, |args, context| todo_tool_handler(args, &context));
     }
 
     fn register_terminal(&mut self) {
@@ -946,6 +887,66 @@ impl BuiltinToolExecutor {
 // ============================================================================
 // File Tool Handlers
 // ============================================================================
+
+// ============================================================================
+// Unified File Tool Handler (action-based routing)
+// ============================================================================
+
+fn file_tool_handler(args: Value, context: &ToolExecutionContext) -> ToolExecutionResult {
+    let action = match args.get("action").and_then(Value::as_str) {
+        Some(a) => a.to_lowercase(),
+        None => return ToolExecutionResult { success: false, output: "Missing required parameter: action (read|write|list|search)".to_string() },
+    };
+
+    match action.as_str() {
+        "read" => file_read_handler(args, context),
+        "write" => file_write_handler(args, context),
+        "list" => file_list_handler(args, context),
+        "search" => grep_handler(args, context),
+        _ => ToolExecutionResult { success: false, output: format!("Unknown file action: '{}'. Use read, write, list, or search.", action) },
+    }
+}
+
+fn todo_tool_handler(args: Value, context: &ToolExecutionContext) -> ToolExecutionResult {
+    let action = match args.get("action").and_then(Value::as_str) {
+        Some(a) => a.to_lowercase(),
+        None => return ToolExecutionResult { success: false, output: "Missing required parameter: action (read|write)".to_string() },
+    };
+
+    match action.as_str() {
+        "read" => {
+            let store = TODO_STORE.lock().unwrap();
+            let items = store.get(&get_todo_key(context)).cloned().unwrap_or_default();
+            let output = if items.is_empty() {
+                "No todo items.".to_string()
+            } else {
+                items.iter().map(|t| format!("- [{}] {} ({})", t.status, t.content, t.id)).collect::<Vec<_>>().join("\n")
+            };
+            ToolExecutionResult { success: true, output }
+        }
+        "write" => {
+            let todos_val = match args.get("todos") {
+                Some(v) => v,
+                None => return ToolExecutionResult { success: false, output: "Missing required parameter: todos".to_string() },
+            };
+            let todos: Vec<TodoItem> = match serde_json::from_value(todos_val.clone()) {
+                Ok(v) => v,
+                Err(e) => return ToolExecutionResult { success: false, output: format!("Invalid todos format: {}", e) },
+            };
+            let key = get_todo_key(context);
+            let mut store = TODO_STORE.lock().unwrap();
+            store.insert(key, todos.clone());
+            let output = if todos.is_empty() {
+                "Todo list cleared.".to_string()
+            } else {
+                let lines: Vec<String> = todos.iter().map(|t| format!("- [{}] {} ({})", t.status, t.content, t.id)).collect();
+                format!("Todo list updated ({} items):\n{}", todos.len(), lines.join("\n"))
+            };
+            ToolExecutionResult { success: true, output }
+        }
+        _ => ToolExecutionResult { success: false, output: format!("Unknown todo action: '{}'. Use read or write.", action) },
+    }
+}
 
 fn file_read_handler(args: Value, context: &ToolExecutionContext) -> ToolExecutionResult {
     let workspace = match get_workspace(context) {
@@ -1211,9 +1212,56 @@ async fn run_shell_command(shell: &str, command: &str, working_dir: &Path) -> To
         result.push_str("\n... (output truncated)");
     }
 
+    // Post-execution: detect cd failures and append guidance
+    if !output.status.success() {
+        let lower = result.to_lowercase();
+        let is_cd_error = lower.contains("no such file or directory")
+            || lower.contains("cannot find the path")
+            || lower.contains("系统找不到指定的路径")
+            || lower.contains("找不到")
+            || lower.contains("not a directory")
+            || lower.contains("does not exist");
+
+        if is_cd_error {
+            // List available items in the working directory to help the model self-correct
+            let list_result = list_directory_for_guidance(working_dir);
+            result.push_str(&format!(
+                "\n\n[System Guidance] The path does not exist. This is NOT a container — do NOT use /workspace. \
+                 Available items in the current working directory ({}):\n{}",
+                working_dir.display().to_string().replace('\\', "/"),
+                list_result,
+            ));
+        }
+    }
+
     ToolExecutionResult {
         success: output.status.success(),
         output: result,
+    }
+}
+
+/// List directory contents for terminal error guidance (max 30 entries, names only).
+fn list_directory_for_guidance(dir: &Path) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(dir) {
+        for entry in read_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let prefix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                "📁 "
+            } else {
+                "📄 "
+            };
+            entries.push(format!("{prefix}{name}"));
+            if entries.len() >= 30 {
+                entries.push("... (more items)".to_string());
+                break;
+            }
+        }
+    }
+    if entries.is_empty() {
+        "(empty directory)".to_string()
+    } else {
+        entries.join("\n")
     }
 }
 

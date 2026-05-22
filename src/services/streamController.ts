@@ -318,6 +318,25 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
         retriable: event.retriable,
       });
       return;
+    case "RETRYING": {
+      const session = useStreamStore.getState().sessionsByRequestId[event.requestId];
+      if (session) {
+        useStreamStore.getState().patchSession(event.requestId, {
+          retrying: {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            nextRetryInSecs: event.nextRetryInSecs,
+            errorSummary: event.errorSummary,
+            receivedAt: Date.now(),
+          },
+          visibleVersion: session.visibleVersion + 1,
+        });
+      }
+      console.info(
+        `[stream] retrying request=${event.requestId} attempt=${event.attempt}/${event.maxAttempts} wait=${event.nextRetryInSecs}s`
+      );
+      return;
+    }
     case "TOOL_CALL": {
       const runtime = getRuntimeSession(event.requestId);
       if (runtime) {
@@ -474,6 +493,15 @@ function normalizeStreamError(error: unknown): {
 export function onStreamChunk(requestId: RequestId, chunk: string): void {
   const runtime = getRuntimeSession(requestId);
   if (!runtime) return;
+
+  // Clear retry state on first chunk after a retry
+  const session = useStreamStore.getState().sessionsByRequestId[requestId];
+  if (session?.retrying) {
+    useStreamStore.getState().patchSession(requestId, {
+      retrying: undefined,
+      visibleVersion: session.visibleVersion + 1,
+    });
+  }
 
   // Accumulate in buffer (O(1) push, avoids string concatenation cost)
   runtime.chunks.push(chunk);

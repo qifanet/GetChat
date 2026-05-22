@@ -89,6 +89,8 @@ export type BrowserDebugCommandName =
   | "update_tool_settings"
   | "get_builtin_tool_states"
   | "set_builtin_tool_enabled"
+  | "get_security_policy"
+  | "update_security_policy"
   | "list_mcp_servers"
   | "add_mcp_server"
   | "remove_mcp_server"

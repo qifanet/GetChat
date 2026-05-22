@@ -290,6 +290,11 @@
     50% { opacity: 0; }
   }
 
+  @keyframes settings-toast-in {
+    0% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+    100% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
   .markdown-content {
     @apply font-body text-[15px] leading-[1.75] text-miro-text;
     word-break: break-word;
