@@ -155,11 +155,10 @@ pub fn run() {
                 // Load MCP servers in background — do not block app startup.
                 let mcp_pool = pool;
                 tokio::spawn(async move {
+                    let key_store = crate::state::SystemKeyStore::new();
                     crate::commands::streaming::reload_mcp_servers_from_db(
                         &mcp_pool,
-                        // We need the key_store ref, but it's moved into AppState.
-                        // Use a temporary approach: load env from DB directly inside reload.
-                        &crate::state::SystemKeyStore::new(),
+                        &key_store,
                         &mcp_manager,
                     )
                     .await;
@@ -344,7 +343,11 @@ pub fn run() {
                             // Use block_on in this sync context
                             tauri::async_runtime::block_on(async {
                                 match crate::repositories::app_kv::get(pool, "close_behavior").await {
-                                    Ok(Some(v)) => v == "\"tray\"" || v == "\"minimize\"" || v == "tray",
+                                    Ok(Some(raw)) => {
+                                        let decoded = serde_json::from_str::<String>(&raw)
+                                            .unwrap_or_else(|_| raw.trim_matches('"').to_string());
+                                        matches!(decoded.as_str(), "tray" | "minimize")
+                                    }
                                     _ => false,
                                 }
                             })

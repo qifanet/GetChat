@@ -7,7 +7,7 @@
  * maintain providers, manage multiple model profiles under each provider, and
  * set the application-level fallback model without leaving the workspace.
  */
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
@@ -1664,14 +1664,33 @@ function AppSettingsSection() {
   const [shellPath, setShellPathLocal] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const closeBehaviorDirtyRef = useRef(false);
+  const shellPathDirtyRef = useRef(false);
 
   useEffect(() => {
-    tauriCmd.getCloseBehavior().then(setCloseBehaviorLocal).catch(() => {});
-    tauriCmd.getShellPath().then(setShellPathLocal).catch(() => {});
-    setLoaded(true);
+    let active = true;
+    const loadInitialSettings = async () => {
+      const [closeResult, shellResult] = await Promise.allSettled([
+        tauriCmd.getCloseBehavior(),
+        tauriCmd.getShellPath(),
+      ]);
+      if (!active) return;
+      if (closeResult.status === "fulfilled" && !closeBehaviorDirtyRef.current) {
+        setCloseBehaviorLocal(closeResult.value);
+      }
+      if (shellResult.status === "fulfilled" && !shellPathDirtyRef.current) {
+        setShellPathLocal(shellResult.value);
+      }
+      setLoaded(true);
+    };
+    void loadInitialSettings();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleCloseBehaviorChange = async (behavior: "exit" | "tray") => {
+    closeBehaviorDirtyRef.current = true;
     setCloseBehaviorLocal(behavior);
     try {
       await tauriCmd.setCloseBehavior(behavior);
@@ -1694,6 +1713,7 @@ function AppSettingsSection() {
         title: t("settings.shellPathTitle"),
       });
       if (selected && typeof selected === "string") {
+        shellPathDirtyRef.current = true;
         setShellPathLocal(selected);
       }
     } catch { /* cancelled */ }
@@ -1754,7 +1774,10 @@ function AppSettingsSection() {
         <input
           type="text"
           value={shellPath}
-          onChange={(e) => setShellPathLocal(e.target.value)}
+          onChange={(e) => {
+            shellPathDirtyRef.current = true;
+            setShellPathLocal(e.target.value);
+          }}
           placeholder={t("settings.shellPathPlaceholder")}
           className="app-input flex-1 rounded-lg px-3 py-2 text-sm"
         />

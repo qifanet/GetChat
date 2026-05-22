@@ -367,7 +367,6 @@
     "shellPathTitle": "Shell Path",
     "shellPathHelp": "Set the shell program for the terminal tool. Leave empty for system default.",
     "shellPathPlaceholder": "e.g.: C:\\Program Files\\Git\\bin\\bash.exe",
-    "builtinToolWebSearchDescription": "Search the web through the configured search service.",
     "mcpServersTitle": "MCP Servers",
     "mcpServersHelp": "Manage Model Context Protocol servers. Tools are automatically available after adding.",
     "mcpAddServer": "Add",

@@ -360,7 +360,16 @@ pub async fn get_close_behavior(state: State<'_, AppState>) -> Result<String, Ap
     let value = crate::repositories::app_kv::get(&state.db, "close_behavior")
         .await
         .map_err(|e| AppError::db_error("Failed to read close_behavior").with_details(e.to_string()))?;
-    Ok(value.unwrap_or_else(|| "exit".to_string()))
+    let parsed = value.and_then(|raw| {
+        let decoded = serde_json::from_str::<String>(&raw)
+            .unwrap_or_else(|_| raw.trim_matches('"').to_string());
+        match decoded.as_str() {
+            "exit" => Some("exit".to_string()),
+            "tray" | "minimize" => Some("tray".to_string()),
+            _ => None,
+        }
+    });
+    Ok(parsed.unwrap_or_else(|| "exit".to_string()))
 }
 
 /** Set the window close behavior: "exit" or "tray". */
@@ -372,7 +381,10 @@ pub async fn set_close_behavior(
     if behavior != "exit" && behavior != "tray" {
         return Err(AppError::invalid_argument("close_behavior must be 'exit' or 'tray'"));
     }
-    crate::repositories::app_kv::set(&state.db, "close_behavior", &behavior)
+    let value_json = serde_json::to_string(&behavior).map_err(|e| {
+        AppError::invalid_argument(format!("Failed to serialize close_behavior: {e}"))
+    })?;
+    crate::repositories::app_kv::set(&state.db, "close_behavior", &value_json)
         .await
         .map_err(|e| AppError::db_error("Failed to save close_behavior").with_details(e.to_string()))?;
     Ok(behavior)
@@ -384,7 +396,10 @@ pub async fn get_shell_path(state: State<'_, AppState>) -> Result<String, AppErr
     let value = crate::repositories::app_kv::get(&state.db, "shell_path")
         .await
         .map_err(|e| AppError::db_error("Failed to read shell_path").with_details(e.to_string()))?;
-    Ok(value.unwrap_or_default())
+    let parsed = value.map(|raw| {
+        serde_json::from_str::<String>(&raw).unwrap_or_else(|_| raw.trim_matches('"').to_string())
+    });
+    Ok(parsed.unwrap_or_default())
 }
 
 /** Set the shell path for the terminal tool. Empty resets to system default. */
@@ -393,7 +408,9 @@ pub async fn set_shell_path(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<String, AppError> {
-    crate::repositories::app_kv::set(&state.db, "shell_path", &path)
+    let value_json = serde_json::to_string(&path)
+        .map_err(|e| AppError::invalid_argument(format!("Failed to serialize shell_path: {e}")))?;
+    crate::repositories::app_kv::set(&state.db, "shell_path", &value_json)
         .await
         .map_err(|e| AppError::db_error("Failed to save shell_path").with_details(e.to_string()))?;
     Ok(path)

@@ -511,6 +511,7 @@ async fn run_react_loop(
         .await
         .ok()
         .flatten()
+        .map(|raw| serde_json::from_str::<String>(&raw).unwrap_or_else(|_| raw.trim_matches('"').to_string()))
         .filter(|s| !s.is_empty());
     let tool_context = ToolExecutionContext {
         conversation_id: conversation_id.clone(),
