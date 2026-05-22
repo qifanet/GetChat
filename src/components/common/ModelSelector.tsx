@@ -133,7 +133,9 @@ export function ModelSelector({
       }
       case "Enter": {
         e.preventDefault();
-        if (highlightIndex >= 0) {
+        if (highlightIndex === -1) {
+          handleSelect(null);
+        } else if (highlightIndex >= 0) {
           const item = flatList[highlightIndex];
           if (item.type === "option") handleSelect(item.model.id);
         }

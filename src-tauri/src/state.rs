@@ -207,6 +207,7 @@ impl SecurityLevel {
  * against command text (terminal) or file paths (file write).
  */
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SecurityPolicy {
     /** Current security level. */
     pub level: SecurityLevel,

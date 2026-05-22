@@ -546,7 +546,7 @@ export async function getSecurityPolicy(): Promise<SecurityPolicyDto> {
 }
 
 export async function updateSecurityPolicy(params: {
-  level?: string;
+  level?: SecurityPolicyDto["level"];
   terminalBlacklist?: string[];
   fileWriteBlacklist?: string[];
 }): Promise<SecurityPolicyDto> {

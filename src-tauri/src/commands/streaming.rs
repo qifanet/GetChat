@@ -446,11 +446,14 @@ fn requires_tool_approval(
         return true;
     }
 
-    match function_name {
+    // Resolve legacy tool names so approval checks work for old names too
+    let resolved_name = resolve_legacy_tool_name(function_name);
+
+    match resolved_name.as_str() {
         "file" => {
             let args: Value = match serde_json::from_str(arguments) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return true, // Fail-safe: require approval on parse failure
             };
             let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("");
             if action != "write" {
@@ -459,13 +462,9 @@ fn requires_tool_approval(
             // File write — check level and blacklist
             match policy.level {
                 SecurityLevel::Permissive => {
-                    // Only check blacklist
                     matches_blacklist(args.get("path").and_then(|p| p.as_str()).unwrap_or(""), &policy.file_write_blacklist)
                 }
-                SecurityLevel::Standard => {
-                    // Check blacklist, auto-approve if not matched
-                    matches_blacklist(args.get("path").and_then(|p| p.as_str()).unwrap_or(""), &policy.file_write_blacklist)
-                }
+                SecurityLevel::Standard => true, // All file writes require approval in Standard
                 SecurityLevel::Strict => true,
             }
         }
@@ -477,11 +476,9 @@ fn requires_tool_approval(
             let command = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
             match policy.level {
                 SecurityLevel::Permissive => {
-                    // Only check blacklist
                     matches_blacklist(command, &policy.terminal_blacklist)
                 }
                 SecurityLevel::Standard => {
-                    // Check blacklist — matched commands require approval
                     matches_blacklist(command, &policy.terminal_blacklist)
                 }
                 SecurityLevel::Strict => true,
@@ -493,13 +490,33 @@ fn requires_tool_approval(
 
 fn matches_blacklist(text: &str, patterns: &[String]) -> bool {
     for pattern in patterns {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            if re.is_match(text) {
+        match regex::Regex::new(pattern) {
+            Ok(re) => {
+                if re.is_match(text) {
+                    return true;
+                }
+            }
+            Err(err) => {
+                // Fail-closed: invalid regex pattern treated as match for safety
+                tracing::warn!(
+                    pattern = %pattern,
+                    error = %err,
+                    "invalid regex in blacklist, treating as match for safety"
+                );
                 return true;
             }
         }
     }
     false
+}
+
+/** Resolve legacy tool names to their current unified equivalents. */
+fn resolve_legacy_tool_name(tool_name: &str) -> String {
+    match tool_name {
+        "file_read" | "file_write" | "file_list" | "grep" => "file".to_string(),
+        "todo_read" | "todo_write" => "todo".to_string(),
+        _ => tool_name.to_string(),
+    }
 }
 
 async fn execute_tool_checked(
@@ -510,7 +527,10 @@ async fn execute_tool_checked(
     context: ToolExecutionContext,
     cancel_rx: &watch::Receiver<bool>,
 ) -> Result<ToolExecutionResult, ReactLoopOutcome> {
-    if !allowed_tool_names.contains(tool_name) {
+    // Resolve legacy tool names before the allowed-set check so old names like
+    // file_read/file_write are accepted when the unified "file" tool is enabled.
+    let resolved_name = resolve_legacy_tool_name(tool_name);
+    if !allowed_tool_names.contains(&resolved_name) && !allowed_tool_names.contains(tool_name) {
         return Ok(ToolExecutionResult {
             success: false,
             output: format!("Tool is not enabled for this stream: {tool_name}"),

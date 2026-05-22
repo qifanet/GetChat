@@ -805,6 +805,12 @@ export function ProviderSettingsScreen({
     }, TOAST_AUTO_DISMISS_MS);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   return (
     <SettingsToastContext.Provider value={showToast}>
       <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
@@ -1629,7 +1635,7 @@ function SecurityPolicySection() {
 
   if (!policy) return null;
 
-  const levels: { value: string; labelKey: string; descKey: string }[] = [
+  const levels: { value: tauriCmd.SecurityPolicyDto["level"]; labelKey: string; descKey: string }[] = [
     { value: "permissive", labelKey: "settings.securityPermissive", descKey: "settings.securityPermissiveDesc" },
     { value: "standard", labelKey: "settings.securityStandard", descKey: "settings.securityStandardDesc" },
     { value: "strict", labelKey: "settings.securityStrict", descKey: "settings.securityStrictDesc" },

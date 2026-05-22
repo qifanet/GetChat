@@ -7,7 +7,7 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import { useStreamStore } from "../../stores/useStreamStore";
 import { getModelDisplayName } from "../../features/models/modelUtils";
@@ -45,7 +45,7 @@ function RetryStatusCard({
   const { t } = useTranslation();
   const [countdown, setCountdown] = useState(nextRetryInSecs);
 
-  useState(() => {
+  useEffect(() => {
     setCountdown(nextRetryInSecs);
     const interval = setInterval(() => {
       setCountdown((prev) => {
@@ -57,7 +57,7 @@ function RetryStatusCard({
       });
     }, 1000);
     return () => clearInterval(interval);
-  });
+  }, [nextRetryInSecs]);
 
   return (
     <div className="mt-3 rounded-lg border border-amber-300/40 bg-amber-50/80 px-4 py-3">

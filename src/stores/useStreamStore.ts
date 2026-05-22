@@ -110,6 +110,7 @@ export const useStreamStore = create<StreamStore>()(
                 [requestId]: {
                   ...existing,
                   status: "COMPLETED",
+                  retrying: undefined,
                 },
               },
             };
@@ -131,6 +132,7 @@ export const useStreamStore = create<StreamStore>()(
                   ...existing,
                   status: "FAILED",
                   error,
+                  retrying: undefined,
                 },
               },
             };
