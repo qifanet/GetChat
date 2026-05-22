@@ -38,6 +38,7 @@ pub struct ToolExecutionResult {
 pub struct ToolExecutionContext {
     pub conversation_id: Option<String>,
     pub workspace_path: Option<String>,
+    pub shell_path: Option<String>,
 }
 
 /** Async trait for executing a named tool with JSON arguments. */
@@ -110,8 +111,7 @@ impl BuiltinToolExecutor {
         executor.register_grep();
         executor.register_todo_read();
         executor.register_todo_write();
-        executor.register_mkdir();
-        executor.register_rm();
+        executor.register_terminal();
         executor.register_web_search();
         let known_disabled_tools = disabled_tools
             .into_iter()
@@ -887,41 +887,31 @@ impl BuiltinToolExecutor {
         });
     }
 
-    fn register_mkdir(&mut self) {
+    fn register_terminal(&mut self) {
         let definition = ToolDefinitionDto {
             tool_type: "function".to_string(),
             function: ToolFunctionDefDto {
-                name: "mkdir".to_string(),
-                description: "Create a directory within the workspace. Creates parent directories recursively if needed.".to_string(),
+                name: "terminal".to_string(),
+                description: "Execute a shell command in the workspace directory. THIS IS A POWERFUL TOOL that requires user approval. The command runs with the user's configured shell (default: system shell). Use this for any command-line operation: listing files, running scripts, installing packages, git operations, creating/deleting files/directories, etc.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Directory path relative to workspace root, or absolute path within workspace" }
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Timeout in seconds (default: 30, max: 120)"
+                        }
                     },
-                    "required": ["path"]
+                    "required": ["command"]
                 }),
             },
         };
-        self.register(definition, |args, context| mkdir_handler(args, &context));
-    }
-
-    fn register_rm(&mut self) {
-        let definition = ToolDefinitionDto {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDefDto {
-                name: "rm".to_string(),
-                description: "Delete a file or directory within the workspace. THIS IS A DESTRUCTIVE OPERATION that requires user confirmation before execution. Use with caution — deleted files cannot be recovered.".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "File or directory path relative to workspace root, or absolute path within workspace" },
-                        "recursive": { "type": "boolean", "description": "If true, delete directories recursively with all contents. Default: false (only removes empty directories)" }
-                    },
-                    "required": ["path"]
-                }),
-            },
-        };
-        self.register(definition, |args, context| rm_handler(args, &context));
+        self.register_async(definition, |args, context| {
+            Box::pin(terminal_handler(args, context))
+        });
     }
 
     fn register_web_search(&mut self) {
@@ -1108,79 +1098,122 @@ fn file_write_handler(args: Value, context: &ToolExecutionContext) -> ToolExecut
     }
 }
 
-fn mkdir_handler(args: Value, context: &ToolExecutionContext) -> ToolExecutionResult {
-    let workspace = match get_workspace(context) {
-        Ok(p) => p,
-        Err(e) => return ToolExecutionResult { success: false, output: e },
+async fn terminal_handler(args: Value, context: ToolExecutionContext) -> ToolExecutionResult {
+    let command = match args.get("command").and_then(Value::as_str) {
+        Some(c) => c.trim(),
+        None => return ToolExecutionResult { success: false, output: "Missing required parameter: command".to_string() },
     };
-    let path = match args.get("path").and_then(Value::as_str) {
-        Some(p) => p,
-        None => return ToolExecutionResult { success: false, output: "Missing required parameter: path".to_string() },
-    };
-    if path.is_empty() {
-        return ToolExecutionResult { success: false, output: "Path cannot be empty".to_string() };
+    if command.is_empty() {
+        return ToolExecutionResult { success: false, output: "Command cannot be empty".to_string() };
     }
 
-    let full_path = match validate_path_in_workspace(path, &workspace) {
-        Ok(p) => p,
-        Err(e) => return ToolExecutionResult { success: false, output: e },
-    };
+    let timeout_secs = args.get("timeout")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .min(120);
 
-    if full_path.exists() {
-        if full_path.is_dir() {
-            return ToolExecutionResult { success: true, output: format!("Directory already exists: '{}'", path) };
-        } else {
-            return ToolExecutionResult { success: false, output: format!("A file already exists at '{}'. Cannot create directory.", path) };
-        }
-    }
+    // Resolve working directory
+    let working_dir = context.workspace_path.as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
 
-    match std::fs::create_dir_all(&full_path) {
-        Ok(()) => ToolExecutionResult { success: true, output: format!("Directory created: '{}'", path) },
-        Err(e) => ToolExecutionResult { success: false, output: format!("Failed to create directory '{}': {}", path, e) },
+    // Resolve shell: prefer user-configured shell_path, fallback to system default
+    let shell = context.shell_path.clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(get_default_shell);
+
+    // Build the command with the configured shell
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        run_shell_command(&shell, command, &working_dir),
+    ).await;
+
+    match result {
+        Ok(output) => output,
+        Err(_) => ToolExecutionResult {
+            success: false,
+            output: format!("Command timed out after {} seconds", timeout_secs),
+        },
     }
 }
 
-fn rm_handler(args: Value, context: &ToolExecutionContext) -> ToolExecutionResult {
-    let workspace = match get_workspace(context) {
-        Ok(p) => p,
-        Err(e) => return ToolExecutionResult { success: false, output: e },
-    };
-    let path = match args.get("path").and_then(Value::as_str) {
-        Some(p) => p,
-        None => return ToolExecutionResult { success: false, output: "Missing required parameter: path".to_string() },
-    };
-    if path.is_empty() {
-        return ToolExecutionResult { success: false, output: "Path cannot be empty".to_string() };
-    }
-
-    let full_path = match validate_path_in_workspace(path, &workspace) {
-        Ok(p) => p,
-        Err(e) => return ToolExecutionResult { success: false, output: e },
-    };
-
-    if !full_path.exists() {
-        return ToolExecutionResult { success: false, output: format!("Path does not exist: '{}'", path) };
-    }
-
-    let recursive = args.get("recursive").and_then(Value::as_bool).unwrap_or(false);
-
-    if full_path.is_dir() {
-        if recursive {
-            match std::fs::remove_dir_all(&full_path) {
-                Ok(()) => ToolExecutionResult { success: true, output: format!("Directory deleted (recursive): '{}'", path) },
-                Err(e) => ToolExecutionResult { success: false, output: format!("Failed to delete directory '{}': {}", path, e) },
-            }
-        } else {
-            match std::fs::remove_dir(&full_path) {
-                Ok(()) => ToolExecutionResult { success: true, output: format!("Directory deleted: '{}'", path) },
-                Err(e) => ToolExecutionResult { success: false, output: format!("Failed to delete directory '{}'. It may not be empty — use recursive=true to delete non-empty directories. Error: {}", path, e) },
-            }
-        }
+fn get_default_shell() -> String {
+    // Default shells per platform
+    if cfg!(target_os = "windows") {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
     } else {
-        match std::fs::remove_file(&full_path) {
-            Ok(()) => ToolExecutionResult { success: true, output: format!("File deleted: '{}'", path) },
-            Err(e) => ToolExecutionResult { success: false, output: format!("Failed to delete file '{}': {}", path, e) },
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+    }
+}
+
+async fn run_shell_command(shell: &str, command: &str, working_dir: &Path) -> ToolExecutionResult {
+    use tokio::process::Command;
+
+    // Determine how to invoke the shell
+    let (program, args) = if shell.ends_with("cmd.exe") || shell.ends_with("cmd") {
+        (shell.to_string(), vec!["/C".to_string(), command.to_string()])
+    } else if shell.ends_with("powershell.exe")
+        || shell.ends_with("pwsh.exe")
+        || shell.ends_with("pwsh")
+        || shell.ends_with("powershell")
+    {
+        (shell.to_string(), vec!["-NoProfile".to_string(), "-Command".to_string(), command.to_string()])
+    } else {
+        // sh, bash, zsh, fish, git-bash, wsl, etc.
+        (shell.to_string(), vec!["-c".to_string(), command.to_string()])
+    };
+
+    let mut cmd = Command::new(&program);
+    cmd.args(&args)
+        .current_dir(working_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // On Windows, prevent visible console window
+    #[cfg(target_os = "windows")]
+    {
+        #[allow(unused_imports)]
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = match cmd.output().await {
+        Ok(o) => o,
+        Err(e) => {
+            return ToolExecutionResult {
+                success: false,
+                output: format!("Failed to execute command: {e}\nShell: {program}"),
+            };
         }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let mut result = String::new();
+    if !stdout.is_empty() {
+        result.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        if !result.is_empty() {
+            result.push_str("\n--- stderr ---\n");
+        }
+        result.push_str(&stderr);
+    }
+
+    // Truncate very long output
+    const MAX_OUTPUT: usize = 30_000;
+    if result.len() > MAX_OUTPUT {
+        result.truncate(MAX_OUTPUT);
+        result.push_str("\n... (output truncated)");
+    }
+
+    ToolExecutionResult {
+        success: output.status.success(),
+        output: result,
     }
 }
 

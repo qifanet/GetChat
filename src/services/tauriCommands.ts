@@ -154,6 +154,28 @@ export async function setSystemPrompt(prompt: string): Promise<string> {
 }
 
 // ============================================================================
+// Close Behavior & Shell Path Settings
+// ============================================================================
+
+export type CloseBehavior = "exit" | "tray";
+
+export async function getCloseBehavior(): Promise<CloseBehavior> {
+  return executeCommand<CloseBehavior>("get_close_behavior");
+}
+
+export async function setCloseBehavior(behavior: CloseBehavior): Promise<CloseBehavior> {
+  return executeCommand<CloseBehavior>("set_close_behavior", { behavior });
+}
+
+export async function getShellPath(): Promise<string> {
+  return executeCommand<string>("get_shell_path");
+}
+
+export async function setShellPath(path: string): Promise<string> {
+  return executeCommand<string>("set_shell_path", { path });
+}
+
+// ============================================================================
 // Provider Commands
 // ============================================================================
 
