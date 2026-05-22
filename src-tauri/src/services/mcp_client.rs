@@ -300,6 +300,15 @@ impl McpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // On Windows, prevent the child process from creating a visible console window.
+        #[cfg(target_os = "windows")]
+        {
+            #[allow(unused_imports)]
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
         for (k, v) in &self.config.env {
             cmd.env(k, v);
         }

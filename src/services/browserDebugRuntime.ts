@@ -106,7 +106,11 @@ export type BrowserDebugCommandName =
   | "get_skills_directory"
   | "import_skill"
   | "refresh_skills_from_disk"
-  | "compress_context";
+  | "compress_context"
+  | "get_close_behavior"
+  | "set_close_behavior"
+  | "get_shell_path"
+  | "set_shell_path";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {

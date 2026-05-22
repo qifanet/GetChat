@@ -407,7 +407,7 @@ async fn execute_tool_with_mcp(
 }
 
 fn requires_tool_approval(function_name: &str) -> bool {
-    matches!(function_name, "rm" | "file_write" | "mkdir")
+    matches!(function_name, "terminal" | "file_write")
         || function_name.starts_with("mcp__")
 }
 
@@ -507,9 +507,15 @@ async fn run_react_loop(
         .map(|tool| tool.function.name.clone())
         .collect();
     let current_tool_choice = initial_request.tool_choice.clone();
+    let shell_path = crate::repositories::app_kv::get(&state.db, "shell_path")
+        .await
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty());
     let tool_context = ToolExecutionContext {
         conversation_id: conversation_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
+        shell_path,
     };
     let mut consecutive_tool_failures = 0u32;
 

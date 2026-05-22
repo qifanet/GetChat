@@ -34,7 +34,8 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri_plugin_updater::UpdaterExt;
 
 /// Run database migrations and return the SQLite pool.
 async fn setup_database(app_handle: &tauri::AppHandle) -> sqlx::SqlitePool {
@@ -140,27 +141,114 @@ pub fn run() {
                     crate::services::mcp_client::McpManager::new(),
                 ));
 
-                // Reload persisted MCP servers from database without exposing stored secrets.
-                crate::commands::streaming::reload_mcp_servers_from_db(
-                    &pool,
-                    key_store.as_ref(),
-                    &mcp_manager,
-                )
-                .await;
-
                 app_handle.manage(AppState {
-                    db: pool,
+                    db: pool.clone(),
                     key_store,
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     tool_executor,
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
                     pending_approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-                    mcp_manager,
+                    mcp_manager: mcp_manager.clone(),
                     app_handle: app_handle.clone(),
+                });
+
+                // Load MCP servers in background — do not block app startup.
+                let mcp_pool = pool;
+                tokio::spawn(async move {
+                    crate::commands::streaming::reload_mcp_servers_from_db(
+                        &mcp_pool,
+                        // We need the key_store ref, but it's moved into AppState.
+                        // Use a temporary approach: load env from DB directly inside reload.
+                        &crate::state::SystemKeyStore::new(),
+                        &mcp_manager,
+                    )
+                    .await;
                 });
             });
 
             tracing::info!("GetChat initialized successfully");
+
+            // Create system tray icon
+            use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+            let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let check_update_item = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &sep, &check_update_item, &quit_item])?;
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("GetChat")
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "check_update" => {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let updater = match handle.updater_builder().build() {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Failed to build updater");
+                                    return;
+                                }
+                            };
+                            match updater.check().await {
+                                Ok(Some(update)) => {
+                                    let version = &update.version;
+                                    tracing::info!(version = %version, "Update available");
+                                    let _ = handle.emit("update-available", serde_json::json!({
+                                        "version": version,
+                                        "body": update.body,
+                                    }));
+                                }
+                                Ok(None) => {
+                                    tracing::info!("App is up to date");
+                                    let _ = handle.emit("update-not-available", ());
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Update check failed");
+                                }
+                            }
+                        });
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    let show_hide = |app: &tauri::AppHandle| {
+                        if let Some(w) = app.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    };
+                    match event {
+                        TrayIconEvent::DoubleClick { .. } => {
+                            show_hide(tray.app_handle());
+                        }
+                        TrayIconEvent::Click { button, button_state, .. } => {
+                            // On Windows, left click also toggles visibility
+                            if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                                show_hide(tray.app_handle());
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -238,9 +326,40 @@ pub fn run() {
             commands::settings::delete_provider,
             commands::settings::test_provider_connection,
             commands::settings::fetch_ollama_models,
+            commands::settings::get_close_behavior,
+            commands::settings::set_close_behavior,
+            commands::settings::get_shell_path,
+            commands::settings::set_shell_path,
             // Debug (1)
             commands::debug::check_db_invariants,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Check user preference: "exit" (default) or "tray"
+                let should_hide = {
+                    let state = window.try_state::<AppState>();
+                    match state {
+                        Some(s) => {
+                            let pool = &s.db;
+                            // Use block_on in this sync context
+                            tauri::async_runtime::block_on(async {
+                                match crate::repositories::app_kv::get(pool, "close_behavior").await {
+                                    Ok(Some(v)) => v == "\"tray\"" || v == "\"minimize\"" || v == "tray",
+                                    _ => false,
+                                }
+                            })
+                        }
+                        None => false,
+                    }
+                };
+
+                if should_hide {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                // else: default behavior — close the window and exit
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -132,13 +132,9 @@ const BUILTIN_TOOL_I18N_KEYS: Record<string, { nameKey: string; descriptionKey: 
     nameKey: "settings.builtinToolTodoWriteName",
     descriptionKey: "settings.builtinToolTodoWriteDescription",
   },
-  mkdir: {
-    nameKey: "settings.builtinToolMkdirName",
-    descriptionKey: "settings.builtinToolMkdirDescription",
-  },
-  rm: {
-    nameKey: "settings.builtinToolRmName",
-    descriptionKey: "settings.builtinToolRmDescription",
+  terminal: {
+    nameKey: "settings.builtinToolTerminalName",
+    descriptionKey: "settings.builtinToolTerminalDescription",
   },
   web_search: {
     nameKey: "settings.builtinToolWebSearchName",
@@ -1462,6 +1458,7 @@ export function ProviderSettingsScreen({
             </section>
             <ToolSettingsSection />
             <BuiltinToolsSection />
+            <AppSettingsSection />
             <McpServersSection />
             <SkillsSection />
           </aside>
@@ -1656,6 +1653,126 @@ function BuiltinToolsSection() {
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function AppSettingsSection() {
+  const { t } = useTranslation();
+  const [closeBehavior, setCloseBehaviorLocal] = useState<"exit" | "tray">("exit");
+  const [shellPath, setShellPathLocal] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    tauriCmd.getCloseBehavior().then(setCloseBehaviorLocal).catch(() => {});
+    tauriCmd.getShellPath().then(setShellPathLocal).catch(() => {});
+    setLoaded(true);
+  }, []);
+
+  const handleCloseBehaviorChange = async (behavior: "exit" | "tray") => {
+    setCloseBehaviorLocal(behavior);
+    try {
+      await tauriCmd.setCloseBehavior(behavior);
+    } catch { /* ignore */ }
+  };
+
+  const handleShellPathSave = async () => {
+    setSaving(true);
+    try {
+      await tauriCmd.setShellPath(shellPath.trim());
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const handleBrowseShell = async () => {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        directory: false,
+        title: t("settings.shellPathTitle"),
+      });
+      if (selected && typeof selected === "string") {
+        setShellPathLocal(selected);
+      }
+    } catch { /* cancelled */ }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
+      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+        {t("settings.closeBehaviorTitle")}
+      </h3>
+      <p className="mt-1 text-xs text-miro-text-secondary">
+        {t("settings.closeBehaviorHelp")}
+      </p>
+      <div className="mt-3 flex gap-3">
+        <button
+          type="button"
+          onClick={() => handleCloseBehaviorChange("exit")}
+          className={`flex-1 rounded-lg border-2 p-3 text-left transition-all ${
+            closeBehavior === "exit"
+              ? "border-emerald-400 bg-emerald-50"
+              : "border-gray-200 bg-white hover:border-gray-300"
+          }`}
+        >
+          <div className="text-sm font-medium text-miro-text">
+            {t("settings.closeBehaviorExit")}
+          </div>
+          <div className="mt-0.5 text-xs text-miro-text-secondary">
+            {t("settings.closeBehaviorExitDesc")}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleCloseBehaviorChange("tray")}
+          className={`flex-1 rounded-lg border-2 p-3 text-left transition-all ${
+            closeBehavior === "tray"
+              ? "border-emerald-400 bg-emerald-50"
+              : "border-gray-200 bg-white hover:border-gray-300"
+          }`}
+        >
+          <div className="text-sm font-medium text-miro-text">
+            {t("settings.closeBehaviorTray")}
+          </div>
+          <div className="mt-0.5 text-xs text-miro-text-secondary">
+            {t("settings.closeBehaviorTrayDesc")}
+          </div>
+        </button>
+      </div>
+
+      <h3 className="mt-6 font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+        {t("settings.shellPathTitle")}
+      </h3>
+      <p className="mt-1 text-xs text-miro-text-secondary">
+        {t("settings.shellPathHelp")}
+      </p>
+      <div className="mt-3 flex gap-2">
+        <input
+          type="text"
+          value={shellPath}
+          onChange={(e) => setShellPathLocal(e.target.value)}
+          placeholder={t("settings.shellPathPlaceholder")}
+          className="app-input flex-1 rounded-lg px-3 py-2 text-sm"
+        />
+        <button
+          type="button"
+          onClick={handleBrowseShell}
+          className="app-secondary-button rounded-lg px-3 py-2 text-xs whitespace-nowrap"
+        >
+          {t("common.browse", "Browse")}
+        </button>
+        <button
+          type="button"
+          onClick={handleShellPathSave}
+          disabled={saving}
+          className="app-primary-button rounded-lg px-3 py-2 text-xs whitespace-nowrap"
+        >
+          {saving ? t("common.saving") : t("common.save")}
+        </button>
       </div>
     </section>
   );
