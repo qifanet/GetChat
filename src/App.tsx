@@ -672,7 +672,12 @@ function WorkspaceCenter({
         <TopContextBar />
         <WorkspaceBannerRegion />
         <div className="relative flex-1 overflow-y-auto">
-          {activeSnapshot ? (
+          {previewFilePath && fileExplorerOpen ? (
+            <FilePreviewPanel
+              filePath={previewFilePath}
+              onClose={() => setPreviewFilePath(null)}
+            />
+          ) : activeSnapshot ? (
             <MessageList />
           ) : (
             <WorkspaceEmptyState
@@ -686,21 +691,11 @@ function WorkspaceCenter({
         <Composer />
       </div>
       {fileExplorerOpen && (
-        <div className="flex w-[280px] shrink-0 flex-col border-l border-miro-border/15 bg-miro-surface-low/50">
-          <div className="flex-1 overflow-hidden">
-            <FileExplorerPanel
-              selectedFilePath={previewFilePath}
-              onSelectFile={setPreviewFilePath}
-            />
-          </div>
-          {previewFilePath && (
-            <div className="h-[45%] shrink-0 border-t border-miro-border/15">
-              <FilePreviewPanel
-                filePath={previewFilePath}
-                onClose={() => setPreviewFilePath(null)}
-              />
-            </div>
-          )}
+        <div className="flex w-[260px] shrink-0 flex-col border-l border-miro-border/15 bg-miro-surface-low/50">
+          <FileExplorerPanel
+            selectedFilePath={previewFilePath}
+            onSelectFile={setPreviewFilePath}
+          />
         </div>
       )}
     </main>

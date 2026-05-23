@@ -37,6 +37,8 @@ pub struct FilePreviewDto {
     pub total_lines: usize,
     pub truncated: bool,
     pub language: Option<String>,
+    pub is_binary: bool,
+    pub file_size: u64,
 }
 
 // ============================================================================
@@ -191,7 +193,51 @@ pub async fn list_directory_entries(
     Ok(entries)
 }
 
-/// Read a file's content for preview. Limited to a maximum number of lines.
+/// Check if bytes appear to be binary (contain null bytes in the first 8 KB).
+fn is_likely_binary(data: &[u8]) -> bool {
+    let check_len = data.len().min(8192);
+    data[..check_len].iter().any(|&b| b == 0)
+}
+
+/// Known binary file extensions that should not be read as text.
+const BINARY_EXTENSIONS: &[&str] = &[
+    "exe", "dll", "so", "dylib", "bin", "dat", "db", "sqlite", "sqlite3",
+    "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tif", "tiff",
+    "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst", "cab", "deb", "rpm",
+    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+    "pdf", "psd", "ai", "eps",
+    "mp3", "mp4", "avi", "mkv", "mov", "wmv", "flv", "wav", "ogg", "flac",
+    "iso", "dmg", "msi", "apk", "jar", "war",
+    "woff", "woff2", "ttf", "otf", "eot",
+    "pyc", "class", "o", "obj", "pdb",
+];
+
+fn is_known_binary_extension(path: &Path) -> bool {
+    let ext = match path.extension().and_then(|e| e.to_str()) {
+        Some(e) => e.to_lowercase(),
+        None => return false,
+    };
+    BINARY_EXTENSIONS.contains(&ext.as_str())
+}
+
+/// Format file size in human-readable form.
+fn format_file_size(size: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if size >= GB {
+        format!("{:.1} GB", size as f64 / GB as f64)
+    } else if size >= MB {
+        format!("{:.1} MB", size as f64 / MB as f64)
+    } else if size >= KB {
+        format!("{:.1} KB", size as f64 / KB as f64)
+    } else {
+        format!("{size} B")
+    }
+}
+
+/// Read a file's content for preview. Handles binary files gracefully.
 #[tauri::command]
 pub async fn read_file_preview(
     state: State<'_, AppState>,
@@ -205,10 +251,44 @@ pub async fn read_file_preview(
         return Err(AppError::invalid_argument("Path is not a file"));
     }
 
-    let limit = max_lines.unwrap_or(500);
-    let content = std::fs::read_to_string(&resolved)
+    let metadata = std::fs::metadata(&resolved)
+        .map_err(|e| AppError::db_error(&format!("Cannot read file metadata: {e}")))?;
+    let file_size = metadata.len();
+
+    // Fast path: known binary extension → skip reading content
+    if is_known_binary_extension(&resolved) {
+        return Ok(FilePreviewDto {
+            path: resolved.to_str().unwrap_or("").to_string(),
+            content: String::new(),
+            total_lines: 0,
+            truncated: false,
+            language: infer_language(&resolved),
+            is_binary: true,
+            file_size,
+        });
+    }
+
+    // Read raw bytes first for binary detection
+    let raw_bytes = std::fs::read(&resolved)
         .map_err(|e| AppError::db_error(&format!("Cannot read file: {e}")))?;
 
+    if is_likely_binary(&raw_bytes) {
+        return Ok(FilePreviewDto {
+            path: resolved.to_str().unwrap_or("").to_string(),
+            content: String::new(),
+            total_lines: 0,
+            truncated: false,
+            language: infer_language(&resolved),
+            is_binary: true,
+            file_size,
+        });
+    }
+
+    // Text file: decode as UTF-8
+    let content = String::from_utf8(raw_bytes)
+        .map_err(|e| AppError::db_error(&format!("Cannot decode file as UTF-8: {e}")))?;
+
+    let limit = max_lines.unwrap_or(500);
     let total_lines = content.lines().count();
     let truncated = total_lines > limit;
 
@@ -224,5 +304,30 @@ pub async fn read_file_preview(
         total_lines,
         truncated,
         language: infer_language(&resolved),
+        is_binary: false,
+        file_size,
     })
+}
+
+/// Open a path in the system file manager (Finder / Explorer / etc.).
+#[tauri::command]
+pub async fn reveal_in_file_manager(path: String) -> Result<(), AppError> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(AppError::not_found("Path does not exist"));
+    }
+
+    // Use the parent directory for files, or the directory itself
+    let target = if p.is_file() {
+        p.parent().unwrap_or(p)
+    } else {
+        p
+    };
+
+    tauri_plugin_opener::reveal_item_in_dir(
+        target.to_str().ok_or_else(|| AppError::invalid_argument("Invalid path encoding"))?,
+    )
+    .map_err(|e| AppError::db_error(&format!("Cannot open file manager: {e}")))?;
+
+    Ok(())
 }

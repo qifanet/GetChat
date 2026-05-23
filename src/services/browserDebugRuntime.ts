@@ -93,6 +93,7 @@ export type BrowserDebugCommandName =
   | "update_security_policy"
   | "list_directory_entries"
   | "read_file_preview"
+  | "reveal_in_file_manager"
   | "list_mcp_servers"
   | "add_mcp_server"
   | "remove_mcp_server"

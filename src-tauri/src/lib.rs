@@ -375,6 +375,7 @@ pub fn run() {
             // Filesystem (2)
             commands::filesystem::list_directory_entries,
             commands::filesystem::read_file_preview,
+            commands::filesystem::reveal_in_file_manager,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

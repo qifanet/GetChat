@@ -462,4 +462,6 @@ export interface FilePreviewDto {
   totalLines: number;
   truncated: boolean;
   language: string | null;
+  isBinary: boolean;
+  fileSize: number;
 }

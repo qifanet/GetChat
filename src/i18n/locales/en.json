@@ -522,6 +522,13 @@
     "emptyDirectory": "This directory is empty",
     "togglePanel": "Toggle file explorer",
     "truncated": "Showing first {{maxLines}} of {{lines}} lines",
-    "noPreview": "Select a file to preview"
+    "noPreview": "Select a file to preview",
+    "binaryFileTitle": "This file cannot be previewed as text",
+    "binaryFileReason": "This file contains binary content that cannot be displayed as text",
+    "recommendedAction": "Recommended action",
+    "openExternally": "Open this file with an appropriate application",
+    "openInFileManager": "Show in File Explorer",
+    "closePreview": "Close preview and return to chat",
+    "searchPlaceholder": "Search in file..."
   }
 }

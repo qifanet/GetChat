@@ -793,3 +793,7 @@ export async function readFilePreview(
     maxLines: maxLines ?? undefined,
   });
 }
+
+export async function revealInFileManager(path: string): Promise<void> {
+  return executeCommand<void>("reveal_in_file_manager", { path });
+}

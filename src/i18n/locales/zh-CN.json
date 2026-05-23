@@ -522,6 +522,13 @@
     "emptyDirectory": "此目录为空",
     "togglePanel": "切换文件浏览器",
     "truncated": "显示前 {{maxLines}} 行，共 {{lines}} 行",
-    "noPreview": "选择文件以预览内容"
+    "noPreview": "选择文件以预览内容",
+    "binaryFileTitle": "此文件无法以文本形式预览",
+    "binaryFileReason": "该文件包含二进制内容，无法作为文本显示",
+    "recommendedAction": "推荐操作",
+    "openExternally": "使用对应的应用程序打开此文件",
+    "openInFileManager": "在文件资源管理器中显示",
+    "closePreview": "关闭预览并返回对话",
+    "searchPlaceholder": "在文件中搜索..."
   }
 }
