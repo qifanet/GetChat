@@ -520,6 +520,8 @@
   "fileExplorer": {
     "noWorkspace": "Set a workspace directory to browse files",
     "emptyDirectory": "This directory is empty",
-    "togglePanel": "Toggle file explorer"
+    "togglePanel": "Toggle file explorer",
+    "truncated": "Showing first {{maxLines}} of {{lines}} lines",
+    "noPreview": "Select a file to preview"
   }
 }

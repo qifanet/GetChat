@@ -131,4 +131,8 @@ export interface UiState {
   branchRenameDialogOpen: boolean;
   /** Set by search navigation; MessageList scrolls to this message then clears it. */
   scrollToMessageId: string | null;
+  /** Whether the file explorer panel is open on the left side. */
+  fileExplorerOpen: boolean;
+  /** File path currently selected in the file explorer, shown in preview panel. */
+  previewFilePath: string | null;
 }

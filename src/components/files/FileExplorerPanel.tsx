@@ -13,9 +13,9 @@ import * as tauriCmd from "../../services/tauriCommands";
 import type { DirectoryEntryDto } from "../../services/tauriTypes";
 import {
   IconChevronRight,
+  IconFile,
   IconFolder,
   IconFolderOpen,
-  IconSettings,
 } from "../common/Icon";
 
 // ============================================================================
@@ -94,7 +94,7 @@ const DirectoryTreeItem = memo(function DirectoryTreeItem({
         ) : (
           <>
             <span className="w-3 shrink-0" />
-            <IconSettings size={14} className="shrink-0 text-miro-text-secondary" />
+            <IconFile size={14} className="shrink-0 text-miro-text-secondary" />
           </>
         )}
         <span className="min-w-0 truncate">{entry.name}</span>
