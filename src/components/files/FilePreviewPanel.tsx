@@ -254,7 +254,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
                   className="leading-none text-miro-text-secondary hover:text-miro-text"
                   onClick={() =>
                     setCurrentMatchIndex((prev) =>
-                      prev < searchResults.length - 1 ? prev + 1 : 0
+                      prev > 0 ? prev - 1 : searchResults.length - 1
                     )
                   }
                 >
@@ -265,7 +265,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
                   className="-mt-0.5 leading-none text-miro-text-secondary hover:text-miro-text"
                   onClick={() =>
                     setCurrentMatchIndex((prev) =>
-                      prev > 0 ? prev - 1 : searchResults.length - 1
+                      prev < searchResults.length - 1 ? prev + 1 : 0
                     )
                   }
                 >

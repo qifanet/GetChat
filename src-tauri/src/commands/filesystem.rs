@@ -310,6 +310,8 @@ pub async fn read_file_preview(
 }
 
 /// Open a path in the system file manager (Finder / Explorer / etc.).
+/// For files, the file manager will open the parent directory and select the file.
+/// For directories, the file manager will open and select the directory itself.
 #[tauri::command]
 pub async fn reveal_in_file_manager(path: String) -> Result<(), AppError> {
     let p = Path::new(&path);
@@ -317,15 +319,8 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), AppError> {
         return Err(AppError::not_found("Path does not exist"));
     }
 
-    // Use the parent directory for files, or the directory itself
-    let target = if p.is_file() {
-        p.parent().unwrap_or(p)
-    } else {
-        p
-    };
-
     tauri_plugin_opener::reveal_item_in_dir(
-        target.to_str().ok_or_else(|| AppError::invalid_argument("Invalid path encoding"))?,
+        p.to_str().ok_or_else(|| AppError::invalid_argument("Invalid path encoding"))?,
     )
     .map_err(|e| AppError::db_error(&format!("Cannot open file manager: {e}")))?;
 
