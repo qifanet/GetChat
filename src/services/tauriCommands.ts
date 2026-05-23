@@ -45,6 +45,8 @@ import {
   type PromptMessage,
   type InvariantCheckResult,
   type ToolDefinitionDto,
+  type DirectoryEntryDto,
+  type FilePreviewDto,
 } from "./tauriTypes";
 import {
   abortBrowserDebugModelStream,
@@ -764,4 +766,30 @@ export async function importSkill(sourcePath: string): Promise<void> {
 
 export async function refreshSkillsFromDisk(): Promise<void> {
   return executeCommand<void>("refresh_skills_from_disk");
+}
+
+// ============================================================================
+// Filesystem Commands (v1.3.0)
+// ============================================================================
+
+export async function listDirectoryEntries(
+  conversationId: string,
+  dirPath: string,
+): Promise<DirectoryEntryDto[]> {
+  return executeCommand<DirectoryEntryDto[]>("list_directory_entries", {
+    conversationId,
+    dirPath,
+  });
+}
+
+export async function readFilePreview(
+  conversationId: string,
+  filePath: string,
+  maxLines?: number,
+): Promise<FilePreviewDto> {
+  return executeCommand<FilePreviewDto>("read_file_preview", {
+    conversationId,
+    filePath,
+    maxLines: maxLines ?? undefined,
+  });
 }

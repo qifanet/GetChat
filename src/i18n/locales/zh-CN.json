@@ -516,5 +516,10 @@
     "noResults": "未找到匹配的消息",
     "recent": "最近会话",
     "noRecent": "暂无最近会话"
+  },
+  "fileExplorer": {
+    "noWorkspace": "请先设置工作空间目录以浏览文件",
+    "emptyDirectory": "此目录为空",
+    "togglePanel": "切换文件浏览器"
   }
 }

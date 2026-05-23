@@ -372,6 +372,9 @@ pub fn run() {
             commands::settings::set_shell_path,
             // Debug (1)
             commands::debug::check_db_invariants,
+            // Filesystem (2)
+            commands::filesystem::list_directory_entries,
+            commands::filesystem::read_file_preview,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

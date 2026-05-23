@@ -443,3 +443,23 @@ export interface InvariantCheckResult {
   /** Unix timestamp (ms) when checks were run */
   checkedAt: number;
 }
+
+// ============================================================================
+// Filesystem Commands (v1.3.0)
+// ============================================================================
+
+export interface DirectoryEntryDto {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modified: number;
+}
+
+export interface FilePreviewDto {
+  path: string;
+  content: string;
+  totalLines: number;
+  truncated: boolean;
+  language: string | null;
+}

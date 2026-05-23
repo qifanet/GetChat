@@ -516,5 +516,10 @@
     "noResults": "No matching messages found",
     "recent": "Recent conversations",
     "noRecent": "No recent conversations"
+  },
+  "fileExplorer": {
+    "noWorkspace": "Set a workspace directory to browse files",
+    "emptyDirectory": "This directory is empty",
+    "togglePanel": "Toggle file explorer"
   }
 }
