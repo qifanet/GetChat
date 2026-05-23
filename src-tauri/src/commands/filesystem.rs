@@ -44,7 +44,7 @@ pub struct FilePreviewDto {
 // ============================================================================
 
 /// Resolve and validate a path against the workspace root.
-fn resolve_workspace_path(
+async fn resolve_workspace_path(
     state: &State<'_, AppState>,
     conversation_id: &str,
     relative_or_absolute: &str,
@@ -129,7 +129,7 @@ pub async fn list_directory_entries(
     conversation_id: String,
     dir_path: String,
 ) -> Result<Vec<DirectoryEntryDto>, AppError> {
-    let resolved = resolve_workspace_path(&state, &conversation_id, &dir_path)?;
+    let resolved = resolve_workspace_path(&state, &conversation_id, &dir_path).await?;
 
     if !resolved.is_dir() {
         return Err(AppError::invalid_argument("Path is not a directory"));
@@ -155,11 +155,13 @@ pub async fn list_directory_entries(
             continue;
         }
 
-        let metadata = entry.metadata().unwrap_or_else(|_| {
-            std::fs::metadata(entry.path()).unwrap_or_else(|_| {
-                std::fs::metadata(entry.path()).unwrap_or_default()
-            })
-        });
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => match std::fs::metadata(entry.path()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            },
+        };
 
         let modified = metadata
             .modified()
@@ -197,7 +199,7 @@ pub async fn read_file_preview(
     file_path: String,
     max_lines: Option<usize>,
 ) -> Result<FilePreviewDto, AppError> {
-    let resolved = resolve_workspace_path(&state, &conversation_id, &file_path)?;
+    let resolved = resolve_workspace_path(&state, &conversation_id, &file_path).await?;
 
     if !resolved.is_file() {
         return Err(AppError::invalid_argument("Path is not a file"));
