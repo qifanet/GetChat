@@ -23,6 +23,7 @@ const KEYRING_SERVICE_NAME: &str = "GetChat.ProviderApiKeys";
 
 pub const TOOL_LIMITS_KV_KEY: &str = "tool_limits";
 pub const BUILTIN_DISABLED_TOOLS_KV_KEY: &str = "builtin_disabled_tools";
+pub const SECURITY_POLICY_KV_KEY: &str = "security_policy";
 
 // ============================================================================
 // Secure Key Store Trait
@@ -123,6 +124,7 @@ pub struct AppState {
     pub active_model_streams: ActiveModelStreamRegistry,
     pub tool_executor: Box<dyn crate::services::tool_executor::ToolExecutor>,
     pub tool_limits: Arc<Mutex<ToolLimits>>,
+    pub security_policy: Arc<Mutex<SecurityPolicy>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     pub mcp_manager: Arc<Mutex<crate::services::mcp_client::McpManager>>,
     pub app_handle: tauri::AppHandle,
@@ -155,5 +157,94 @@ impl ToolLimits {
         self.max_consecutive_failures = self.max_consecutive_failures.clamp(1, 20);
         self.approval_timeout_secs = self.approval_timeout_secs.clamp(10, 300);
         self
+    }
+}
+
+// ============================================================================
+// Security Policy
+// ============================================================================
+
+/** Security level controlling how aggressively approval is required. */
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityLevel {
+    /** Only destructive write operations require approval. */
+    Permissive,
+    /** Write operations + terminal commands matching blacklist require approval (default). */
+    Standard,
+    /** All file writes and all terminal commands require approval. */
+    Strict,
+}
+
+impl Default for SecurityLevel {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
+impl SecurityLevel {
+    pub fn from_u8(level: u8) -> Self {
+        match level {
+            0 => Self::Permissive,
+            1 => Self::Standard,
+            2.. => Self::Strict,
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::Permissive => 0,
+            Self::Standard => 1,
+            Self::Strict => 2,
+        }
+    }
+}
+
+/**
+ * Policy governing which tool operations require user approval.
+ *
+ * Stored in app_kv as JSON. Blacklist entries are regex patterns matched
+ * against command text (terminal) or file paths (file write).
+ */
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityPolicy {
+    /** Current security level. */
+    pub level: SecurityLevel,
+    /** Regex patterns for terminal commands that always require approval. */
+    pub terminal_blacklist: Vec<String>,
+    /** Regex patterns for file paths that always require approval on write. */
+    pub file_write_blacklist: Vec<String>,
+}
+
+impl Default for SecurityPolicy {
+    fn default() -> Self {
+        Self {
+            level: SecurityLevel::Standard,
+            terminal_blacklist: vec![
+                r"rm\s+-rf\s+/".to_string(),
+                r"del\s+/[sS]".to_string(),
+                r"format\s+[a-zA-Z]:".to_string(),
+                r"shutdown".to_string(),
+                r"reboot".to_string(),
+                r"rmdir\s+/[sS]".to_string(),
+                r"rd\s+/[sS]".to_string(),
+                r"taskkill".to_string(),
+                r"reg\s+(delete|add)".to_string(),
+                r"net\s+(user|localgroup)".to_string(),
+                r"curl\s+.*\|\s*(ba)?sh".to_string(),
+                r"wget\s+.*\|\s*(ba)?sh".to_string(),
+                r"chmod\s+777".to_string(),
+                r"iex\s*\(".to_string(),
+                r"Invoke-Expression".to_string(),
+                r"Start-Process.*-Verb\s+RunAs".to_string(),
+            ],
+            file_write_blacklist: vec![
+                r"\.env$".to_string(),
+                r"(?i)credential".to_string(),
+                r"(?i)password".to_string(),
+                r"(?i)secret".to_string(),
+            ],
+        }
     }
 }

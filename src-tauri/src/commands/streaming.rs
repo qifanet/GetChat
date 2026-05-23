@@ -20,6 +20,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use serde_json::{json, Value};
 use tauri::{ipc::Channel, Manager, State};
 use tokio::sync::watch;
 
@@ -336,10 +337,37 @@ async fn execute_tool_with_mcp(
     arguments: &str,
     context: ToolExecutionContext,
 ) -> ToolExecutionResult {
+    // Legacy tool name compatibility: route old tool names to new unified tools
+    let (resolved_name, rewritten_args) = match tool_name {
+        "file_read" | "file_write" | "file_list" | "grep" => {
+            let action = match tool_name {
+                "file_read" => "read",
+                "file_write" => "write",
+                "file_list" => "list",
+                "grep" => "search",
+                _ => unreachable!(),
+            };
+            let mut args: Value = serde_json::from_str(arguments).unwrap_or(json!({}));
+            if let Some(obj) = args.as_object_mut() {
+                obj.insert("action".to_string(), Value::String(action.to_string()));
+            }
+            ("file".to_string(), serde_json::to_string(&args).unwrap_or_else(|_| arguments.to_string()))
+        }
+        "todo_read" | "todo_write" => {
+            let action = if tool_name == "todo_read" { "read" } else { "write" };
+            let mut args: Value = serde_json::from_str(arguments).unwrap_or(json!({}));
+            if let Some(obj) = args.as_object_mut() {
+                obj.insert("action".to_string(), Value::String(action.to_string()));
+            }
+            ("todo".to_string(), serde_json::to_string(&args).unwrap_or_else(|_| arguments.to_string()))
+        }
+        _ => (tool_name.to_string(), arguments.to_string()),
+    };
+
     // Try built-in executor first
     let result = state
         .tool_executor
-        .execute_with_context(tool_name, arguments, context)
+        .execute_with_context(&resolved_name, &rewritten_args, context)
         .await;
 
     if result.success || !result.output.starts_with("Unknown tool:") {
@@ -406,9 +434,89 @@ async fn execute_tool_with_mcp(
     }
 }
 
-fn requires_tool_approval(function_name: &str) -> bool {
-    matches!(function_name, "terminal" | "file_write")
-        || function_name.starts_with("mcp__")
+fn requires_tool_approval(
+    function_name: &str,
+    arguments: &str,
+    policy: &crate::state::SecurityPolicy,
+) -> bool {
+    use crate::state::SecurityLevel;
+
+    // MCP tools always require approval
+    if function_name.starts_with("mcp__") {
+        return true;
+    }
+
+    // Resolve legacy tool names so approval checks work for old names too
+    let resolved_name = resolve_legacy_tool_name(function_name);
+
+    match resolved_name.as_str() {
+        "file" => {
+            let args: Value = match serde_json::from_str(arguments) {
+                Ok(v) => v,
+                Err(_) => return true, // Fail-safe: require approval on parse failure
+            };
+            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("");
+            if action != "write" {
+                return false;
+            }
+            // File write — check level and blacklist
+            match policy.level {
+                SecurityLevel::Permissive => {
+                    matches_blacklist(args.get("path").and_then(|p| p.as_str()).unwrap_or(""), &policy.file_write_blacklist)
+                }
+                SecurityLevel::Standard => true, // All file writes require approval in Standard
+                SecurityLevel::Strict => true,
+            }
+        }
+        "terminal" => {
+            let args: Value = match serde_json::from_str(arguments) {
+                Ok(v) => v,
+                Err(_) => return true, // Fail-safe: require approval on parse failure
+            };
+            let command = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
+            match policy.level {
+                SecurityLevel::Permissive => {
+                    matches_blacklist(command, &policy.terminal_blacklist)
+                }
+                SecurityLevel::Standard => {
+                    matches_blacklist(command, &policy.terminal_blacklist)
+                }
+                SecurityLevel::Strict => true,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn matches_blacklist(text: &str, patterns: &[String]) -> bool {
+    for pattern in patterns {
+        match regex::Regex::new(pattern) {
+            Ok(re) => {
+                if re.is_match(text) {
+                    return true;
+                }
+            }
+            Err(err) => {
+                // Fail-closed: invalid regex pattern treated as match for safety
+                tracing::warn!(
+                    pattern = %pattern,
+                    error = %err,
+                    "invalid regex in blacklist, treating as match for safety"
+                );
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/** Resolve legacy tool names to their current unified equivalents. */
+fn resolve_legacy_tool_name(tool_name: &str) -> String {
+    match tool_name {
+        "file_read" | "file_write" | "file_list" | "grep" => "file".to_string(),
+        "todo_read" | "todo_write" => "todo".to_string(),
+        _ => tool_name.to_string(),
+    }
 }
 
 async fn execute_tool_checked(
@@ -419,7 +527,10 @@ async fn execute_tool_checked(
     context: ToolExecutionContext,
     cancel_rx: &watch::Receiver<bool>,
 ) -> Result<ToolExecutionResult, ReactLoopOutcome> {
-    if !allowed_tool_names.contains(tool_name) {
+    // Resolve legacy tool names before the allowed-set check so old names like
+    // file_read/file_write are accepted when the unified "file" tool is enabled.
+    let resolved_name = resolve_legacy_tool_name(tool_name);
+    if !allowed_tool_names.contains(&resolved_name) && !allowed_tool_names.contains(tool_name) {
         return Ok(ToolExecutionResult {
             success: false,
             output: format!("Tool is not enabled for this stream: {tool_name}"),
@@ -493,7 +604,7 @@ async fn run_react_loop(
     state: &State<'_, AppState>,
     initial_request: ResolvedModelStreamRequest,
     channel: &Channel<ModelStreamEventDto>,
-    cancel_rx: watch::Receiver<bool>,
+    mut cancel_rx: watch::Receiver<bool>,
     max_iterations: u32,
     max_consecutive_failures: u32,
     approval_timeout_secs: u32,
@@ -535,12 +646,30 @@ async fn run_react_loop(
 
         guidance_parts.push("You have access to tools. Use them proactively when they can help answer the user's request more accurately or efficiently.".to_string());
 
-        if tool_names.iter().any(|n| *n == "todo_write" || *n == "todo_read") {
-            guidance_parts.push("When the user's request involves multiple steps or a complex task, proactively use todo_write to create a todo list first, then work through each item and update statuses as you progress. This helps track progress and ensures nothing is missed.".to_string());
+        if tool_names.iter().any(|n| *n == "todo") {
+            guidance_parts.push("When the user's request involves multiple steps or a complex task, proactively use the todo tool (action=write) to create a todo list first, then work through each item and update statuses as you progress. This helps track progress and ensures nothing is missed.".to_string());
         }
 
-        if tool_names.iter().any(|n| *n == "file_read" || *n == "file_list" || *n == "grep") {
+        if tool_names.iter().any(|n| *n == "file") {
             guidance_parts.push("When asked about files or code, use file tools to read actual file contents rather than guessing. Always verify information by reading the files first.".to_string());
+        }
+
+        if tool_names.iter().any(|n| *n == "terminal") {
+            let mut terminal_guidance = String::from(
+                "IMPORTANT: This is a local desktop environment, NOT a container or sandbox. ",
+            );
+            if let Some(ref ws) = initial_request.workspace_path {
+                terminal_guidance.push_str(&format!(
+                    "The current working directory is '{}'. ",
+                    ws.replace('\\', "/"),
+                ));
+            }
+            terminal_guidance.push_str(
+                "Do NOT use /workspace as a path — that is a container convention and does not exist here. \
+                 Always verify a directory exists before cd-ing into it (e.g., use 'ls DIR && cd DIR' or check with 'if exist DIR' on Windows). \
+                 If a cd command fails, list available directories first before trying another path.",
+            );
+            guidance_parts.push(terminal_guidance);
         }
 
         if !guidance_parts.is_empty() {
@@ -600,13 +729,66 @@ async fn run_react_loop(
         // may choose not to call them. We keep tools in the request so
         // the model can chain multiple tool calls across iterations.
 
-        // Stream the model response
-        let outcome = model_stream_service::stream_model_response(
-            &request,
-            channel,
-            cancel_rx.clone(),
-        )
-        .await?;
+        // Stream the model response with automatic retry for retriable errors
+        const MAX_RETRY_ATTEMPTS: u32 = 5;
+        let mut last_failure: Option<ModelStreamFailure> = None;
+        let mut outcome: Option<ModelStreamOutcome> = None;
+
+        for retry_attempt in 0..=MAX_RETRY_ATTEMPTS {
+            if retry_attempt > 0 {
+                // Exponential backoff with jitter: ~2s, ~5s, ~10s, ~20s, ~30s
+                let base_delay = 2u64.pow(retry_attempt.min(4));
+                let jitter = (retry_attempt as u64) * 3;
+                let delay_secs = (base_delay + jitter).min(30) as u32;
+                let delay = Duration::from_secs(delay_secs as u64);
+
+                let failure = last_failure.as_ref().unwrap();
+                let _ = channel.send(ModelStreamEventDto::Retrying {
+                    request_id: request_id.clone(),
+                    attempt: retry_attempt,
+                    max_attempts: MAX_RETRY_ATTEMPTS,
+                    next_retry_in_secs: delay_secs,
+                    error_summary: failure.message.chars().take(200).collect(),
+                });
+
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {},
+                    _ = cancel_rx.changed() => {
+                        if *cancel_rx.borrow() {
+                            return Ok(ReactLoopOutcome::Cancelled);
+                        }
+                    }
+                }
+            }
+
+            match model_stream_service::stream_model_response(
+                &request,
+                channel,
+                cancel_rx.clone(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    outcome = Some(result);
+                    break;
+                }
+                Err(failure) => {
+                    if !failure.retriable {
+                        // Terminal error — propagate immediately
+                        return Err(failure);
+                    }
+                    // Retriable — store and loop again if attempts remain
+                    last_failure = Some(failure);
+                    if retry_attempt >= MAX_RETRY_ATTEMPTS {
+                        // All retries exhausted — propagate the last failure
+                        return Err(last_failure.unwrap());
+                    }
+                    // Otherwise, backoff and retry
+                }
+            }
+        }
+
+        let outcome = outcome.expect("outcome must be set after retry loop");
 
         match outcome {
             ModelStreamOutcome::Completed {
@@ -668,7 +850,9 @@ async fn run_react_loop(
                         arguments: tc.function.arguments.clone(),
                     });
 
-                    let requires_approval = requires_tool_approval(&tc.function.name);
+                    let security_policy = state.security_policy.lock().await.clone();
+                    let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
+                    drop(security_policy);
 
                     let result = if requires_approval {
                         // Request user approval via oneshot channel
@@ -1058,6 +1242,64 @@ pub async fn update_tool_settings(
         "updated"
     );
     Ok(next_limits)
+}
+
+#[tauri::command]
+pub async fn get_security_policy(
+    state: State<'_, AppState>,
+) -> Result<crate::state::SecurityPolicy, AppError> {
+    Ok(state.security_policy.lock().await.clone())
+}
+
+#[tauri::command]
+pub async fn update_security_policy(
+    state: State<'_, AppState>,
+    level: Option<String>,
+    terminal_blacklist: Option<Vec<String>>,
+    file_write_blacklist: Option<Vec<String>>,
+) -> Result<crate::state::SecurityPolicy, AppError> {
+    use crate::state::SECURITY_POLICY_KV_KEY;
+
+    let previous = {
+        let mut policy = state.security_policy.lock().await;
+        let previous = policy.clone();
+        if let Some(ref l) = level {
+            policy.level = match l.as_str() {
+                "permissive" => crate::state::SecurityLevel::Permissive,
+                "strict" => crate::state::SecurityLevel::Strict,
+                _ => crate::state::SecurityLevel::Standard,
+            };
+        }
+        if let Some(ref bl) = terminal_blacklist {
+            policy.terminal_blacklist = bl.clone();
+        }
+        if let Some(ref bl) = file_write_blacklist {
+            policy.file_write_blacklist = bl.clone();
+        }
+        let updated = policy.clone();
+        drop(policy);
+        (previous, updated)
+    };
+
+    let updated = previous.1;
+    let previous = previous.0;
+    let value_json = serde_json::to_string(&updated)
+        .map_err(|error| AppError::db_error("Failed to serialize security policy").with_details(error.to_string()))?;
+
+    if let Err(error) = crate::repositories::app_kv::set(&state.db, SECURITY_POLICY_KV_KEY, &value_json).await {
+        let mut policy = state.security_policy.lock().await;
+        *policy = previous;
+        return Err(AppError::from(error));
+    }
+
+    tracing::info!(
+        cmd = "update_security_policy",
+        level = ?updated.level,
+        terminal_blacklist_count = updated.terminal_blacklist.len(),
+        file_write_blacklist_count = updated.file_write_blacklist.len(),
+        "updated"
+    );
+    Ok(updated)
 }
 
 // ============================================================================

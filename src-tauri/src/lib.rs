@@ -28,7 +28,8 @@ mod test_support;
 
 use services::tool_executor::BuiltinToolExecutor;
 use state::{
-    AppState, SystemKeyStore, ToolLimits, BUILTIN_DISABLED_TOOLS_KV_KEY, TOOL_LIMITS_KV_KEY,
+    AppState, SystemKeyStore, ToolLimits, SecurityPolicy, BUILTIN_DISABLED_TOOLS_KV_KEY,
+    SECURITY_POLICY_KV_KEY, TOOL_LIMITS_KV_KEY,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -78,7 +79,7 @@ async fn load_persisted_tool_limits(pool: &sqlx::SqlitePool) -> ToolLimits {
 }
 
 async fn load_persisted_builtin_disabled_tools(pool: &sqlx::SqlitePool) -> HashSet<String> {
-    match crate::repositories::app_kv::get(pool, BUILTIN_DISABLED_TOOLS_KV_KEY).await {
+    let raw: HashSet<String> = match crate::repositories::app_kv::get(pool, BUILTIN_DISABLED_TOOLS_KV_KEY).await {
         Ok(Some(value_json)) => match serde_json::from_str::<Vec<String>>(&value_json) {
             Ok(names) => names.into_iter().collect(),
             Err(error) => {
@@ -98,6 +99,42 @@ async fn load_persisted_builtin_disabled_tools(pool: &sqlx::SqlitePool) -> HashS
                 "failed to load disabled tool list, falling back to defaults"
             );
             HashSet::new()
+        }
+    };
+
+    // Migrate legacy tool names to unified tool names
+    let migrated: HashSet<String> = raw.into_iter().map(|name| {
+        match name.as_str() {
+            "file_read" | "file_write" | "file_list" | "grep" => "file".to_string(),
+            "todo_read" | "todo_write" => "todo".to_string(),
+            _ => name,
+        }
+    }).collect();
+
+    migrated
+}
+
+async fn load_persisted_security_policy(pool: &sqlx::SqlitePool) -> SecurityPolicy {
+    match crate::repositories::app_kv::get(pool, SECURITY_POLICY_KV_KEY).await {
+        Ok(Some(value_json)) => match serde_json::from_str::<SecurityPolicy>(&value_json) {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::warn!(
+                    key = SECURITY_POLICY_KV_KEY,
+                    error = %error,
+                    "invalid persisted security policy, falling back to defaults"
+                );
+                SecurityPolicy::default()
+            }
+        },
+        Ok(None) => SecurityPolicy::default(),
+        Err(error) => {
+            tracing::warn!(
+                key = SECURITY_POLICY_KV_KEY,
+                error = %error,
+                "failed to load persisted security policy, falling back to defaults"
+            );
+            SecurityPolicy::default()
         }
     }
 }
@@ -134,6 +171,7 @@ pub fn run() {
                 let key_store = Box::new(SystemKeyStore::new());
                 let tool_limits = load_persisted_tool_limits(&pool).await;
                 let disabled_builtin_tools = load_persisted_builtin_disabled_tools(&pool).await;
+                let security_policy = load_persisted_security_policy(&pool).await;
                 let tool_executor = Box::new(BuiltinToolExecutor::new_with_disabled(
                     disabled_builtin_tools,
                 ));
@@ -147,6 +185,7 @@ pub fn run() {
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     tool_executor,
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
+                    security_policy: Arc::new(tokio::sync::Mutex::new(security_policy)),
                     pending_approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     mcp_manager: mcp_manager.clone(),
                     app_handle: app_handle.clone(),
@@ -297,6 +336,8 @@ pub fn run() {
             commands::streaming::approve_tool_action,
             commands::streaming::get_tool_settings,
             commands::streaming::update_tool_settings,
+            commands::streaming::get_security_policy,
+            commands::streaming::update_security_policy,
             // MCP Server management (4)
             commands::streaming::list_mcp_servers,
             commands::streaming::add_mcp_server,

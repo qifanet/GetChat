@@ -177,4 +177,20 @@ pub enum ModelStreamEventDto {
         #[serde(rename = "timeoutSecs")]
         timeout_secs: u32,
     },
+    /// Emitted before an automatic retry attempt after a retriable provider error.
+    Retrying {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        /// Current retry attempt number (1-based).
+        attempt: u32,
+        /// Maximum number of retry attempts.
+        #[serde(rename = "maxAttempts")]
+        max_attempts: u32,
+        /// Seconds until the next retry attempt.
+        #[serde(rename = "nextRetryInSecs")]
+        next_retry_in_secs: u32,
+        /// Short summary of the error that triggered this retry.
+        #[serde(rename = "errorSummary")]
+        error_summary: String,
+    },
 }

@@ -7,7 +7,7 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import { useStreamStore } from "../../stores/useStreamStore";
 import { getModelDisplayName } from "../../features/models/modelUtils";
@@ -29,6 +29,58 @@ import {
   MessageActionMoreMenu,
 } from "./MessageActionToolbar";
 import type { MessageNode } from "../../types/conversation";
+
+/** Retry status card — shows countdown during automatic retry attempts. */
+function RetryStatusCard({
+  attempt,
+  maxAttempts,
+  nextRetryInSecs,
+  errorSummary,
+}: {
+  attempt: number;
+  maxAttempts: number;
+  nextRetryInSecs: number;
+  errorSummary: string;
+}) {
+  const { t } = useTranslation();
+  const [countdown, setCountdown] = useState(nextRetryInSecs);
+
+  useEffect(() => {
+    setCountdown(nextRetryInSecs);
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [nextRetryInSecs]);
+
+  return (
+    <div className="mt-3 rounded-lg border border-amber-300/40 bg-amber-50/80 px-4 py-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        {t("message.retrying", { attempt, maxAttempts })}
+      </div>
+      <div className="mt-1 text-xs text-amber-600">
+        {countdown > 0
+          ? t("message.retryCountdown", { seconds: countdown })
+          : t("message.retryConnecting")}
+      </div>
+      {errorSummary && (
+        <div className="mt-1 truncate text-[11px] text-amber-500/80" title={errorSummary}>
+          {errorSummary}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_workspace_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
@@ -219,6 +271,11 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
     (s) => (isStreaming && requestId ? s.sessionsByRequestId[requestId]?.pendingApproval : undefined)
   );
 
+  // Retry state — show countdown when backend is retrying
+  const retryState = useStreamStore(
+    (s) => (isStreaming && requestId ? s.sessionsByRequestId[requestId]?.retrying : undefined)
+  );
+
   if (isStreaming && requestId) {
     return (
       <AssistantMessageFrame
@@ -232,6 +289,14 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
           rendererMode={rendererMode}
         />
         {streamingToolCallSection}
+        {retryState ? (
+          <RetryStatusCard
+            attempt={retryState.attempt}
+            maxAttempts={retryState.maxAttempts}
+            nextRetryInSecs={retryState.nextRetryInSecs}
+            errorSummary={retryState.errorSummary}
+          />
+        ) : null}
         {pendingApproval ? (
           <ToolApprovalCard
             requestId={requestId}

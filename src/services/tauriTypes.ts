@@ -351,6 +351,16 @@ export interface ModelStreamApprovalRequiredEvent {
   timeoutSecs: number;
 }
 
+/** Retry in progress event — emitted before an automatic retry after a retriable error. */
+export interface ModelStreamRetryingEvent {
+  kind: "RETRYING";
+  requestId: RequestId;
+  attempt: number;
+  maxAttempts: number;
+  nextRetryInSecs: number;
+  errorSummary: string;
+}
+
 /** Union of all runtime model stream events delivered through the channel. */
 export type ModelStreamEvent =
   | ModelStreamChunkEvent
@@ -358,7 +368,8 @@ export type ModelStreamEvent =
   | ModelStreamFailedEvent
   | ModelStreamToolCallEvent
   | ModelStreamToolResultEvent
-  | ModelStreamApprovalRequiredEvent;
+  | ModelStreamApprovalRequiredEvent
+  | ModelStreamRetryingEvent;
 
 // ============================================================================
 // Context Management Types

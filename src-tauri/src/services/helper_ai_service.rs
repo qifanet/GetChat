@@ -603,16 +603,26 @@ fn build_diff_user_prompt(left: &[String], right: &[String]) -> String {
 // ============================================================================
 
 const COMPRESS_SYSTEM_PROMPT: &str = concat!(
-    "你是一个对话总结助手。用户会给你一段对话历史，请生成简洁的摘要。\n",
+    "你是一个对话总结助手。用户会给你一段对话历史，请生成**结构化**摘要。\n\n",
+    "输出格式必须严格遵循以下 Markdown 结构：\n\n",
+    "## 关键决策\n",
+    "- [列出所有重要决策、结论和共识]\n\n",
+    "## 技术实体\n",
+    "- [保留所有变量名、函数名、文件路径、配置值、API 端点等技术细节]\n\n",
+    "## 用户意图\n",
+    "- [总结用户的核心需求、偏好和约束]\n\n",
+    "## 工具使用记录\n",
+    "- [简述已执行的工具操作及其关键结果，尤其是文件变更和命令输出]\n\n",
+    "## 待解决事项\n",
+    "- [列出尚未完成的事项或未回答的问题]\n\n",
     "要求：\n",
-    "- 保留关键信息、决策和结论\n",
-    "- 保留技术细节（变量名、函数名、配置值等）\n",
     "- 使用与原文相同的语言\n",
-    "- 摘要长度约为原文的 20-30%\n",
+    "- 每个条目保持精炼，但不得丢失关键技术细节\n",
+    "- 如果某个分类下没有相关内容，省略该分类标题\n",
     "- 只输出摘要，不要添加额外说明"
 );
 
-const COMPRESS_KEEP_RECENT_SOURCE_MESSAGES: usize = 4;
+const COMPRESS_KEEP_RECENT_SOURCE_MESSAGES: usize = 6;
 const COMPRESS_MIN_SOURCE_MESSAGES: usize = 3;
 const COMPRESS_MAX_MESSAGE_CHARS: usize = 2_000;
 const COMPRESS_MIN_INPUT_CHARS: usize = 6_000;

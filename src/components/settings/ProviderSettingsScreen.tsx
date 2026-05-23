@@ -7,7 +7,7 @@
  * maintain providers, manage multiple model profiles under each provider, and
  * set the application-level fallback model without leaving the workspace.
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
@@ -87,6 +87,21 @@ interface SettingsFeedbackState {
   tone: "success" | "error" | "info";
   message: string;
 }
+
+/** Toast state for the settings page top-level save feedback. */
+interface SettingsToastState {
+  visible: boolean;
+  tone: "success" | "error";
+  message: string;
+}
+
+const SettingsToastContext = createContext<(message: string, tone?: "success" | "error") => void>(() => {});
+
+function useSettingsToast() {
+  return useContext(SettingsToastContext);
+}
+
+const TOAST_AUTO_DISMISS_MS = 2000;
 /** Create a new model draft with a stable system-owned model profile ID. */
 function createDraftModel(
   requestName = "",
@@ -108,29 +123,13 @@ const BUILTIN_TOOL_I18N_KEYS: Record<string, { nameKey: string; descriptionKey: 
     nameKey: "settings.builtinToolCalculatorName",
     descriptionKey: "settings.builtinToolCalculatorDescription",
   },
-  file_read: {
-    nameKey: "settings.builtinToolFileReadName",
-    descriptionKey: "settings.builtinToolFileReadDescription",
+  file: {
+    nameKey: "settings.builtinToolFileName",
+    descriptionKey: "settings.builtinToolFileDescription",
   },
-  file_write: {
-    nameKey: "settings.builtinToolFileWriteName",
-    descriptionKey: "settings.builtinToolFileWriteDescription",
-  },
-  file_list: {
-    nameKey: "settings.builtinToolFileListName",
-    descriptionKey: "settings.builtinToolFileListDescription",
-  },
-  grep: {
-    nameKey: "settings.builtinToolGrepName",
-    descriptionKey: "settings.builtinToolGrepDescription",
-  },
-  todo_read: {
-    nameKey: "settings.builtinToolTodoReadName",
-    descriptionKey: "settings.builtinToolTodoReadDescription",
-  },
-  todo_write: {
-    nameKey: "settings.builtinToolTodoWriteName",
-    descriptionKey: "settings.builtinToolTodoWriteDescription",
+  todo: {
+    nameKey: "settings.builtinTodoName",
+    descriptionKey: "settings.builtinTodoDescription",
   },
   terminal: {
     nameKey: "settings.builtinToolTerminalName",
@@ -789,16 +788,54 @@ export function ProviderSettingsScreen({
       setIsTestingConnection(false);
     }
   }
+
+  // --- Settings page toast ---
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toast, setToast] = useState<SettingsToastState>({
+    visible: false,
+    tone: "success",
+    message: "",
+  });
+
+  const showToast = useCallback((message: string, tone: "success" | "error" = "success") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ visible: true, tone, message });
+    toastTimerRef.current = setTimeout(() => {
+      setToast((prev) => ({ ...prev, visible: false }));
+    }, TOAST_AUTO_DISMISS_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   return (
-    <section className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-transparent xl:flex-row">
-      <aside className="app-panel flex min-w-0 w-full shrink-0 flex-col rounded-shell bg-white/95 xl:w-[330px]">
-        <div className="border-b border-miro-border/10 px-5 py-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="app-secondary-button mb-4 justify-start gap-2 px-3 py-2 text-sm"
+    <SettingsToastContext.Provider value={showToast}>
+      <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        {toast.visible && (
+          <div
+            className={`absolute left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
+              toast.tone === "success"
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border border-red-200 bg-red-50 text-red-700"
+            }`}
+            style={{ animation: "settings-toast-in 0.25s ease-out" }}
           >
-            <IconChevronLeft size={14} />
+            <span className="mr-2">{toast.tone === "success" ? "\u2713" : "\u2717"}</span>
+            {toast.message}
+          </div>
+        )}
+        <section className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-transparent xl:flex-row">
+          <aside className="app-panel flex min-w-0 w-full shrink-0 flex-col rounded-shell bg-white/95 xl:w-[330px]">
+            <div className="border-b border-miro-border/10 px-5 py-5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="app-secondary-button mb-4 justify-start gap-2 px-3 py-2 text-sm"
+              >
+                <IconChevronLeft size={14} />
             {t("settings.backToWorkspace")}
           </button>
           <div className="flex min-w-0 items-center gap-3">
@@ -1457,6 +1494,7 @@ export function ProviderSettingsScreen({
               </div>
             </section>
             <ToolSettingsSection />
+            <SecurityPolicySection />
             <BuiltinToolsSection />
             <AppSettingsSection />
             <McpServersSection />
@@ -1465,12 +1503,15 @@ export function ProviderSettingsScreen({
         </div>
       </div>
     </section>
+      </div>
+    </SettingsToastContext.Provider>
   );
 }
 
 /** Tool calling settings section: max iterations, consecutive failures, approval timeout. */
 function ToolSettingsSection() {
   const { t } = useTranslation();
+  const showToast = useSettingsToast();
   const [settings, setSettings] = useState<tauriCmd.ToolSettingsDto | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1485,8 +1526,10 @@ function ToolSettingsSection() {
     try {
       const updated = await tauriCmd.updateToolSettings(patch);
       setSettings(updated);
+      showToast(t("common.saved"));
     } catch (err) {
       console.error("[tool-settings] failed to save", err);
+      showToast(t("settings.providerSaveFailed"), "error");
     } finally {
       setSaving(false);
     }
@@ -1581,8 +1624,76 @@ function ToolSettingsSection() {
   );
 }
 
+function SecurityPolicySection() {
+  const { t } = useTranslation();
+  const showToast = useSettingsToast();
+  const [policy, setPolicy] = useState<tauriCmd.SecurityPolicyDto | null>(null);
+
+  useEffect(() => {
+    tauriCmd.getSecurityPolicy().then(setPolicy).catch(() => {});
+  }, []);
+
+  if (!policy) return null;
+
+  const levels: { value: tauriCmd.SecurityPolicyDto["level"]; labelKey: string; descKey: string }[] = [
+    { value: "permissive", labelKey: "settings.securityPermissive", descKey: "settings.securityPermissiveDesc" },
+    { value: "standard", labelKey: "settings.securityStandard", descKey: "settings.securityStandardDesc" },
+    { value: "strict", labelKey: "settings.securityStrict", descKey: "settings.securityStrictDesc" },
+  ];
+
+  return (
+    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
+      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+        {t("settings.securityPolicyTitle")}
+      </h3>
+      <p className="mt-1 text-xs text-miro-text-secondary">
+        {t("settings.securityPolicyHelp")}
+      </p>
+      <div className="mt-4 space-y-3">
+        {levels.map((lv) => (
+          <label
+            key={lv.value}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+              policy.level === lv.value
+                ? "border-miro-blue bg-blue-50/60"
+                : "border-miro-border/20 hover:border-miro-border/40"
+            }`}
+          >
+            <input
+              type="radio"
+              name="securityLevel"
+              value={lv.value}
+              checked={policy.level === lv.value}
+              className="mt-0.5"
+              onChange={async () => {
+                try {
+                  const updated = await tauriCmd.updateSecurityPolicy({ level: lv.value });
+                  setPolicy(updated);
+                  showToast(t("common.saved"));
+                } catch (err) {
+                  console.error("[security-policy] failed to update", err);
+                  showToast(t("settings.providerSaveFailed"), "error");
+                }
+              }}
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-miro-text">
+                {t(lv.labelKey)}
+              </div>
+              <div className="text-xs text-miro-text-secondary">
+                {t(lv.descKey)}
+              </div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function BuiltinToolsSection() {
   const { t } = useTranslation();
+  const showToast = useSettingsToast();
   const [tools, setTools] = useState<tauriCmd.ToolStateDto[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -1599,8 +1710,10 @@ function BuiltinToolsSection() {
       setTools((prev) =>
         prev.map((t) => (t.name === name ? { ...t, enabled } : t))
       );
+      showToast(t("common.saved"));
     } catch (err) {
       console.error("[builtin-tools] failed to toggle", err);
+      showToast(t("settings.providerSaveFailed"), "error");
     }
   }
 
@@ -1660,6 +1773,7 @@ function BuiltinToolsSection() {
 
 function AppSettingsSection() {
   const { t } = useTranslation();
+  const showToast = useSettingsToast();
   const [closeBehavior, setCloseBehaviorLocal] = useState<"exit" | "tray">("exit");
   const [shellPath, setShellPathLocal] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -1694,6 +1808,7 @@ function AppSettingsSection() {
     setCloseBehaviorLocal(behavior);
     try {
       await tauriCmd.setCloseBehavior(behavior);
+      showToast(t("common.saved"));
     } catch { /* ignore */ }
   };
 
@@ -1701,7 +1816,10 @@ function AppSettingsSection() {
     setSaving(true);
     try {
       await tauriCmd.setShellPath(shellPath.trim());
-    } catch { /* ignore */ }
+      showToast(t("common.saved"));
+    } catch {
+      showToast(t("settings.providerSaveFailed"), "error");
+    }
     setSaving(false);
   };
 
@@ -1803,6 +1921,7 @@ function AppSettingsSection() {
 
 function McpServersSection() {
   const { t } = useTranslation();
+  const showToast = useSettingsToast();
   const [servers, setServers] = useState<tauriCmd.McpServerStateDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -1852,10 +1971,12 @@ function McpServersSection() {
     try {
       await tauriCmd.setMcpServerEnabled(name, enabled);
       await loadServers();
+      showToast(t("common.saved"));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setServerErrors((prev) => ({ ...prev, [name]: message }));
       await loadServers();
+      showToast(message, "error");
     } finally {
       setServerPending(name, false);
     }
@@ -2018,8 +2139,11 @@ function McpServersSection() {
       setEditingMcpServerName(null);
       setShowForm(false);
       await loadServers();
+      showToast(t("common.saved"));
     } catch (err: unknown) {
-      setAddError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setAddError(msg);
+      showToast(msg, "error");
     } finally {
       setAdding(false);
     }
@@ -2056,9 +2180,11 @@ function McpServersSection() {
     try {
       await tauriCmd.removeMcpServer(name);
       await loadServers();
+      showToast(t("common.saved"));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setServerErrors((prev) => ({ ...prev, [name]: message }));
+      showToast(message, "error");
       console.error("[mcp] failed to remove server", err);
     } finally {
       setServerPending(name, false);
