@@ -180,6 +180,30 @@ export interface StreamSessionMeta {
     receivedAt: number;
   };
 
+  /** Mid-loop context compression in progress (set by CONTEXT_COMPRESSING event) */
+  contextCompressing?: {
+    level: number;
+    usageRatio: number;
+    receivedAt: number;
+  };
+
+  /** Latest in-flight ReAct-loop context window status pushed by backend. */
+  contextStatus?: {
+    usedTokens: number;
+    totalTokens: number;
+    percentage: number;
+    messageCount: number;
+    receivedAt: number;
+  };
+
+  /** Mid-loop context compression result (set by CONTEXT_COMPRESSED event, auto-cleared) */
+  contextCompressed?: {
+    compressedCount: number;
+    tokensSaved: number;
+    newUsageRatio: number;
+    receivedAt: number;
+  };
+
   error?: StreamError;
 }
 

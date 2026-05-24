@@ -17,8 +17,9 @@ import {
   listAvailableModelOptions,
 } from "../../features/models/modelUtils";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { useStreamStore } from "../../stores/useStreamStore";
 import { sendMessageAction } from "../../features/composer/sendMessageAction";
-import { cancelStream } from "../../services/streamController";
+import { cancelActiveStreams, cancelStream } from "../../services/streamController";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { SendMode } from "../../types/base";
 
@@ -40,11 +41,16 @@ const _select_patchParams = (s: import("../../stores/appStore.types").AppStore) 
 const _select_setSendingState = (s: import("../../stores/appStore.types").AppStore) => s.setSendingState;
 const _select_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
 
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 /** Message composer with textarea, send mode dropdown, and stop controls. */
 export function Composer() {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const submitInFlightRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Slash command state
   const [slashItems, setSlashItems] = useState<tauriCmd.SlashItemDto[]>([]);
@@ -118,44 +124,51 @@ export function Composer() {
   }, [menuOpen]);
   /** Dispatch the real send action while keeping runtime failures visible in the console. */
   const handleSend = useCallback(async () => {
-    if (!canSend) {
+    if (submitInFlightRef.current || !canSend) {
       return;
     }
 
-    // If an active slash item is pending, render its template and prepend to draft
-    if (activeSlashItem) {
-      try {
-        const { item, argsJson } = activeSlashItem;
-        let rendered: string;
-        if (item.itemType === "mcp_prompt" && item.serverName) {
-          rendered = await tauriCmd.executeMcpPrompt(item.serverName, item.name, argsJson);
-        } else {
-          rendered = await tauriCmd.executeSkill(item.name, argsJson);
-        }
-        const userText = draft.trim();
-        const fullText = userText ? `${rendered}\n\n${userText}` : rendered;
-        setDraft(fullText);
-        setActiveSlashItem(null);
-      } catch (err) {
-        console.error("[composer] slash render failed:", err);
-        return;
-      }
-      // Yield so the draft state update propagates before sendMessageAction reads it
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    submitInFlightRef.current = true;
 
     try {
-      await sendMessageAction();
-    } catch (error) {
-      console.error("[composer] send failed:", error);
+      // If an active slash item is pending, render its template and prepend to draft.
+      if (activeSlashItem) {
+        try {
+          const { item, argsJson } = activeSlashItem;
+          let rendered: string;
+          if (item.itemType === "mcp_prompt" && item.serverName) {
+            rendered = await tauriCmd.executeMcpPrompt(item.serverName, item.name, argsJson);
+          } else {
+            rendered = await tauriCmd.executeSkill(item.name, argsJson);
+          }
+          const userText = draft.trim();
+          const fullText = userText ? `${rendered}\n\n${userText}` : rendered;
+          setDraft(fullText);
+          setActiveSlashItem(null);
+        } catch (err) {
+          console.error("[composer] slash render failed:", err);
+          return;
+        }
+        // Yield so the draft state update propagates before sendMessageAction reads it.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      try {
+        await sendMessageAction();
+      } catch (error) {
+        console.error("[composer] send failed:", error);
+      }
+    } finally {
+      submitInFlightRef.current = false;
     }
   }, [canSend, activeSlashItem, draft, setDraft]);
   /** Cancel the active streaming request when the user presses the stop control. */
   const handleStop = useCallback(() => {
-    if (activeRequestId) {
-      cancelStream(activeRequestId);
+    const cancelled = cancelActiveStreams({ conversationId: activeConversationId });
+    if (cancelled === 0 && activeRequestId) {
+      void cancelStream(activeRequestId);
     }
-  }, [activeRequestId]);
+  }, [activeConversationId, activeRequestId]);
   /** Select a send mode from the dropdown and close it. */
   const handleSelectMode = useCallback(
     (mode: SendMode) => {
@@ -243,17 +256,27 @@ export function Composer() {
     setActiveSlashItem({ item, argsJson: JSON.stringify(values) });
     setParamDialog(null);
   }, [paramDialog]);
-  /** Poll context status periodically when conversation is active. */
+  /** Refetch context status from backend immediately. */
+  const refreshContextStatus = useCallback(() => {
+    if (!activeConversationId || !activeBranchId || !selectedModelId) return;
+    tauriCmd
+      .getContextStatus(activeConversationId, activeBranchId, selectedModelId)
+      .then(setContextStatus)
+      .catch(() => {});
+  }, [activeConversationId, activeBranchId, selectedModelId]);
+
+  /** Poll context status periodically. Uses 5s interval during active streaming, 30s when idle. */
   useEffect(() => {
     if (!activeConversationId || !activeBranchId || !selectedModelId) return;
     let cancelled = false;
+    const interval = isSending ? 5_000 : 30_000;
     const poll = () => {
       if (cancelled) return;
       tauriCmd
         .getContextStatus(activeConversationId, activeBranchId, selectedModelId)
         .then(setContextStatus)
         .catch(() => {});
-      timer = window.setTimeout(poll, 30_000);
+      timer = window.setTimeout(poll, interval);
     };
     let timer: ReturnType<typeof setTimeout>;
     poll();
@@ -261,17 +284,71 @@ export function Composer() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [activeConversationId, activeBranchId, selectedModelId]);
+  }, [activeConversationId, activeBranchId, selectedModelId, isSending]);
+
+  /** Re-fetch context status immediately when a stream completes. */
+  const prevSendingRef = useRef(isSending);
+  useEffect(() => {
+    if (prevSendingRef.current && !isSending) {
+      refreshContextStatus();
+    }
+    prevSendingRef.current = isSending;
+  }, [isSending, refreshContextStatus]);
+
+  /** Re-fetch context status when mid-loop compression completes (CONTEXT_COMPRESSED SSE event). */
+  const streamSession = useStreamStore((s) =>
+    activeRequestId ? s.sessionsByRequestId[activeRequestId] : undefined
+  );
+  useEffect(() => {
+    if (streamSession?.contextCompressed) {
+      refreshContextStatus();
+    }
+  }, [streamSession?.contextCompressed, refreshContextStatus]);
+
+  /** Post-stream async compaction (opencode-style): trigger background compression
+   *  after a stream completes if context usage is high. The result takes effect on
+   *  the NEXT conversation turn, not the current one. */
+  const POST_STREAM_COMPRESSION_THRESHOLD = 75;
+  useEffect(() => {
+    if (prevSendingRef.current && !isSending) {
+      if (activeConversationId && activeBranchId && selectedModelId) {
+        tauriCmd.getContextStatus(activeConversationId, activeBranchId, selectedModelId)
+          .then((status) => {
+            const pct = status.rawPercentage ?? status.percentage;
+            if (pct >= POST_STREAM_COMPRESSION_THRESHOLD) {
+              console.info(
+                `[context] post-stream async compression: usage=${pct}% >= ${POST_STREAM_COMPRESSION_THRESHOLD}%`
+              );
+              tauriCmd.compressContext(activeConversationId, activeBranchId, selectedModelId)
+                .then((result) => {
+                  if (result.skipped) {
+                    console.info("[context] post-stream compression skipped", result.skipReason);
+                  } else {
+                    console.info(
+                      `[context] post-stream compression done: ${result.compressedMessageCount} messages, ~${result.estimatedTokens} tokens`
+                    );
+                  }
+                  refreshContextStatus();
+                })
+                .catch((err) => {
+                  console.warn("[context] post-stream compression failed (non-critical)", err);
+                });
+            }
+          })
+          .catch(() => { /* status fetch failed, ignore */ });
+      }
+    }
+  }, [isSending, activeConversationId, activeBranchId, selectedModelId, refreshContextStatus]);
 
   async function handleCompress() {
     if (!activeConversationId || !activeBranchId || !selectedModelId) return;
     setCompressing(true);
     try {
-      await tauriCmd.compressContext(activeConversationId, activeBranchId, selectedModelId);
-      tauriCmd
-        .getContextStatus(activeConversationId, activeBranchId, selectedModelId)
-        .then(setContextStatus)
-        .catch(() => {});
+      const result = await tauriCmd.compressContext(activeConversationId, activeBranchId, selectedModelId);
+      if (result.skipped) {
+        console.info("[composer] context compression skipped", result.skipReason ?? "NO_COMPRESSIBLE_CONTENT");
+      }
+      refreshContextStatus();
     } catch (err) {
       console.error("[composer] compress failed:", err);
     } finally {
@@ -295,12 +372,18 @@ export function Composer() {
             <span className="app-status-pill px-2.5 py-1 text-[10px]">
               {selectedModelLabel}
             </span>
-            {contextStatus && contextStatus.totalTokens > 0 && (() => {
-              const pct = contextStatus.percentage;
+            {contextStatus && finiteNumber(contextStatus.totalTokens) > 0 && (() => {
+              const liveStatus = isSending ? streamSession?.contextStatus : undefined;
+              const totalTokens = finiteNumber(liveStatus?.totalTokens ?? contextStatus.totalTokens);
+              const usedTokens = finiteNumber(liveStatus?.usedTokens ?? contextStatus.usedTokens);
+              const pct = finiteNumber(liveStatus?.percentage ?? contextStatus.percentage);
+              const rawPct = finiteNumber(contextStatus.rawPercentage ?? pct);
               const barColor = pct > 85 ? "bg-red-400" : pct > 60 ? "bg-amber-400" : "bg-emerald-400";
               const textColor = pct > 85 ? "text-red-600" : pct > 60 ? "text-amber-600" : "text-emerald-600";
-              const usedK = (contextStatus.usedTokens / 1000).toFixed(1);
-              const totalK = (contextStatus.totalTokens / 1000).toFixed(0);
+              const usedK = (usedTokens / 1000).toFixed(1);
+              const rawUsedK = (finiteNumber(contextStatus.rawUsedTokens ?? contextStatus.usedTokens) / 1000).toFixed(1);
+              const totalK = (totalTokens / 1000).toFixed(0);
+              const promptBudgetK = (finiteNumber(contextStatus.promptBudgetTokens) / 1000).toFixed(1);
               const fallbackBreakdown: tauriCmd.ContextTokenBreakdownDto = {
                 systemTokens: 0,
                 toolPromptTokens: 0,
@@ -311,9 +394,11 @@ export function Composer() {
                 skillPromptTokens: 0,
               };
               const breakdown = contextStatus.breakdown ?? fallbackBreakdown;
-              const formatK = (tokens: number) => `${(tokens / 1000).toFixed(1)}K`;
+              const formatK = (tokens: number) => `${(finiteNumber(tokens) / 1000).toFixed(1)}K`;
               const contextTooltip = [
-                `${t("composer.contextTotal")}: ${usedK}K / ${totalK}K`,
+                `${t("composer.contextRequestEstimate")}: ${usedK}K / ${totalK}K`,
+                `${t("composer.contextRawEstimate")}: ${rawUsedK}K / ${totalK}K (${Math.round(rawPct)}%)`,
+                `${t("composer.contextPromptBudget")}: ${promptBudgetK}K`,
                 `${t("composer.contextSystem")}: ${formatK(breakdown.systemTokens)}`,
                 `${t("composer.contextToolPrompt")}: ${formatK(breakdown.toolPromptTokens)}`,
                 `${t("composer.contextMessagePrompt")}: ${formatK(
@@ -335,14 +420,14 @@ export function Composer() {
                   <span className="relative inline-flex h-1.5 w-12 items-center overflow-hidden rounded-full bg-miro-border/40">
                     <span
                       className={`absolute inset-y-0 left-0 rounded-full transition-all duration-300 ${barColor}`}
-                      style={{ width: `${Math.min(pct, 100)}%` }}
+                      style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }}
                     />
                   </span>
                   {Math.round(pct)}%
                   <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 hidden min-w-56 whitespace-pre rounded-xl border border-miro-border/20 bg-white px-3 py-2 text-left text-[10px] leading-5 text-miro-text shadow-lg group-focus:block group-focus-within:block">
                     {contextTooltip}
                   </span>
-                  {pct > 60 && (
+                  {rawPct > 60 && (
                     <button
                       type="button"
                       onClick={() => void handleCompress()}

@@ -1552,12 +1552,12 @@ function ToolSettingsSection() {
             <input
               type="number"
               min={1}
-              max={50}
+              max={100}
               value={settings.max_iterations}
               className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
               onChange={(e) => {
                 const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 50) {
+                if (!isNaN(v) && v >= 1 && v <= 100) {
                   setSettings({ ...settings, max_iterations: v });
                 }
               }}
@@ -1600,12 +1600,12 @@ function ToolSettingsSection() {
             <input
               type="number"
               min={10}
-              max={300}
+              max={600}
               value={settings.approval_timeout_secs}
               className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
               onChange={(e) => {
                 const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 300) {
+                if (!isNaN(v) && v >= 10 && v <= 600) {
                   setSettings({ ...settings, approval_timeout_secs: v });
                 }
               }}
@@ -1613,6 +1613,30 @@ function ToolSettingsSection() {
             />
             <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
               {t("settings.approvalTimeoutHelp")}
+            </span>
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-miro-text">
+            {t("settings.toolExecutionTimeout")}
+          </label>
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <input
+              type="number"
+              min={10}
+              max={600}
+              value={settings.tool_execution_timeout_secs}
+              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 10 && v <= 600) {
+                  setSettings({ ...settings, tool_execution_timeout_secs: v });
+                }
+              }}
+              onBlur={() => void handleSave({ tool_execution_timeout_secs: settings.tool_execution_timeout_secs })}
+            />
+            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
+              {t("settings.toolExecutionTimeoutHelp")}
             </span>
           </div>
         </div>

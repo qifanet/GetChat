@@ -166,19 +166,27 @@ pub async fn start_model_stream(
     let model_id = input.model_id.clone();
 
     let mut active_streams = state.active_model_streams.lock().await;
-    if active_streams.contains_key(&request_id) {
+    if let Some(active_request_id) = active_streams.keys().next().cloned() {
+        let message = if active_request_id == request_id {
+            "A stream with the same requestId is already active".to_string()
+        } else {
+            format!("Another model stream is already active: {active_request_id}")
+        };
         let _ = channel.send(ModelStreamEventDto::Failed {
             request_id: request_id.clone(),
             code: "STREAM_ALREADY_ACTIVE".to_string(),
-            message: "A stream with the same requestId is already active".to_string(),
+            message,
             retriable: true,
         });
+        drop(active_streams);
+        release_pending_model_stream_gate(&state, &request_id).await;
         return Ok(());
     }
 
     let (cancel_tx, cancel_rx) = watch::channel(false);
     active_streams.insert(request_id.clone(), cancel_tx);
     drop(active_streams);
+    release_pending_model_stream_gate(&state, &request_id).await;
 
     let resolved = match model_stream_service::resolve_stream_request(
         &state.db,
@@ -226,6 +234,7 @@ pub async fn start_model_stream(
         tool_limits.max_iterations,
         tool_limits.max_consecutive_failures,
         tool_limits.approval_timeout_secs,
+        tool_limits.tool_execution_timeout_secs,
     )
     .await;
 
@@ -287,6 +296,8 @@ pub async fn abort_model_stream(
     state: State<'_, AppState>,
     request_id: String,
 ) -> Result<(), AppError> {
+    release_pending_model_stream_gate(&state, &request_id).await;
+
     let sender = {
         let active_streams = state.active_model_streams.lock().await;
         active_streams.get(&request_id).cloned()
@@ -298,6 +309,16 @@ pub async fn abort_model_stream(
 
     tracing::info!(cmd = "abort_model_stream", request_id = %request_id, "ok");
     Ok(())
+}
+
+async fn release_pending_model_stream_gate(state: &State<'_, AppState>, request_id: &str) {
+    let mut pending = state.pending_model_stream.lock().await;
+    if pending
+        .as_ref()
+        .map_or(false, |existing| existing.request_id == request_id)
+    {
+        *pending = None;
+    }
 }
 
 // ============================================================================
@@ -526,6 +547,7 @@ async fn execute_tool_checked(
     arguments: &str,
     context: ToolExecutionContext,
     cancel_rx: &watch::Receiver<bool>,
+    default_timeout_secs: u64,
 ) -> Result<ToolExecutionResult, ReactLoopOutcome> {
     // Resolve legacy tool names before the allowed-set check so old names like
     // file_read/file_write are accepted when the unified "file" tool is enabled.
@@ -537,12 +559,22 @@ async fn execute_tool_checked(
         });
     }
 
+    // Extract per-call timeout from tool arguments if provided; otherwise use the
+    // configured default. Models can pass {"timeout": 120} to request a longer
+    // execution window for commands that are known to take time.
+    let per_call_timeout: u64 = serde_json::from_str::<Value>(arguments)
+        .ok()
+        .and_then(|v| v.get("timeout").and_then(Value::as_u64))
+        .unwrap_or(default_timeout_secs)
+        .max(10)           // at least 10 seconds
+        .min(600);         // hard ceiling of 10 minutes
+
     let mut cancel_rx = cancel_rx.clone();
     tokio::select! {
         result = execute_tool_with_mcp(state, tool_name, arguments, context) => Ok(result),
-        _ = tokio::time::sleep(Duration::from_secs(TOOL_EXECUTION_TIMEOUT_SECONDS)) => Ok(ToolExecutionResult {
+        _ = tokio::time::sleep(Duration::from_secs(per_call_timeout)) => Ok(ToolExecutionResult {
             success: false,
-            output: format!("Tool execution timed out after {} seconds: {}", TOOL_EXECUTION_TIMEOUT_SECONDS, tool_name),
+            output: format!("Tool execution timed out after {} seconds: {}", per_call_timeout, tool_name),
         }),
         changed = cancel_rx.changed() => {
             if changed.is_ok() && *cancel_rx.borrow() {
@@ -553,6 +585,496 @@ async fn execute_tool_checked(
                     output: "Tool execution interrupted by stream state change".to_string(),
                 })
             }
+        }
+    }
+}
+
+// ============================================================================
+// Mid-loop Context Compression
+// ============================================================================
+
+/// Result of a mid-loop context compression pass.
+struct MidLoopCompressInfo {
+    trimmed_groups: u32,
+    tokens_saved: u32,
+    new_ratio: f32,
+    prompt_messages: Vec<ModelPromptMessageDto>,
+}
+
+fn is_system_role(role: &str) -> bool {
+    role == "system" || role == "SYSTEM"
+}
+
+/// Prune old tool_result content in prompt messages. Inspired by opencode's
+/// prune() which truncates old tool outputs beyond a token budget, keeping
+/// recent tool outputs intact.
+///
+/// Strategy: for TOOL-role messages that are not in the last 2 turns, truncate
+/// content to MAX_PRUNED_TOOL_CHARS characters. This saves thousands of tokens
+/// from verbose tool outputs (e.g., file reads, shell output) without losing
+/// the essential information for continuation.
+const MAX_PRUNED_TOOL_CHARS: usize = 2000;
+const PRUNE_PROTECT_RECENT_MESSAGES: usize = 6;
+
+fn prune_old_tool_results(prompt_messages: &mut [ModelPromptMessageDto], iteration: u32) {
+    // Only prune after the first iteration to allow initial context to be complete
+    if iteration == 0 {
+        return;
+    }
+
+    let total = prompt_messages.len();
+    let protect_from = total.saturating_sub(PRUNE_PROTECT_RECENT_MESSAGES);
+    let mut pruned_count = 0;
+
+    for i in 0..protect_from {
+        let msg = &mut prompt_messages[i];
+        if msg.role != "TOOL" {
+            continue;
+        }
+        if msg.content.len() <= MAX_PRUNED_TOOL_CHARS {
+            continue;
+        }
+        let truncated: String = msg.content.chars().take(MAX_PRUNED_TOOL_CHARS).collect();
+        msg.content = format!("{}\n\n[... output truncated ({} chars total) ...]", truncated, msg.content.len());
+        pruned_count += 1;
+    }
+
+    if pruned_count > 0 {
+        tracing::info!(
+            iteration,
+            pruned_count,
+            protected_recent = total - protect_from,
+            "prune_old_tool_results: truncated old tool outputs"
+        );
+    }
+}
+
+fn is_compressed_context_message(msg: &ModelPromptMessageDto) -> bool {
+    msg.source_message_id.is_none()
+        && is_system_role(&msg.role)
+        && msg.content.starts_with("[Compressed Context Summary]")
+}
+
+/// Deterministic budget trimming: drop oldest non-system messages from the
+/// prompt until estimated tokens fall within `budget`. System prefix messages
+/// (those without source_message_id) are always preserved. The most recent
+/// messages are also preserved to maintain conversation coherence.
+fn apply_deterministic_budget_trim(
+    prompt_messages: &[ModelPromptMessageDto],
+    budget: u32,
+    tools: &[ToolDefinitionDto],
+) -> Vec<ModelPromptMessageDto> {
+    let current_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+        prompt_messages,
+        tools,
+    );
+    if current_tokens <= budget {
+        return prompt_messages.to_vec();
+    }
+
+    // Find the boundary between system prefix and conversation messages
+    let system_prefix_end = prompt_messages
+        .iter()
+        .position(|msg| msg.source_message_id.is_some())
+        .unwrap_or(prompt_messages.len());
+
+    // Preserve the last 4 messages (2 turns: user + assistant) for coherence
+    let preserve_recent = 4;
+    let conversation_len = prompt_messages.len().saturating_sub(system_prefix_end);
+    let min_preserve_from_end = preserve_recent.min(conversation_len);
+
+    // Calculate how many messages we need to drop from the start of conversation
+    let tool_tokens = crate::services::token_estimator::estimate_tool_definitions_tokens(tools);
+    let available_for_messages = budget.saturating_sub(tool_tokens);
+
+    let mut result: Vec<ModelPromptMessageDto> = Vec::new();
+    // Always keep system prefix
+    for msg in &prompt_messages[..system_prefix_end] {
+        result.push(msg.clone());
+    }
+
+    // Add conversation messages from oldest to newest, dropping from the start
+    // if budget would be exceeded, but always preserving the last `min_preserve_from_end`
+    let conversation_messages = &prompt_messages[system_prefix_end..];
+    let drop_limit = conversation_messages.len().saturating_sub(min_preserve_from_end);
+    let mut accumulated_tokens: u32 = 0;
+
+    for (i, msg) in conversation_messages.iter().enumerate() {
+        let remaining_slots = conversation_messages.len().saturating_sub(i);
+        if remaining_slots <= min_preserve_from_end {
+            // Always include the last few messages
+            result.push(msg.clone());
+            continue;
+        }
+        let msg_tokens = crate::services::token_estimator::estimate_dto_message_tokens(msg);
+        if accumulated_tokens + msg_tokens <= available_for_messages || i >= drop_limit {
+            accumulated_tokens += msg_tokens;
+            result.push(msg.clone());
+        }
+        // else: skip this old message to save tokens
+    }
+
+    let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(&result, tools);
+    tracing::info!(
+        old_count = prompt_messages.len(),
+        new_count = result.len(),
+        old_tokens = current_tokens,
+        new_tokens,
+        budget,
+        "apply_deterministic_budget_trim: trimmed prompt"
+    );
+
+    result
+}
+
+fn apply_compressed_context_to_runtime_prompt(
+    prompt_messages: &[ModelPromptMessageDto],
+    summary_text: &str,
+    compressed_source_ids: &HashSet<String>,
+) -> Vec<ModelPromptMessageDto> {
+    let mut next = Vec::with_capacity(prompt_messages.len().saturating_add(1));
+    let mut index = 0usize;
+
+    // Keep leading synthetic system prompts stable for prompt-cache friendliness,
+    // but replace any older compressed summary with the newly persisted one.
+    while let Some(msg) = prompt_messages.get(index) {
+        if !(msg.source_message_id.is_none() && is_system_role(&msg.role)) {
+            break;
+        }
+        if !is_compressed_context_message(msg) {
+            next.push(msg.clone());
+        }
+        index += 1;
+    }
+
+    if !summary_text.trim().is_empty() {
+        next.push(ModelPromptMessageDto {
+            source_message_id: None,
+            role: "system".to_string(),
+            content: format!("[Compressed Context Summary]\n{}", summary_text.trim()),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
+
+    for msg in prompt_messages.iter().skip(index) {
+        if is_compressed_context_message(msg) {
+            continue;
+        }
+        if msg
+            .source_message_id
+            .as_ref()
+            .is_some_and(|id| compressed_source_ids.contains(id))
+        {
+            continue;
+        }
+        next.push(msg.clone());
+    }
+
+    next
+}
+
+/**
+ * Lightweight mid-loop context compression.
+ *
+ * Unlike the full `compress_context` (which calls a helper AI model), this
+ * function performs rule-based pruning: it scores prompt messages using the
+ * importance scorer, identifies low-value groups, and trims them from the
+ * front of the prompt to free space for the next iteration.
+ *
+ * This is intentionally synchronous (no AI call) to minimize latency within
+ * the ReAct loop. The full AI-powered compression happens at the end of the
+ * turn when `compress_context` is called from the frontend.
+ *
+ * The trimming only removes messages from the prompt array in-memory; the
+ * actual persisted messages in the database are not affected. The next call
+ * to `build_prompt_messages` will reconstruct the prompt from the database
+ * with the correct compressed context summary.
+ */
+async fn mid_loop_compress(
+    state: &State<'_, AppState>,
+    conversation_id: &str,
+    branch_id: &str,
+    model_id: &str,
+    prompt_messages: &[ModelPromptMessageDto],
+    tools: &[ToolDefinitionDto],
+    effective_budget: u32,
+    _trigger_threshold: u32,
+) -> Result<Option<MidLoopCompressInfo>, AppError> {
+    // Try the full AI-powered compression via helper_ai_service. The summary is
+    // persisted for the active branch and then applied to this in-flight prompt.
+    let compress_result = crate::services::helper_ai_service::compress_context(
+        state,
+        conversation_id,
+        branch_id,
+        model_id,
+    )
+    .await;
+
+    match compress_result {
+        Ok(result) => {
+            let compressed_source_ids: HashSet<String> = crate::repositories::compressed_contexts::find_latest_by_branch(
+                &state.db,
+                conversation_id,
+                branch_id,
+            )
+            .await
+            .map_err(AppError::from)?
+            .and_then(|row| serde_json::from_str::<Vec<String>>(&row.compressed_message_ids).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+            if compressed_source_ids.is_empty() {
+                tracing::warn!(
+                    conversation_id = %conversation_id,
+                    branch_id = %branch_id,
+                    "mid_loop_compress: persisted summary has no source ids"
+                );
+                return Ok(None);
+            }
+
+            let old_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                prompt_messages,
+                tools,
+            );
+            let next_prompt_messages = apply_compressed_context_to_runtime_prompt(
+                prompt_messages,
+                &result.summary_text,
+                &compressed_source_ids,
+            );
+            let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                &next_prompt_messages,
+                tools,
+            );
+            let tokens_saved = old_tokens.saturating_sub(new_tokens);
+
+            if tokens_saved == 0 && next_prompt_messages.len() >= prompt_messages.len() {
+                tracing::warn!(
+                    conversation_id = %conversation_id,
+                    branch_id = %branch_id,
+                    old_tokens,
+                    new_tokens,
+                    "mid_loop_compress: compression produced no in-flight token savings"
+                );
+                return Ok(None);
+            }
+
+            let new_ratio = if effective_budget > 0 {
+                new_tokens as f32 / effective_budget as f32
+            } else {
+                0.0
+            };
+            Ok(Some(MidLoopCompressInfo {
+                trimmed_groups: result.compressed_message_count,
+                tokens_saved,
+                new_ratio,
+                prompt_messages: next_prompt_messages,
+            }))
+        }
+        Err(e) => {
+            if is_expected_compression_noop(&e) {
+                tracing::info!(
+                    reason = %e.message,
+                    "mid_loop_compress: AI compression skipped"
+                );
+                return Ok(None);
+            }
+            // AI compression failed — fall back to deterministic budget trimming.
+            // Drop oldest non-system messages until the prompt fits within budget,
+            // preserving the system prefix and the most recent messages.
+            tracing::warn!(
+                error = %e.message,
+                "mid_loop_compress: AI compression failed, applying deterministic fallback"
+            );
+            let old_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                prompt_messages,
+                tools,
+            );
+            if old_tokens <= effective_budget {
+                return Ok(None);
+            }
+            let trimmed = apply_deterministic_budget_trim(prompt_messages, effective_budget, tools);
+            let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                &trimmed,
+                tools,
+            );
+            let tokens_saved = old_tokens.saturating_sub(new_tokens);
+            if tokens_saved == 0 {
+                return Ok(None);
+            }
+            let new_ratio = if effective_budget > 0 {
+                new_tokens as f32 / effective_budget as f32
+            } else {
+                0.0
+            };
+            Ok(Some(MidLoopCompressInfo {
+                trimmed_groups: 0,
+                tokens_saved,
+                new_ratio,
+                prompt_messages: trimmed,
+            }))
+        }
+    }
+}
+
+async fn maybe_compress_react_prompt(
+    state: &State<'_, AppState>,
+    request_id: &str,
+    iteration: u32,
+    model_id: &str,
+    conversation_id: &Option<String>,
+    branch_id: &Option<String>,
+    prompt_messages: &mut Vec<ModelPromptMessageDto>,
+    tools: &[ToolDefinitionDto],
+    context_budget_tokens: u32,
+    effective_input_budget: u32,
+    compression_trigger_tokens: u32,
+    channel: &Channel<ModelStreamEventDto>,
+) {
+    // Layer 0: Prune — truncate verbose tool_result content in older messages.
+    // This is a zero-cost, deterministic operation that doesn't require AI calls.
+    // Inspired by opencode's prune() which truncates old tool outputs to save tokens.
+    prune_old_tool_results(prompt_messages, iteration);
+
+    let prompt_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+        prompt_messages,
+        tools,
+    );
+    let msg_tokens: u32 = prompt_messages
+        .iter()
+        .map(crate::services::token_estimator::estimate_dto_message_tokens)
+        .sum();
+    let tool_def_tokens = crate::services::token_estimator::estimate_tool_definitions_tokens(tools);
+
+    tracing::info!(
+        request_id = %request_id,
+        iteration,
+        prompt_tokens,
+        msg_tokens,
+        tool_def_tokens,
+        trigger_threshold = compression_trigger_tokens,
+        effective_budget = effective_input_budget,
+        msg_count = prompt_messages.len(),
+        "react loop: context budget check"
+    );
+
+    let context_percentage = if context_budget_tokens > 0 {
+        (prompt_tokens as f32 / context_budget_tokens as f32) * 100.0
+    } else {
+        0.0
+    };
+    let _ = channel.send(ModelStreamEventDto::ContextStatusUpdated {
+        request_id: request_id.to_string(),
+        used_tokens: prompt_tokens,
+        total_tokens: context_budget_tokens,
+        percentage: if context_percentage.is_finite() { context_percentage } else { 0.0 },
+        message_count: prompt_messages.len() as u32,
+    });
+
+    if prompt_tokens < compression_trigger_tokens || effective_input_budget == 0 {
+        return;
+    }
+
+    let usage_ratio = prompt_tokens as f32 / effective_input_budget as f32;
+    let compression_level = crate::services::importance_scorer::CompressionLevel::from_usage_ratio(usage_ratio);
+    if compression_level == crate::services::importance_scorer::CompressionLevel::None {
+        return;
+    }
+
+    let Some(conv_id) = conversation_id.as_deref() else {
+        tracing::warn!(
+            request_id = %request_id,
+            prompt_tokens,
+            "react loop: context compression skipped because conversation_id is missing"
+        );
+        return;
+    };
+    let Some(branch_id) = branch_id.as_deref() else {
+        tracing::warn!(
+            request_id = %request_id,
+            prompt_tokens,
+            "react loop: context compression skipped because branch_id is missing"
+        );
+        return;
+    };
+
+    tracing::info!(
+        request_id = %request_id,
+        prompt_tokens,
+        effective_input_budget,
+        usage_ratio = format!("{:.2}", usage_ratio),
+        level = ?compression_level,
+        "react loop: mid-loop context compression triggered"
+    );
+
+    let _ = channel.send(ModelStreamEventDto::ContextCompressing {
+        request_id: request_id.to_string(),
+        level: match compression_level {
+            crate::services::importance_scorer::CompressionLevel::Level1 => 1,
+            crate::services::importance_scorer::CompressionLevel::Level2 => 2,
+            crate::services::importance_scorer::CompressionLevel::Level3 => 3,
+            _ => 0,
+        },
+        usage_ratio,
+    });
+
+    match mid_loop_compress(
+        state,
+        conv_id,
+        branch_id,
+        model_id,
+        prompt_messages,
+        tools,
+        effective_input_budget,
+        compression_trigger_tokens,
+    )
+    .await
+    {
+        Ok(Some(info)) => {
+            let compressed_count = info.trimmed_groups;
+            let tokens_saved = info.tokens_saved;
+            let new_usage_ratio = info.new_ratio;
+            *prompt_messages = info.prompt_messages;
+            tracing::info!(
+                request_id = %request_id,
+                compressed_count,
+                tokens_saved,
+                new_usage_ratio = format!("{:.2}", new_usage_ratio),
+                "react loop: mid-loop compression applied to in-flight prompt"
+            );
+            let _ = channel.send(ModelStreamEventDto::ContextCompressed {
+                request_id: request_id.to_string(),
+                compressed_count,
+                tokens_saved,
+                new_usage_ratio,
+            });
+        }
+        Ok(None) => {
+            tracing::info!(
+                request_id = %request_id,
+                "react loop: mid-loop compression skipped (no effective savings)"
+            );
+            let _ = channel.send(ModelStreamEventDto::ContextCompressionSkipped {
+                request_id: request_id.to_string(),
+                reason: "NO_EFFECTIVE_SAVINGS".to_string(),
+                usage_ratio,
+            });
+        }
+        Err(e) => {
+            let reason = e.message.clone();
+            tracing::warn!(
+                request_id = %request_id,
+                error = %reason,
+                "react loop: mid-loop compression failed, continuing with full prompt"
+            );
+            let _ = channel.send(ModelStreamEventDto::ContextCompressionSkipped {
+                request_id: request_id.to_string(),
+                reason,
+                usage_ratio,
+            });
         }
     }
 }
@@ -576,6 +1098,7 @@ async fn stream_final_response_without_tools(
         tools: vec![],
         tool_choice: None,
         conversation_id: initial_request.conversation_id.clone(),
+        branch_id: initial_request.branch_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
     };
 
@@ -608,9 +1131,12 @@ async fn run_react_loop(
     max_iterations: u32,
     max_consecutive_failures: u32,
     approval_timeout_secs: u32,
+    tool_execution_timeout_secs: u64,
 ) -> Result<ReactLoopOutcome, ModelStreamFailure> {
     let request_id = initial_request.request_id.clone();
     let conversation_id = initial_request.conversation_id.clone();
+    let branch_id = initial_request.branch_id.clone();
+    let model_id = initial_request.model_id.clone();
     let mut prompt_messages = initial_request.prompt_messages.clone();
     let current_tools = build_backend_enabled_tool_definitions(state).await;
     let allowed_tool_names: HashSet<String> = current_tools
@@ -618,6 +1144,21 @@ async fn run_react_loop(
         .map(|tool| tool.function.name.clone())
         .collect();
     let current_tool_choice = initial_request.tool_choice.clone();
+
+    // Resolve context window size for mid-loop compression checks.
+    let context_window_kb: i32 = crate::repositories::provider_models::find_by_id(&state.db, &model_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|m| m.context_window_kb)
+        .unwrap_or(64);
+    let context_budget_tokens = (context_window_kb.max(8) as u32) * 1000;
+    // Reserve ~8K tokens for model output + safety margin
+    let output_reservation: u32 = 8_000;
+    let effective_input_budget = context_budget_tokens.saturating_sub(output_reservation);
+    // Compression trigger threshold: 60% of effective budget
+    let compression_trigger_tokens = (effective_input_budget as f32 * 0.60) as u32;
+
     let shell_path = crate::repositories::app_kv::get(&state.db, "shell_path")
         .await
         .ok()
@@ -681,6 +1222,7 @@ async fn run_react_loop(
                     first.content.push_str(&guidance);
                 } else {
                     prompt_messages.insert(0, ModelPromptMessageDto {
+                        source_message_id: None,
                         role: "system".to_string(),
                         content: guidance,
                         reasoning_content: None,
@@ -691,6 +1233,7 @@ async fn run_react_loop(
                 }
             } else {
                 prompt_messages.insert(0, ModelPromptMessageDto {
+                    source_message_id: None,
                     role: "system".to_string(),
                     content: guidance,
                     reasoning_content: None,
@@ -708,6 +1251,22 @@ async fn run_react_loop(
             return Ok(ReactLoopOutcome::Cancelled);
         }
 
+        maybe_compress_react_prompt(
+            state,
+            &request_id,
+            iteration,
+            &model_id,
+            &conversation_id,
+            &branch_id,
+            &mut prompt_messages,
+            &current_tools,
+            context_budget_tokens,
+            effective_input_budget,
+            compression_trigger_tokens,
+            channel,
+        )
+        .await;
+
         // Build request for this iteration
         let request = ResolvedModelStreamRequest {
             request_id: request_id.clone(),
@@ -722,6 +1281,7 @@ async fn run_react_loop(
             tools: current_tools.clone(),
             tool_choice: current_tool_choice.clone(),
             conversation_id: conversation_id.clone(),
+            branch_id: branch_id.clone(),
             workspace_path: initial_request.workspace_path.clone(),
         };
 
@@ -832,6 +1392,7 @@ async fn run_react_loop(
 
                 // Add the assistant message with tool_calls to the prompt
                 let assistant_tool_call_message = ModelPromptMessageDto {
+                    source_message_id: None,
                     role: "assistant".to_string(),
                     content: String::new(),
                     reasoning_content,
@@ -888,7 +1449,7 @@ async fn run_react_loop(
                         );
 
                         // Wait for user response with backend-side timeout
-                        let approved = match tokio::time::timeout(
+                        let (approved, was_timeout) = match tokio::time::timeout(
                             std::time::Duration::from_secs(approval_timeout_secs as u64),
                             rx,
                         ).await {
@@ -898,22 +1459,22 @@ async fn run_react_loop(
                                     approved,
                                     "react loop: approval received, resuming"
                                 );
-                                approved
+                                (approved, false)
                             }
                             Ok(Err(_)) => {
                                 tracing::warn!(
                                     approval_id = %approval_id,
                                     "approval channel closed, treating as rejected"
                                 );
-                                false
+                                (false, false)
                             }
                             Err(_) => {
                                 tracing::warn!(
                                     approval_id = %approval_id,
                                     timeout_secs = approval_timeout_secs,
-                                    "approval timed out (backend), treating as rejected"
+                                    "approval timed out (backend)"
                                 );
-                                false
+                                (false, true)
                             }
                         };
 
@@ -924,7 +1485,6 @@ async fn run_react_loop(
                         }
 
                         if approved {
-                            // User approved — execute the tool (with MCP routing)
                             match execute_tool_checked(
                                 state,
                                 &allowed_tool_names,
@@ -932,20 +1492,35 @@ async fn run_react_loop(
                                 &tc.function.arguments,
                                 tool_context.clone(),
                                 &cancel_rx,
+                                tool_execution_timeout_secs,
                             )
                             .await {
                                 Ok(result) => result,
                                 Err(outcome) => return Ok(outcome),
                             }
+                        } else if was_timeout {
+                            tracing::info!(
+                                approval_id = %approval_id,
+                                timeout_secs = approval_timeout_secs,
+                                "tool approval timed out"
+                            );
+                            crate::services::tool_executor::ToolExecutionResult {
+                                success: false,
+                                output: format!(
+                                    "Approval timed out after {} seconds — user did not respond in time. \
+                                     This is NOT a user rejection. The user may have stepped away or is busy. \
+                                     You may retry this tool call if appropriate.",
+                                    approval_timeout_secs
+                                ),
+                            }
                         } else {
-                            // User rejected
                             tracing::info!(
                                 approval_id = %approval_id,
                                 "user rejected tool execution"
                             );
                             crate::services::tool_executor::ToolExecutionResult {
                                 success: false,
-                                output: "User rejected this operation.".to_string(),
+                                output: "User explicitly rejected this operation.".to_string(),
                             }
                         }
                     } else {
@@ -957,6 +1532,7 @@ async fn run_react_loop(
                             &tc.function.arguments,
                             tool_context.clone(),
                             &cancel_rx,
+                            tool_execution_timeout_secs,
                         )
                         .await {
                             Ok(result) => result,
@@ -982,6 +1558,7 @@ async fn run_react_loop(
 
                     // Add tool result to prompt messages
                     let tool_result_message = ModelPromptMessageDto {
+                        source_message_id: None,
                         role: "tool".to_string(),
                         content: result.output.clone(),
                         reasoning_content: None,
@@ -1024,6 +1601,7 @@ async fn run_react_loop(
                                     success: false,
                                 });
                                 prompt_messages.push(ModelPromptMessageDto {
+                                    source_message_id: None,
                                     role: "tool".to_string(),
                                     content: skipped_output,
                                     reasoning_content: None,
@@ -1034,6 +1612,7 @@ async fn run_react_loop(
                             }
 
                             prompt_messages.push(ModelPromptMessageDto {
+                                source_message_id: None,
                                 role: "system".to_string(),
                                 content: format!(
                                     "Tool execution has failed {} consecutive times. You cannot call any more tools in this response. \
@@ -1073,6 +1652,7 @@ async fn run_react_loop(
     // synthesize a `tool` message here: strict providers such as DeepSeek only
     // accept tool messages that directly answer a preceding assistant tool call.
     let limit_message = ModelPromptMessageDto {
+        source_message_id: None,
         role: "system".to_string(),
         content: format!(
             "Maximum tool call rounds reached ({}). You cannot call any more tools in this response. \
@@ -1101,6 +1681,7 @@ async fn run_react_loop(
         tools: vec![], // No tools — force text response
         tool_choice: None,
         conversation_id: conversation_id.clone(),
+        branch_id: branch_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
     };
 
@@ -1208,6 +1789,7 @@ pub async fn update_tool_settings(
     max_iterations: Option<u32>,
     max_consecutive_failures: Option<u32>,
     approval_timeout_secs: Option<u32>,
+    tool_execution_timeout_secs: Option<u64>,
 ) -> Result<crate::state::ToolLimits, AppError> {
     let (previous_limits, next_limits) = {
         let mut limits = state.tool_limits.lock().await;
@@ -1220,6 +1802,9 @@ pub async fn update_tool_settings(
         }
         if let Some(v) = approval_timeout_secs {
             limits.approval_timeout_secs = v;
+        }
+        if let Some(v) = tool_execution_timeout_secs {
+            limits.tool_execution_timeout_secs = v;
         }
         *limits = limits.clone().normalized();
         (previous_limits, limits.clone())
@@ -1239,6 +1824,7 @@ pub async fn update_tool_settings(
         max_iterations = next_limits.max_iterations,
         max_consecutive_failures = next_limits.max_consecutive_failures,
         approval_timeout_secs = next_limits.approval_timeout_secs,
+        tool_execution_timeout_secs = next_limits.tool_execution_timeout_secs,
         "updated"
     );
     Ok(next_limits)
@@ -2176,22 +2762,18 @@ pub async fn get_context_status(
         None => String::new(),
     };
 
-    let input = crate::dto::messages::BuildPromptMessagesInput {
+    let raw_input = crate::dto::messages::BuildPromptMessagesInput {
         conversation_id: conversation_id.clone(),
-        up_to_message_id,
+        up_to_message_id: up_to_message_id.clone(),
         max_tokens_budget: None,
         branch_id: Some(branch_id.clone()),
     };
 
-    let messages = crate::services::prompt_service::build_prompt_messages(&state.db, &input)
+    let raw_messages = crate::services::prompt_service::build_prompt_messages(&state.db, &raw_input)
         .await
         .map_err(|e| AppError::db_error(&format!("Failed to build prompt: {e}")))?;
 
-    let mut breakdown = crate::services::token_estimator::estimate_messages_token_breakdown(&messages);
     let tool_definitions = build_backend_enabled_tool_definitions(&state).await;
-    breakdown.tool_prompt_tokens =
-        crate::services::token_estimator::estimate_tool_definitions_tokens(&tool_definitions);
-    let used_tokens = crate::services::token_estimator::sum_context_token_breakdown(&breakdown);
     let context_window_kb = crate::repositories::provider_models::get_context_window_kb(
         &state.db,
         &model_id,
@@ -2199,17 +2781,68 @@ pub async fn get_context_status(
     .await
     .unwrap_or(64);
     let total_tokens = (context_window_kb as u32) * 1000;
+
+    let mut raw_breakdown = crate::services::token_estimator::estimate_messages_token_breakdown(&raw_messages);
+    let raw_message_breakdown_tokens = crate::services::token_estimator::sum_context_token_breakdown(&raw_breakdown);
+    let raw_used_tokens = crate::services::token_estimator::estimate_prompt_model_request_tokens(
+        &raw_messages,
+        &tool_definitions,
+    );
+    // Attribute tool schemas plus request-level overhead to tool_prompt_tokens
+    // so the UI total matches the same request-level estimate used by streaming.
+    raw_breakdown.tool_prompt_tokens = raw_used_tokens.saturating_sub(raw_message_breakdown_tokens);
+
+    // The send path applies deterministic prompt trimming before streaming.
+    // Report `used_tokens` on the same basis, while keeping `raw_used_tokens`
+    // available for diagnostics and deciding whether compression is worthwhile.
+    let total_for_budget = total_tokens.max(1000);
+    let default_output_reserve = 512u32.max((total_for_budget as f32 * 0.10).floor() as u32);
+    let output_reserve = default_output_reserve.min((total_for_budget as f32 * 0.40).floor() as u32);
+    let send_budget = (total_for_budget as f32 * 0.90).floor() as u32;
+    let prompt_budget_tokens = 1000u32.max(
+        send_budget
+            .saturating_sub(raw_breakdown.tool_prompt_tokens)
+            .saturating_sub(output_reserve),
+    );
+
+    let budgeted_input = crate::dto::messages::BuildPromptMessagesInput {
+        conversation_id: conversation_id.clone(),
+        up_to_message_id,
+        max_tokens_budget: Some(prompt_budget_tokens.min(i32::MAX as u32) as i32),
+        branch_id: Some(branch_id.clone()),
+    };
+    let messages = crate::services::prompt_service::build_prompt_messages(&state.db, &budgeted_input)
+        .await
+        .map_err(|e| AppError::db_error(&format!("Failed to build budgeted prompt: {e}")))?;
+
+    let mut breakdown = crate::services::token_estimator::estimate_messages_token_breakdown(&messages);
+    let message_breakdown_tokens = crate::services::token_estimator::sum_context_token_breakdown(&breakdown);
+    let used_tokens = crate::services::token_estimator::estimate_prompt_model_request_tokens(
+        &messages,
+        &tool_definitions,
+    );
+    breakdown.tool_prompt_tokens = used_tokens.saturating_sub(message_breakdown_tokens);
+
     let percentage = if total_tokens > 0 {
         (used_tokens as f32 / total_tokens as f32) * 100.0
+    } else {
+        0.0
+    };
+    let raw_percentage = if total_tokens > 0 {
+        (raw_used_tokens as f32 / total_tokens as f32) * 100.0
     } else {
         0.0
     };
 
     Ok(crate::dto::streaming::ContextStatusDto {
         used_tokens,
+        raw_used_tokens,
         total_tokens,
         percentage,
+        raw_percentage,
         message_count: messages.len() as u32,
+        raw_message_count: raw_messages.len() as u32,
+        prompt_budget_tokens,
         breakdown,
     })
 }
@@ -2971,6 +3604,9 @@ pub struct CompressContextDto {
     pub summary_text: String,
     pub compressed_message_count: u32,
     pub estimated_tokens: u32,
+    pub skipped: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
 }
 
 #[tauri::command]
@@ -2980,17 +3616,51 @@ pub async fn compress_context(
     branch_id: String,
     model_id: String,
 ) -> Result<CompressContextDto, AppError> {
-    let result = crate::services::helper_ai_service::compress_context(
+    let result = match crate::services::helper_ai_service::compress_context(
         &state, &conversation_id, &branch_id, &model_id,
     )
-    .await?;
+    .await
+    {
+        Ok(result) => result,
+        Err(error) if is_expected_compression_noop(&error) => {
+            let skip_reason = error.message.clone();
+            tracing::info!(
+                conversation_id = %conversation_id,
+                branch_id = %branch_id,
+                reason = %skip_reason,
+                "compress_context: no-op"
+            );
+            return Ok(CompressContextDto {
+                compressed_id: String::new(),
+                summary_text: String::new(),
+                compressed_message_count: 0,
+                estimated_tokens: 0,
+                skipped: true,
+                skip_reason: Some(skip_reason),
+            });
+        }
+        Err(error) => return Err(error),
+    };
 
     Ok(CompressContextDto {
         compressed_id: result.compressed_id,
         summary_text: result.summary_text,
         compressed_message_count: result.compressed_message_count,
         estimated_tokens: result.estimated_tokens,
+        skipped: false,
+        skip_reason: None,
     })
+}
+
+fn is_expected_compression_noop(error: &AppError) -> bool {
+    matches!(&error.code, crate::error::AppErrorCode::InvalidArgument)
+        && matches!(
+            error.message.as_str(),
+            "No compressible content"
+                | "Context usage is below compression threshold"
+                | "Not enough messages to compress"
+                | "Branch has no messages"
+        )
 }
 
 /// Render a skill template by replacing {{variable}} placeholders.

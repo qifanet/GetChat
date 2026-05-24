@@ -60,6 +60,8 @@ pub struct ResolvedModelStreamRequest {
     pub tool_choice: Option<String>,
     /// Conversation ID for context-aware tools (e.g. todo scoping).
     pub conversation_id: Option<String>,
+    /// Branch ID for branch-aware context compression.
+    pub branch_id: Option<String>,
     /// Per-conversation workspace root for file-scoped tools.
     pub workspace_path: Option<String>,
 }
@@ -263,6 +265,7 @@ pub async fn resolve_stream_request(
         tools: input.tools.clone(),
         tool_choice: input.tool_choice.clone(),
         conversation_id: input.conversation_id.clone(),
+        branch_id: input.branch_id.clone(),
         workspace_path,
     })
 }
@@ -1564,6 +1567,7 @@ mod tests {
     fn test_validate_prompt_tool_sequence_accepts_answered_tool_call() {
         let messages = vec![
             ModelPromptMessageDto {
+                source_message_id: None,
                 role: "USER".to_string(),
                 content: "Please look this up".to_string(),
                 reasoning_content: None,
@@ -1572,6 +1576,7 @@ mod tests {
                 name: None,
             },
             ModelPromptMessageDto {
+                source_message_id: None,
                 role: "ASSISTANT".to_string(),
                 content: String::new(),
                 reasoning_content: None,
@@ -1587,6 +1592,7 @@ mod tests {
                 name: None,
             },
             ModelPromptMessageDto {
+                source_message_id: None,
                 role: "TOOL".to_string(),
                 content: "result".to_string(),
                 reasoning_content: None,
@@ -1603,6 +1609,7 @@ mod tests {
     #[test]
     fn test_validate_prompt_tool_sequence_rejects_orphan_tool_message() {
         let messages = vec![ModelPromptMessageDto {
+            source_message_id: None,
             role: "tool".to_string(),
             content: "orphan".to_string(),
             reasoning_content: None,
@@ -1621,6 +1628,7 @@ mod tests {
     fn test_validate_prompt_tool_sequence_rejects_missing_tool_result() {
         let messages = vec![
             ModelPromptMessageDto {
+                source_message_id: None,
                 role: "assistant".to_string(),
                 content: String::new(),
                 reasoning_content: None,
@@ -1636,6 +1644,7 @@ mod tests {
                 name: None,
             },
             ModelPromptMessageDto {
+                source_message_id: None,
                 role: "user".to_string(),
                 content: "continue".to_string(),
                 reasoning_content: None,
@@ -1654,6 +1663,7 @@ mod tests {
     #[test]
     fn test_serialize_assistant_tool_calls_uses_empty_string_content() {
         let value = serialize_prompt_message(&ModelPromptMessageDto {
+            source_message_id: None,
             role: "ASSISTANT".to_string(),
             content: String::new(),
             reasoning_content: None,
@@ -1679,6 +1689,7 @@ mod tests {
     #[test]
     fn test_serialize_tool_message_normalizes_role() {
         let value = serialize_prompt_message(&ModelPromptMessageDto {
+            source_message_id: None,
             role: "TOOL".to_string(),
             content: "{\"ok\":true}".to_string(),
             reasoning_content: None,
@@ -1718,6 +1729,7 @@ mod tests {
             model_id: "gpt-4.1-mini".to_string(),
             request_model_name: "gpt-4.1-mini".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
+                source_message_id: None,
                 role: "USER".to_string(),
                 content: "Hello provider".to_string(),
                 reasoning_content: None,
@@ -1734,6 +1746,7 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             conversation_id: None,
+            branch_id: None,
             workspace_path: None,
         };
 
@@ -1800,6 +1813,7 @@ mod tests {
             model_id: "llama3.1".to_string(),
             request_model_name: "llama3.1".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
+                source_message_id: None,
                 role: "USER".to_string(),
                 content: "Stream from ollama".to_string(),
                 reasoning_content: None,
@@ -1816,6 +1830,7 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             conversation_id: None,
+            branch_id: None,
             workspace_path: None,
         };
 
@@ -1887,6 +1902,7 @@ mod tests {
             model_id: "llama3.1".to_string(),
             request_model_name: "llama3.1".to_string(),
             prompt_messages: vec![ModelPromptMessageDto {
+                source_message_id: None,
                 role: "USER".to_string(),
                 content: "Fallback please".to_string(),
                 reasoning_content: None,
@@ -1898,6 +1914,7 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             conversation_id: None,
+            branch_id: None,
             workspace_path: None,
         };
 

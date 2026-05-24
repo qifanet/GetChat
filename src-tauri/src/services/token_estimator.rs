@@ -3,8 +3,9 @@
  * @description Character-based token estimation for context window management.
  *
  * Uses simple heuristic:
- *   - CJK characters: ~2 chars per token
- *   - Non-CJK characters: ~3 chars per token
+ *   - CJK characters: ~0.8 token per char
+ *   - ASCII letters/digits: ~4 chars per token
+ *   - JSON punctuation/whitespace: discounted to avoid tool-output overcount
  *
  * This is intentionally imprecise — actual tokenization depends on the model's
  * BPE vocabulary. The estimate is used for context budgeting, not billing.
@@ -12,53 +13,124 @@
 
 use crate::dto::common::ToolDefinitionDto;
 use crate::dto::streaming::ContextTokenBreakdownDto;
+use crate::dto::streaming::ModelPromptMessageDto;
 use crate::services::prompt_service::PromptMessage;
+use serde_json::{json, Value};
 
-/// Estimate the number of tokens in a text string.
+const MESSAGE_FORMAT_OVERHEAD_TOKENS: u32 = 4;
+const REQUEST_FORMAT_OVERHEAD_TOKENS: u32 = 12;
+const REQUEST_ESTIMATE_SAFETY_MULTIPLIER: f32 = 1.05;
+
+/// Estimate the number of tokens in a text string using conservative
+/// character-class heuristics.
 ///
-/// CJK characters (Unicode ranges for Han, Hiragana, Katakana, Hangul, CJK
-/// punctuation) are counted at ~0.5 tokens per char. All other characters
-/// are counted at ~0.33 tokens per char (≈3 chars per token).
+/// This intentionally favors context-safety over billing accuracy, but avoids
+/// the previous over-counting of JSON-heavy tool results where every quote,
+/// comma, and bracket was scored too aggressively.
 pub fn estimate_tokens(text: &str) -> u32 {
-    let mut cjk_chars: u32 = 0;
-    let mut other_chars: u32 = 0;
-
+    if text.is_empty() {
+        return 0;
+    }
+    let mut total: f32 = 0.0;
     for ch in text.chars() {
-        if is_cjk(ch) {
-            cjk_chars += 1;
+        if ch.is_ascii() {
+            match ch {
+                ' ' | '\t' | '\n' | '\r' => total += 0.05,
+                '{' | '}' | '[' | ']' | '(' | ')' | ',' | ':' | ';' | '"' => total += 0.18,
+                '0'..='9' => total += 0.25,
+                'A'..='Z' | 'a'..='z' | '_' | '-' => total += 0.25,
+                _ => total += 0.22,
+            }
+        } else if is_cjk(ch) {
+            total += 0.8;
         } else {
-            other_chars += 1;
+            total += 0.5;
         }
     }
+    total.ceil() as u32
+}
 
-    // CJK: ~2 chars per token → chars / 2
-    // Non-CJK: ~3 chars per token → chars / 3
-    let cjk_tokens = (cjk_chars + 1) / 2;
-    let other_tokens = (other_chars + 2) / 3;
-    cjk_tokens + other_tokens
+fn normalize_role_for_provider(role: &str) -> &'static str {
+    match role {
+        "SYSTEM" | "system" => "system",
+        "USER" | "user" => "user",
+        "ASSISTANT" | "assistant" => "assistant",
+        "TOOL" | "tool" => "tool",
+        _ => "user",
+    }
+}
+
+fn prompt_message_provider_json(msg: &PromptMessage) -> Value {
+    let role = normalize_role_for_provider(&msg.role);
+    let mut value = json!({
+        "role": role,
+        "content": &msg.content,
+    });
+
+    if let Some(reasoning_content) = msg
+        .reasoning_content
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        value["reasoning_content"] = json!(reasoning_content);
+    }
+    if let Some(tool_calls) = &msg.tool_calls {
+        value["tool_calls"] = json!(tool_calls);
+    }
+    if let Some(tool_call_id) = &msg.tool_call_id {
+        value["tool_call_id"] = json!(tool_call_id);
+    }
+    if let Some(name) = &msg.name {
+        value["name"] = json!(name);
+    }
+
+    value
+}
+
+fn dto_message_provider_json(msg: &ModelPromptMessageDto) -> Value {
+    let role = normalize_role_for_provider(&msg.role);
+    let mut value = json!({
+        "role": role,
+        "content": &msg.content,
+    });
+
+    if let Some(reasoning_content) = msg
+        .reasoning_content
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        value["reasoning_content"] = json!(reasoning_content);
+    }
+    if let Some(tool_calls) = &msg.tool_calls {
+        value["tool_calls"] = json!(tool_calls);
+    }
+    if let Some(tool_call_id) = &msg.tool_call_id {
+        value["tool_call_id"] = json!(tool_call_id);
+    }
+    if let Some(name) = &msg.name {
+        value["name"] = json!(name);
+    }
+
+    value
+}
+
+fn apply_request_safety_margin(tokens: u32) -> u32 {
+    ((tokens as f32) * REQUEST_ESTIMATE_SAFETY_MULTIPLIER).ceil() as u32
 }
 
 /// Estimate tokens for one prompt message including model-format overhead.
 pub fn estimate_prompt_message_tokens(msg: &PromptMessage) -> u32 {
-    // Each message has overhead for role label, formatting, etc. (~4 tokens)
-    let mut total: u32 = 4;
-    total += estimate_tokens(&msg.content);
-    if let Some(reasoning_content) = &msg.reasoning_content {
-        total += estimate_tokens(reasoning_content);
-    }
-    if let Some(name) = &msg.name {
-        total += estimate_tokens(name);
-    }
-    if let Some(tool_calls) = &msg.tool_calls {
-        for tc in tool_calls {
-            total += estimate_tokens(&tc.function.name);
-            total += estimate_tokens(&tc.function.arguments);
-        }
-    }
-    if let Some(tool_call_id) = &msg.tool_call_id {
-        total += estimate_tokens(tool_call_id);
-    }
-    total
+    MESSAGE_FORMAT_OVERHEAD_TOKENS
+        + estimate_tokens(&prompt_message_provider_json(msg).to_string())
+}
+
+/// Full token estimation for `ModelPromptMessageDto` — accounts for all fields
+/// including tool_calls, reasoning_content, tool_call_id, and name.
+pub fn estimate_dto_message_tokens(msg: &ModelPromptMessageDto) -> u32 {
+    MESSAGE_FORMAT_OVERHEAD_TOKENS
+        + estimate_tokens(&dto_message_provider_json(msg).to_string())
 }
 
 /// Estimate context usage by category for UI diagnostics.
@@ -113,16 +185,40 @@ pub fn sum_context_token_breakdown(breakdown: &ContextTokenBreakdownDto) -> u32 
 
 /// Estimate tokens used by tool definitions sent alongside chat messages.
 pub fn estimate_tool_definitions_tokens(tools: &[ToolDefinitionDto]) -> u32 {
-    tools
-        .iter()
-        .map(|tool| {
-            // Function/tool definitions are serialized beside messages and also
-            // consume context budget, even though they are not chat messages.
-            6 + estimate_tokens(&tool.function.name)
-                + estimate_tokens(&tool.function.description)
-                + estimate_tokens(&tool.function.parameters.to_string())
-        })
-        .sum()
+    if tools.is_empty() {
+        return 0;
+    }
+
+    // Tool definitions are sent as a JSON array beside chat messages. Estimating
+    // the serialized shape keeps UI status and ReAct checks on the same basis.
+    6 + estimate_tokens(&serde_json::to_string(tools).unwrap_or_default())
+}
+
+/// Estimate a full runtime model request: chat messages, tool definitions, and
+/// request-level formatting overhead. This is the preferred entry point for
+/// ReAct loop context-budget checks.
+pub fn estimate_model_request_tokens(
+    messages: &[ModelPromptMessageDto],
+    tools: &[ToolDefinitionDto],
+) -> u32 {
+    let message_tokens: u32 = messages.iter().map(estimate_dto_message_tokens).sum();
+    let raw = message_tokens
+        .saturating_add(estimate_tool_definitions_tokens(tools))
+        .saturating_add(REQUEST_FORMAT_OVERHEAD_TOKENS);
+    apply_request_safety_margin(raw)
+}
+
+/// Estimate a full request from persisted prompt messages. Used by context UI
+/// status so it stays consistent with runtime streaming checks.
+pub fn estimate_prompt_model_request_tokens(
+    messages: &[PromptMessage],
+    tools: &[ToolDefinitionDto],
+) -> u32 {
+    let message_tokens: u32 = messages.iter().map(estimate_prompt_message_tokens).sum();
+    let raw = message_tokens
+        .saturating_add(estimate_tool_definitions_tokens(tools))
+        .saturating_add(REQUEST_FORMAT_OVERHEAD_TOKENS);
+    apply_request_safety_margin(raw)
 }
 
 /// Check if a character falls within CJK Unicode ranges.
@@ -148,22 +244,21 @@ mod tests {
 
     #[test]
     fn test_estimate_ascii() {
-        // "Hello world" = 11 chars, all non-CJK → ceil(11/3) = 4
+        // "Hello world" = 10 letters * 0.25 + 1 space * 0.05 = 2.55 → ceil = 3
         let tokens = estimate_tokens("Hello world");
-        assert_eq!(tokens, 4);
+        assert_eq!(tokens, 3);
     }
 
     #[test]
     fn test_estimate_cjk() {
-        // "你好世界" = 4 CJK chars → ceil(4/2) = 2
+        // "你好世界" = 4 CJK chars * 0.8 = 3.2 → 4
         let tokens = estimate_tokens("你好世界");
-        assert_eq!(tokens, 2);
+        assert_eq!(tokens, 4);
     }
 
     #[test]
     fn test_estimate_mixed() {
-        // "Hello 你好" = 5 non-CJK chars (including space) + 2 CJK chars
-        // non-CJK: ceil(5/3) = 2, CJK: ceil(2/2) = 1, total = 3
+        // "Hello 你好" = 5 letters * 0.25 + 1 space * 0.05 + 2 CJK * 0.8 = 2.9 → 3
         let tokens = estimate_tokens("Hello 你好");
         assert_eq!(tokens, 3);
     }

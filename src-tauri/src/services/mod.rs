@@ -10,6 +10,7 @@
  */
 
 pub mod helper_ai_service;
+pub mod importance_scorer;
 pub mod invariant_service;
 pub mod mcp_client;
 pub mod model_stream_service;

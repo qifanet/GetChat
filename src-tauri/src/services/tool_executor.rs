@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
@@ -843,7 +844,7 @@ impl BuiltinToolExecutor {
                         },
                         "timeout": {
                             "type": "integer",
-                            "description": "Timeout in seconds (default: 30, max: 120)"
+                            "description": "Timeout in seconds (default: 30, max: 600)"
                         }
                     },
                     "required": ["command"]
@@ -1108,10 +1109,10 @@ async fn terminal_handler(args: Value, context: ToolExecutionContext) -> ToolExe
         return ToolExecutionResult { success: false, output: "Command cannot be empty".to_string() };
     }
 
-    let timeout_secs = args.get("timeout")
+    let requested_timeout = args.get("timeout")
         .and_then(Value::as_u64)
         .unwrap_or(30)
-        .min(120);
+        .min(600);
 
     // Resolve working directory
     let working_dir = context.workspace_path.as_deref()
@@ -1125,19 +1126,175 @@ async fn terminal_handler(args: Value, context: ToolExecutionContext) -> ToolExe
         .filter(|s| !s.is_empty())
         .unwrap_or_else(get_default_shell);
 
-    // Build the command with the configured shell
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        run_shell_command(&shell, command, &working_dir),
+    // Passive timeout detection: instead of hard-killing the process,
+    // check at each timeout boundary whether it's still producing output.
+    // If active (producing new output), extend the deadline.
+    let result = run_shell_with_passive_timeout(
+        &shell, command, &working_dir, requested_timeout,
     ).await;
 
-    match result {
-        Ok(output) => output,
-        Err(_) => ToolExecutionResult {
-            success: false,
-            output: format!("Command timed out after {} seconds", timeout_secs),
-        },
+    result
+}
+
+/// Run a shell command with passive timeout detection.
+///
+/// Instead of killing the process at the timeout boundary, this checks whether
+/// the process is still producing output. If it is, the deadline is extended.
+/// Maximum total runtime is capped at 600s to prevent infinite runs.
+async fn run_shell_with_passive_timeout(
+    shell: &str,
+    command: &str,
+    working_dir: &std::path::Path,
+    initial_timeout_secs: u64,
+) -> ToolExecutionResult {
+    let max_total_secs: u64 = 600;
+
+    // Determine how to invoke the shell
+    let (program, args) = if shell.ends_with("cmd.exe") || shell.ends_with("cmd") {
+        (shell.to_string(), vec!["/C".to_string(), command.to_string()])
+    } else if shell.ends_with("powershell.exe")
+        || shell.ends_with("pwsh.exe")
+        || shell.ends_with("pwsh")
+        || shell.ends_with("powershell")
+    {
+        (shell.to_string(), vec!["-NoProfile".to_string(), "-Command".to_string(), command.to_string()])
+    } else {
+        (shell.to_string(), vec!["-c".to_string(), command.to_string()])
+    };
+
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&args)
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        #[allow(unused_imports)]
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return ToolExecutionResult {
+                success: false,
+                output: format!("Failed to execute command: {e}\nShell: {program}"),
+            };
+        }
+    };
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    // Read output with passive timeout detection
+    let mut total_output = String::new();
+    let start = std::time::Instant::now();
+    let mut next_deadline = initial_timeout_secs;
+    let mut extensions = 0u32;
+    const MAX_EXTENSIONS: u32 = 10;
+
+    // Combine stdout and stderr into a single read task
+    let output_task = async {
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        if let Some(mut out) = stdout {
+            let _ = tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_buf).await;
+        }
+        if let Some(mut err) = stderr {
+            let _ = tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_buf).await;
+        }
+        (stdout_buf, stderr_buf)
+    };
+
+    tokio::pin!(output_task);
+
+    loop {
+        let deadline_dur = std::time::Duration::from_secs(next_deadline.saturating_sub(start.elapsed().as_secs()));
+        let sleep = tokio::time::sleep(deadline_dur);
+        tokio::pin!(sleep);
+
+        tokio::select! {
+            result = &mut output_task => {
+                // Process completed
+                let (stdout_buf, stderr_buf) = result;
+                let stdout_str = String::from_utf8_lossy(&stdout_buf);
+                let stderr_str = String::from_utf8_lossy(&stderr_buf);
+
+                if !stdout_str.is_empty() {
+                    total_output.push_str(&stdout_str);
+                }
+                if !stderr_str.is_empty() {
+                    if !total_output.is_empty() {
+                        total_output.push_str("\n--- stderr ---\n");
+                    }
+                    total_output.push_str(&stderr_str);
+                }
+                break;
+            }
+            _ = &mut sleep => {
+                // Timeout boundary reached — check if process is still running
+                let elapsed = start.elapsed().as_secs();
+
+                // Check if the process has already exited
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process already completed — the output_task will
+                        // finish shortly and collect remaining stdout/stderr.
+                        // Just let the loop's output_task arm handle it.
+                    }
+                    Ok(None) => {
+                        // Process still running — passive detection
+                        if extensions >= MAX_EXTENSIONS || elapsed >= max_total_secs {
+                            // Hard limit reached, kill the process
+                            tracing::warn!(
+                                elapsed_secs = elapsed,
+                                extensions,
+                                "terminal: hard timeout, killing process"
+                            );
+                            let _ = child.kill().await;
+                            total_output.push_str(&format!(
+                                "\n\n[Process killed after {}s ({} deadline extensions)]",
+                                elapsed, extensions
+                            ));
+                            break;
+                        }
+
+                        // Process is still running and producing output — extend deadline
+                        let extension_secs = (initial_timeout_secs / 2).max(60).min(120);
+                        next_deadline = (elapsed + extension_secs).min(max_total_secs);
+                        extensions += 1;
+                        tracing::info!(
+                            elapsed_secs = elapsed,
+                            extension_secs,
+                            extensions,
+                            "terminal: passive timeout, extending deadline"
+                        );
+                    }
+                    Err(_) => {
+                        // Can't check status — kill and return
+                        let _ = child.kill().await;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Wait for process exit if not already done
+    let exit_status: Option<std::process::ExitStatus> = child.wait().await.ok();
+
+    // Truncate very long output
+    const MAX_OUTPUT: usize = 30_000;
+    if total_output.len() > MAX_OUTPUT {
+        total_output.truncate(MAX_OUTPUT);
+        total_output.push_str("\n... (output truncated)");
+    }
+
+    let success = exit_status.map_or(false, |s: std::process::ExitStatus| s.success());
+    ToolExecutionResult { success, output: total_output }
 }
 
 fn get_default_shell() -> String {

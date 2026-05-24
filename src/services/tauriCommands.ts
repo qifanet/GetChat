@@ -497,6 +497,7 @@ export interface ToolSettingsDto {
   max_iterations: number;
   max_consecutive_failures: number;
   approval_timeout_secs: number;
+  tool_execution_timeout_secs: number;
 }
 
 export async function getToolSettings(): Promise<ToolSettingsDto> {
@@ -507,12 +508,13 @@ export async function updateToolSettings(params: {
   max_iterations?: number;
   max_consecutive_failures?: number;
   approval_timeout_secs?: number;
+  tool_execution_timeout_secs?: number;
 }): Promise<ToolSettingsDto> {
-  // Tauri v2 expects camelCase parameter names from JS
   const camelParams: Record<string, unknown> = {};
   if (params.max_iterations !== undefined) camelParams.maxIterations = params.max_iterations;
   if (params.max_consecutive_failures !== undefined) camelParams.maxConsecutiveFailures = params.max_consecutive_failures;
   if (params.approval_timeout_secs !== undefined) camelParams.approvalTimeoutSecs = params.approval_timeout_secs;
+  if (params.tool_execution_timeout_secs !== undefined) camelParams.toolExecutionTimeoutSecs = params.tool_execution_timeout_secs;
   return executeCommand<ToolSettingsDto>("update_tool_settings", camelParams);
 }
 
@@ -622,10 +624,16 @@ export interface ContextTokenBreakdownDto {
 }
 
 export interface ContextStatusDto {
+  /** Estimate of the actual next model request after prompt-budget trimming. */
   usedTokens: number;
+  /** Untrimmed full-path estimate for diagnostics/compression decisions. */
+  rawUsedTokens: number;
   totalTokens: number;
   percentage: number;
+  rawPercentage: number;
   messageCount: number;
+  rawMessageCount: number;
+  promptBudgetTokens: number;
   breakdown: ContextTokenBreakdownDto;
 }
 
@@ -646,6 +654,8 @@ export interface CompressContextResult {
   summaryText: string;
   compressedMessageCount: number;
   estimatedTokens: number;
+  skipped: boolean;
+  skipReason?: string;
 }
 
 export async function compressContext(

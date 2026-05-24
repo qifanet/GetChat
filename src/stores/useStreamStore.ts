@@ -111,6 +111,8 @@ export const useStreamStore = create<StreamStore>()(
                   ...existing,
                   status: "COMPLETED",
                   retrying: undefined,
+                  pendingApproval: undefined,
+                  contextCompressing: undefined,
                 },
               },
             };
@@ -133,6 +135,8 @@ export const useStreamStore = create<StreamStore>()(
                   status: "FAILED",
                   error,
                   retrying: undefined,
+                  pendingApproval: undefined,
+                  contextCompressing: undefined,
                 },
               },
             };

@@ -9,6 +9,8 @@
  *          warn on error (with error_code).
  */
 
+use std::time::{Duration, Instant};
+
 use tauri::State;
 
 use crate::dto::messages::{
@@ -18,7 +20,9 @@ use crate::dto::messages::{
 };
 use crate::error::AppError;
 use crate::services::{prompt_service, snapshot_service};
-use crate::state::AppState;
+use crate::state::{AppState, PendingModelStream};
+
+const PENDING_MODEL_STREAM_STALE_AFTER: Duration = Duration::from_secs(120);
 
 // ============================================================================
 // Commands
@@ -101,7 +105,11 @@ pub async fn create_assistant_placeholder_for_branch(
     let conv_id = input.conversation_id.clone();
     let branch_id = input.branch_id.clone();
     let request_id = input.request_id.clone();
+    acquire_pending_model_stream_gate(&state, &request_id).await?;
     let result = snapshot_service::create_assistant_placeholder_for_branch(&state.db, &input).await;
+    if result.is_err() {
+        release_pending_model_stream_gate(&state, &request_id).await;
+    }
     match &result {
         Ok(msg) => tracing::info!(
             cmd = "create_assistant_placeholder_for_branch",
@@ -133,7 +141,11 @@ pub async fn create_assistant_variant_placeholder(
     let conv_id = input.conversation_id.clone();
     let parent_msg_id = input.parent_message_id.clone();
     let request_id = input.request_id.clone();
+    acquire_pending_model_stream_gate(&state, &request_id).await?;
     let result = snapshot_service::create_assistant_variant_placeholder(&state.db, &input).await;
+    if result.is_err() {
+        release_pending_model_stream_gate(&state, &request_id).await;
+    }
     match &result {
         Ok(msg) => tracing::info!(
             cmd = "create_assistant_variant_placeholder",
@@ -152,6 +164,44 @@ pub async fn create_assistant_variant_placeholder(
     result
 }
 
+async fn acquire_pending_model_stream_gate(
+    state: &State<'_, AppState>,
+    request_id: &str,
+) -> Result<(), AppError> {
+    if let Some(active_request_id) = state.active_model_streams.lock().await.keys().next().cloned() {
+        return Err(AppError::conflict(format!(
+            "Another model stream is already active: {active_request_id}"
+        )));
+    }
+
+    let mut pending = state.pending_model_stream.lock().await;
+    if let Some(existing) = pending.as_ref() {
+        if existing.started_at.elapsed() <= PENDING_MODEL_STREAM_STALE_AFTER {
+            return Err(AppError::conflict(format!(
+                "Another model stream is already being prepared: {}",
+                existing.request_id
+            )));
+        }
+        *pending = None;
+    }
+
+    *pending = Some(PendingModelStream {
+        request_id: request_id.to_string(),
+        started_at: Instant::now(),
+    });
+    Ok(())
+}
+
+async fn release_pending_model_stream_gate(state: &State<'_, AppState>, request_id: &str) {
+    let mut pending = state.pending_model_stream.lock().await;
+    if pending
+        .as_ref()
+        .map_or(false, |existing| existing.request_id == request_id)
+    {
+        *pending = None;
+    }
+}
+
 /**
  * Complete a streaming assistant message.
  * Commits final text and token usage. Status: STREAMING → COMPLETED.
@@ -163,7 +213,9 @@ pub async fn complete_assistant_message(
 ) -> Result<MessageDto, AppError> {
     let start = std::time::Instant::now();
     let msg_id = input.message_id.clone();
+    let request_id = input.request_id.clone();
     let content_length = input.content_text.len();
+    release_pending_model_stream_gate(&state, &request_id).await;
     let result = snapshot_service::complete_assistant_message(&state.db, &input).await;
     match &result {
         Ok(_) => tracing::info!(
@@ -190,8 +242,10 @@ pub async fn fail_assistant_message(
 ) -> Result<MessageDto, AppError> {
     let start = std::time::Instant::now();
     let msg_id = input.message_id.clone();
+    let request_id = input.request_id.clone();
     let error_code_input = input.error_code.clone();
     let partial_length = input.partial_content_text.as_ref().map(|s| s.len()).unwrap_or(0);
+    release_pending_model_stream_gate(&state, &request_id).await;
     let result = snapshot_service::fail_assistant_message(&state.db, &input).await;
     match &result {
         Ok(_) => tracing::info!(

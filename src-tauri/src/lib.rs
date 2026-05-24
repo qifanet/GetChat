@@ -183,6 +183,7 @@ pub fn run() {
                     db: pool.clone(),
                     key_store,
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    pending_model_stream: Arc::new(tokio::sync::Mutex::new(None)),
                     tool_executor,
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
                     security_policy: Arc::new(tokio::sync::Mutex::new(security_policy)),

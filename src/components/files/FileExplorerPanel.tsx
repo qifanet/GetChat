@@ -6,7 +6,7 @@
  * Only visible when a conversation with a workspace path is active.
  * Files can be clicked to preview in the FilePreviewPanel.
  */
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import * as tauriCmd from "../../services/tauriCommands";
@@ -147,10 +147,13 @@ export function FileExplorerPanel({
   );
   const activeSnapshot = useAppStore((s) => s.activeSnapshot);
   const workspacePath = activeSnapshot?.summary.workspacePath ?? null;
+  const setFileExplorerOpen = useAppStore((s) => s.setFileExplorerOpen);
+  const isSending = useAppStore((s) => s.composer.isSending);
 
   const [entries, setEntries] = useState<DirectoryEntryDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleSelect = useCallback(
     (path: string, isDir: boolean) => {
@@ -160,6 +163,26 @@ export function FileExplorerPanel({
     },
     [onSelectFile]
   );
+
+  const refresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  // Auto-close when there's no workspace path
+  useEffect(() => {
+    if (!workspacePath && activeConversationId) {
+      setFileExplorerOpen(false);
+    }
+  }, [workspacePath, activeConversationId, setFileExplorerOpen]);
+
+  // Auto-refresh after stream completes (AI may have created/modified files)
+  const prevSendingRef = useRef(isSending);
+  useEffect(() => {
+    if (prevSendingRef.current && !isSending && workspacePath) {
+      refresh();
+    }
+    prevSendingRef.current = isSending;
+  }, [isSending, workspacePath, refresh]);
 
   useEffect(() => {
     if (!activeConversationId || !workspacePath) {
@@ -189,7 +212,7 @@ export function FileExplorerPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId, workspacePath]);
+  }, [activeConversationId, workspacePath, refreshKey]);
 
   if (!workspacePath || !activeConversationId) {
     return (
@@ -225,6 +248,16 @@ export function FileExplorerPanel({
         <span className="truncate text-[11px] font-medium text-miro-text-secondary">
           {workspacePath.split(/[\\/]/).pop()}
         </span>
+        <button
+          type="button"
+          className="ml-auto shrink-0 rounded p-1 text-miro-text-secondary transition-colors hover:bg-miro-surface-low hover:text-miro-text"
+          onClick={refresh}
+          title={t("fileExplorer.refresh")}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 1v5h5" /><path d="M3.51 10a6 6 0 1 0 1.07-5.22L1 6" />
+          </svg>
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto py-1">
         {entries.map((entry) => (
