@@ -161,7 +161,15 @@ vi.mock("../../stores/useStreamStore", () => ({
 }));
 
 // Import after mocks
-import { startAssistantStream, onStreamChunk, completeStream, failStream, cancelStream, attachSurfaceToRequest } from "../streamController";
+import {
+  attachSurfaceToRequest,
+  cancelActiveStreams,
+  cancelStream,
+  completeStream,
+  failStream,
+  onStreamChunk,
+  startAssistantStream,
+} from "../streamController";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -259,6 +267,31 @@ describe("startAssistantStream", () => {
       }),
       expect.any(Function)
     );
+  });
+
+  it("rejects a second stream while the first is active", async () => {
+    await startAssistantStream({
+      conversationId: "conv_1",
+      branchId: "branch_1",
+      parentMessageId: "msg_parent",
+      providerId: "prov_1",
+      modelId: "model_1",
+      promptMessages: [],
+    });
+    mockTauriCommands.createAssistantPlaceholderForBranch.mockClear();
+
+    await expect(
+      startAssistantStream({
+        conversationId: "conv_1",
+        branchId: "branch_1",
+        parentMessageId: "msg_parent_2",
+        providerId: "prov_1",
+        modelId: "model_1",
+        promptMessages: [],
+      })
+    ).rejects.toThrow("already running");
+
+    expect(mockTauriCommands.createAssistantPlaceholderForBranch).not.toHaveBeenCalled();
   });
 });
 
@@ -492,6 +525,36 @@ describe("cancelStream", () => {
 
     // Runtime should be cleaned up
     expect(runtimeMap.has(result.requestId)).toBe(false);
+  });
+
+  it("cancelActiveStreams cancels every active session in scope", async () => {
+    const first = await startAssistantStream({
+      conversationId: "conv_1",
+      branchId: "branch_1",
+      parentMessageId: "msg_parent",
+      providerId: "prov_1",
+      modelId: "model_1",
+      promptMessages: [],
+    });
+
+    mockSessions[first.requestId].status = "CANCELLED";
+
+    const second = await startAssistantStream({
+      conversationId: "conv_1",
+      branchId: "branch_2",
+      parentMessageId: "msg_parent_2",
+      providerId: "prov_1",
+      modelId: "model_1",
+      promptMessages: [],
+    });
+
+    mockSessions[first.requestId].status = "STREAMING";
+
+    const cancelled = cancelActiveStreams({ conversationId: "conv_1" });
+
+    expect(cancelled).toBe(2);
+    expect(mockTauriCommands.abortModelStream).toHaveBeenCalledWith(first.requestId);
+    expect(mockTauriCommands.abortModelStream).toHaveBeenCalledWith(second.requestId);
   });
 });
 

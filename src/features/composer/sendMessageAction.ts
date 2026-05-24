@@ -20,7 +20,10 @@
  */
 import { useAppStore } from "../../stores/useAppStore";
 import { buildSendPlan } from "./buildSendPlan";
-import { startAssistantStream } from "../../services/streamController";
+import {
+  findActiveAssistantStream,
+  startAssistantStream,
+} from "../../services/streamController";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { AppStore } from "../../stores/appStore.types";
 import type { BranchEntity, MessageNode } from "../../types/conversation";
@@ -37,6 +40,49 @@ type EnabledTools = Awaited<ReturnType<typeof tauriCmd.getEnabledToolDefinitions
 interface PreparedPromptForSend {
   promptMessages: PromptMessage[];
   tools: EnabledTools;
+}
+
+interface SendSubmitLock {
+  startedAt: number;
+}
+
+const SEND_SUBMIT_LOCK_STALE_MS = 120_000;
+let activeSendSubmitLock: SendSubmitLock | null = null;
+
+function isSendSubmitLocked(): boolean {
+  if (!activeSendSubmitLock) {
+    return false;
+  }
+  if (Date.now() - activeSendSubmitLock.startedAt > SEND_SUBMIT_LOCK_STALE_MS) {
+    activeSendSubmitLock = null;
+    return false;
+  }
+  return true;
+}
+
+function tryAcquireSendSubmitLock(): boolean {
+  if (isSendSubmitLocked()) {
+    return false;
+  }
+  activeSendSubmitLock = { startedAt: Date.now() };
+  return true;
+}
+
+function releaseSendSubmitLock(): void {
+  activeSendSubmitLock = null;
+}
+
+function syncComposerToActiveStream(): boolean {
+  const activeStream = findActiveAssistantStream();
+  if (!activeStream) {
+    return false;
+  }
+
+  useAppStore.getState().setSendingState({
+    isSending: true,
+    activeRequestId: activeStream.requestId,
+  });
+  return true;
 }
 
 /** Resolve the provider that should serve the currently selected model. */
@@ -112,12 +158,18 @@ function shouldAttemptPassiveCompression(
   status: tauriCmd.ContextStatusDto | null,
   promptTokenBudget: number
 ): boolean {
-  if (!status || status.messageCount < 6) {
+  if (!status) {
     return false;
   }
+  const rawMessageCount = status.rawMessageCount ?? status.messageCount;
+  if (rawMessageCount < 6) {
+    return false;
+  }
+  const rawUsedTokens = status.rawUsedTokens ?? status.usedTokens;
+  const rawPercentage = status.rawPercentage ?? status.percentage;
   return (
-    status.percentage >= PASSIVE_COMPRESSION_THRESHOLD_PERCENT ||
-    status.usedTokens > promptTokenBudget
+    rawPercentage >= PASSIVE_COMPRESSION_THRESHOLD_PERCENT ||
+    rawUsedTokens > promptTokenBudget
   );
 }
 
@@ -137,23 +189,11 @@ async function preparePromptForSend(params: {
     }),
   ]);
 
-  let status = initialStatus;
-  let promptTokenBudget = getPromptTokenBudget(state, modelId, status);
-
-  if (shouldAttemptPassiveCompression(status, promptTokenBudget)) {
-    try {
-      await tauriCmd.compressContext(conversationId, branchId, modelId);
-      status = await tauriCmd.getContextStatus(conversationId, branchId, modelId).catch((error) => {
-        console.warn("[context] failed to refresh context status after compression", error);
-        return status;
-      });
-      promptTokenBudget = getPromptTokenBudget(state, modelId, status);
-    } catch (error) {
-      // Sending should still proceed with deterministic prompt trimming. The
-      // backend only stores a compressed summary after the helper call succeeds.
-      console.warn("[context] passive compression failed; falling back to budget trimming", error);
-    }
-  }
+  // Compression is now triggered asynchronously AFTER stream completion
+  // (opencode-style: model-response-then-compact). The deterministic budget
+  // trimming in buildPromptMessages is the safety net for the current turn.
+  const status = initialStatus;
+  const promptTokenBudget = getPromptTokenBudget(state, modelId, status);
 
   const promptMessages = await tauriCmd.buildPromptMessages({
     conversationId,
@@ -181,6 +221,15 @@ async function preparePromptForSend(params: {
  */
 export async function sendMessageAction(): Promise<void> {
   const state = useAppStore.getState();
+  if (state.composer.isSending || isSendSubmitLocked()) {
+    console.warn("[composer] duplicate send ignored: a send is already in progress");
+    return;
+  }
+  if (syncComposerToActiveStream()) {
+    console.warn("[composer] duplicate send ignored: a stream is already active");
+    return;
+  }
+
   // --- Validation ---
   const draft = state.composer.draft.trim();
   if (!draft) {
@@ -190,6 +239,19 @@ export async function sendMessageAction(): Promise<void> {
   if (!modelId) {
     throw new Error("No model selected");
   }
+
+  if (!tryAcquireSendSubmitLock()) {
+    console.warn("[composer] duplicate send ignored: submit lock is active");
+    return;
+  }
+
+  let assistantStreamStarted = false;
+  useAppStore.getState().setSendingState({
+    isSending: true,
+    activeRequestId: null,
+  });
+
+  try {
 
   const directOverwriteIntent =
     state.workspace.forkIntent?.sourceType === "HISTORY_USER_EDIT" &&
@@ -267,6 +329,7 @@ export async function sendMessageAction(): Promise<void> {
       tools: tools.length > 0 ? tools : undefined,
       toolChoice: tools.length > 0 ? "auto" : undefined,
     });
+    assistantStreamStarted = true;
     return;
   }
 
@@ -383,4 +446,16 @@ export async function sendMessageAction(): Promise<void> {
     tools: tools.length > 0 ? tools : undefined,
     toolChoice: tools.length > 0 ? "auto" : undefined,
   });
+  assistantStreamStarted = true;
+  } catch (error) {
+    if (!assistantStreamStarted) {
+      useAppStore.getState().setSendingState({
+        isSending: false,
+        activeRequestId: null,
+      });
+    }
+    throw error;
+  } finally {
+    releaseSendSubmitLock();
+  }
 }

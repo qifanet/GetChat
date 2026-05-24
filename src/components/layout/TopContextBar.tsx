@@ -46,6 +46,8 @@ const _sel_setLeftSidebarCollapsed = (s: import("../../stores/appStore.types").A
 const _sel_setRightPanelCollapsed = (s: import("../../stores/appStore.types").AppStore) => s.setRightPanelCollapsed;
 const _sel_setBranchPreferredModel = (s: import("../../stores/appStore.types").AppStore) => s.setBranchPreferredModel;
 const _sel_enterCompare = (s: import("../../stores/appStore.types").AppStore) => s.enterCompare;
+const _sel_ui_fileExplorerOpen = (s: import("../../stores/appStore.types").AppStore) => s.ui.fileExplorerOpen;
+const _sel_setFileExplorerOpen = (s: import("../../stores/appStore.types").AppStore) => s.setFileExplorerOpen;
 /** Responsive top bar for conversation context and primary workspace actions. */
 export function TopContextBar() {
   const { t } = useTranslation();
@@ -64,6 +66,8 @@ export function TopContextBar() {
   const setRightCollapsed = useAppStore(_sel_setRightPanelCollapsed);
   const setBranchPreferredModel = useAppStore(_sel_setBranchPreferredModel);
   const enterCompare = useAppStore(_sel_enterCompare);
+  const fileExplorerOpen = useAppStore(_sel_ui_fileExplorerOpen);
+  const setFileExplorerOpen = useAppStore(_sel_setFileExplorerOpen);
   const suggestedCompareTargetBranchId = useAppStore(
     selectSuggestedCompareTargetBranchId
   );
@@ -239,6 +243,16 @@ export function TopContextBar() {
                 </button>
               ) : null}
             </div>
+          ) : null}
+          {summary?.workspacePath ? (
+            <button
+              type="button"
+              onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
+              className={`app-icon-button h-9 w-9 shrink-0 ${fileExplorerOpen ? "bg-miro-blue-light/60 text-miro-blue" : ""}`}
+              title={t("fileExplorer.togglePanel")}
+            >
+              <IconFolderOpen size={14} />
+            </button>
           ) : null}
           <button
             type="button"

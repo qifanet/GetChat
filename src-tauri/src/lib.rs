@@ -183,6 +183,7 @@ pub fn run() {
                     db: pool.clone(),
                     key_store,
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    pending_model_stream: Arc::new(tokio::sync::Mutex::new(None)),
                     tool_executor,
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
                     security_policy: Arc::new(tokio::sync::Mutex::new(security_policy)),
@@ -372,6 +373,10 @@ pub fn run() {
             commands::settings::set_shell_path,
             // Debug (1)
             commands::debug::check_db_invariants,
+            // Filesystem (2)
+            commands::filesystem::list_directory_entries,
+            commands::filesystem::read_file_preview,
+            commands::filesystem::reveal_in_file_manager,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

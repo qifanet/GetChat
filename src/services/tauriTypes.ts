@@ -295,6 +295,7 @@ export interface StartModelStreamInput {
   tools?: ToolDefinitionDto[];
   toolChoice?: string;
   conversationId?: string;
+  branchId?: BranchId;
 }
 
 /** Runtime stream chunk event sent from the Tauri backend over Channel IPC. */
@@ -369,7 +370,46 @@ export type ModelStreamEvent =
   | ModelStreamToolCallEvent
   | ModelStreamToolResultEvent
   | ModelStreamApprovalRequiredEvent
-  | ModelStreamRetryingEvent;
+  | ModelStreamRetryingEvent
+  | ModelStreamContextCompressingEvent
+  | ModelStreamContextCompressionSkippedEvent
+  | ModelStreamContextStatusUpdatedEvent
+  | ModelStreamContextCompressedEvent;
+
+/** Mid-loop context compression started. */
+export interface ModelStreamContextCompressingEvent {
+  kind: "CONTEXT_COMPRESSING";
+  requestId: RequestId;
+  level: number;
+  usageRatio: number;
+}
+
+/** Mid-loop context compression was intentionally skipped. */
+export interface ModelStreamContextCompressionSkippedEvent {
+  kind: "CONTEXT_COMPRESSION_SKIPPED";
+  requestId: RequestId;
+  reason: string;
+  usageRatio: number;
+}
+
+/** ReAct-loop in-flight context status update. */
+export interface ModelStreamContextStatusUpdatedEvent {
+  kind: "CONTEXT_STATUS_UPDATED";
+  requestId: RequestId;
+  usedTokens: number;
+  totalTokens: number;
+  percentage: number;
+  messageCount: number;
+}
+
+/** Mid-loop context compression completed. */
+export interface ModelStreamContextCompressedEvent {
+  kind: "CONTEXT_COMPRESSED";
+  requestId: RequestId;
+  compressedCount: number;
+  tokensSaved: number;
+  newUsageRatio: number;
+}
 
 // ============================================================================
 // Context Management Types
@@ -387,10 +427,16 @@ export interface ContextTokenBreakdownDto {
 }
 
 export interface ContextStatusDto {
+  /** Estimate of the actual next model request after prompt-budget trimming. */
   usedTokens: number;
+  /** Untrimmed full-path estimate for diagnostics/compression decisions. */
+  rawUsedTokens: number;
   totalTokens: number;
   percentage: number;
+  rawPercentage: number;
   messageCount: number;
+  rawMessageCount: number;
+  promptBudgetTokens: number;
   breakdown: ContextTokenBreakdownDto;
 }
 
@@ -442,4 +488,26 @@ export interface InvariantCheckResult {
   checks: InvariantCheck[];
   /** Unix timestamp (ms) when checks were run */
   checkedAt: number;
+}
+
+// ============================================================================
+// Filesystem Commands (v1.3.0)
+// ============================================================================
+
+export interface DirectoryEntryDto {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modified: number;
+}
+
+export interface FilePreviewDto {
+  path: string;
+  content: string;
+  totalLines: number;
+  truncated: boolean;
+  language: string | null;
+  isBinary: boolean;
+  fileSize: number;
 }

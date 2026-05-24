@@ -275,3 +275,20 @@ where
 
     Ok(())
 }
+
+/** Get the workspace path for a conversation. Returns None if not set. */
+pub async fn get_workspace_path<'e, E>(
+    executor: E,
+    id: &str,
+) -> sqlx::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT workspace_path FROM conversations WHERE id = ?")
+            .bind(id)
+            .fetch_optional(executor)
+            .await?;
+
+    Ok(row.and_then(|(ws,)| ws.filter(|s| !s.is_empty())))
+}

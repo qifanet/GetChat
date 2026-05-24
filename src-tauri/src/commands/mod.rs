@@ -15,6 +15,7 @@ pub mod bootstrap;
 pub mod branches;
 pub mod conversations;
 pub mod debug;
+pub mod filesystem;
 pub mod messages;
 pub mod settings;
 pub mod streaming;

@@ -191,6 +191,8 @@ export interface UiSlice {
   setLeftSidebarCollapsed: (collapsed: boolean) => void;
   setRightPanelCollapsed: (collapsed: boolean) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
+  setFileExplorerOpen: (open: boolean) => void;
+  setPreviewFilePath: (path: string | null) => void;
   openExportDialog: () => void;
   closeExportDialog: () => void;
   openBranchRenameDialog: () => void;

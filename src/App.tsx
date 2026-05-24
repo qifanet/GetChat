@@ -26,6 +26,8 @@ import { TodoStatusBar } from "./components/todo/TodoStatusBar";
 import { CompareWorkspace } from "./components/compare/CompareWorkspace";
 import { ConversationListItem } from "./components/conversations/ConversationListItem";
 import { BrandLogo } from "./components/brand/BrandLogo";
+import { FileExplorerPanel } from "./components/files/FileExplorerPanel";
+import { FilePreviewPanel } from "./components/files/FilePreviewPanel";
 import {
   IconChevronDown,
   IconChevronLeft,
@@ -69,6 +71,10 @@ const selectOpenExportDialog = (s: import("./stores/appStore.types").AppStore) =
 const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
 const selectSummariesById = (s: import("./stores/appStore.types").AppStore) => s.summariesById;
 const selectActiveConversationId = (s: import("./stores/appStore.types").AppStore) => s.workspace.activeConversationId;
+const selectFileExplorerOpen = (s: import("./stores/appStore.types").AppStore) => s.ui.fileExplorerOpen;
+const selectPreviewFilePath = (s: import("./stores/appStore.types").AppStore) => s.ui.previewFilePath;
+const selectSetFileExplorerOpen = (s: import("./stores/appStore.types").AppStore) => s.setFileExplorerOpen;
+const selectSetPreviewFilePath = (s: import("./stores/appStore.types").AppStore) => s.setPreviewFilePath;
 type AppPage = "WORKSPACE" | "SETTINGS";
 interface ConversationSidebarProps {
   activePage: AppPage;
@@ -648,6 +654,10 @@ function WorkspaceCenter({
 }: WorkspaceCenterProps) {
   const activeSnapshot = useAppStore(selectActiveSnapshot);
   const workspaceMode = useAppStore(selectWorkspaceMode);
+  const fileExplorerOpen = useAppStore(selectFileExplorerOpen);
+  const previewFilePath = useAppStore(selectPreviewFilePath);
+  const setPreviewFilePath = useAppStore(selectSetPreviewFilePath);
+
   if (workspaceMode === "COMPARE") {
     return (
       <main className="app-panel h-full min-w-0 overflow-hidden rounded-shell bg-white/90">
@@ -655,23 +665,39 @@ function WorkspaceCenter({
       </main>
     );
   }
+
   return (
-    <main className="app-panel flex h-full min-w-0 flex-col overflow-hidden rounded-shell bg-white/92">
-      <TopContextBar />
-      <WorkspaceBannerRegion />
-      <div className="relative flex-1 overflow-y-auto">
-        {activeSnapshot ? (
-          <MessageList />
-        ) : (
-          <WorkspaceEmptyState
-            hasConfiguredProviders={hasConfiguredProviders}
-            onCreateConversation={onCreateConversation}
-            onOpenSettings={onOpenSettings}
-          />
-        )}
+    <main className="app-panel flex h-full min-w-0 overflow-hidden rounded-shell bg-white/92">
+      <div className="flex flex-1 flex-col min-w-0">
+        <TopContextBar />
+        <WorkspaceBannerRegion />
+        <div className="relative flex-1 overflow-y-auto">
+          {previewFilePath && fileExplorerOpen ? (
+            <FilePreviewPanel
+              filePath={previewFilePath}
+              onClose={() => setPreviewFilePath(null)}
+            />
+          ) : activeSnapshot ? (
+            <MessageList />
+          ) : (
+            <WorkspaceEmptyState
+              hasConfiguredProviders={hasConfiguredProviders}
+              onCreateConversation={onCreateConversation}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
+        </div>
+        <TodoStatusBar conversationId={activeSnapshot?.summary.id} />
+        <Composer />
       </div>
-      <TodoStatusBar conversationId={activeSnapshot?.summary.id} />
-      <Composer />
+      {fileExplorerOpen && (
+        <div className="flex w-[260px] shrink-0 flex-col border-l border-miro-border/15 bg-miro-surface-low/50">
+          <FileExplorerPanel
+            selectedFilePath={previewFilePath}
+            onSelectFile={setPreviewFilePath}
+          />
+        </div>
+      )}
     </main>
   );
 }

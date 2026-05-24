@@ -16,7 +16,7 @@
  */
 
 use sqlx::SqlitePool;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex, oneshot};
 
 const KEYRING_SERVICE_NAME: &str = "GetChat.ProviderApiKeys";
@@ -117,11 +117,26 @@ impl SecureKeyStore for SystemKeyStore {
 pub type ActiveModelStreamRegistry =
     Arc<Mutex<HashMap<String, watch::Sender<bool>>>>;
 
+/**
+ * Short-lived gate set after an assistant placeholder is created and before
+ * the provider stream is registered. This closes the IPC gap where duplicate
+ * frontend clicks could create multiple placeholders before `start_model_stream`
+ * had a chance to populate `active_model_streams`.
+ */
+pub type PendingModelStreamGate = Arc<Mutex<Option<PendingModelStream>>>;
+
+#[derive(Debug, Clone)]
+pub struct PendingModelStream {
+    pub request_id: String,
+    pub started_at: Instant,
+}
+
 /** Shared application state, managed by Tauri's state system. */
 pub struct AppState {
     pub db: SqlitePool,
     pub key_store: Box<dyn SecureKeyStore>,
     pub active_model_streams: ActiveModelStreamRegistry,
+    pub pending_model_stream: PendingModelStreamGate,
     pub tool_executor: Box<dyn crate::services::tool_executor::ToolExecutor>,
     pub tool_limits: Arc<Mutex<ToolLimits>>,
     pub security_policy: Arc<Mutex<SecurityPolicy>>,
@@ -139,6 +154,9 @@ pub struct ToolLimits {
     pub max_consecutive_failures: u32,
     /** Approval timeout in seconds for destructive tools (default: 60). */
     pub approval_timeout_secs: u32,
+    /** Default per-tool execution timeout in seconds (default: 60).
+     *  Individual tools can override this via their arguments "timeout" field. */
+    pub tool_execution_timeout_secs: u64,
 }
 
 impl Default for ToolLimits {
@@ -147,15 +165,17 @@ impl Default for ToolLimits {
             max_iterations: 10,
             max_consecutive_failures: 7,
             approval_timeout_secs: 60,
+            tool_execution_timeout_secs: 60,
         }
     }
 }
 
 impl ToolLimits {
     pub fn normalized(mut self) -> Self {
-        self.max_iterations = self.max_iterations.clamp(1, 50);
+        self.max_iterations = self.max_iterations.clamp(1, 100);
         self.max_consecutive_failures = self.max_consecutive_failures.clamp(1, 20);
-        self.approval_timeout_secs = self.approval_timeout_secs.clamp(10, 300);
+        self.approval_timeout_secs = self.approval_timeout_secs.clamp(10, 600);
+        self.tool_execution_timeout_secs = self.tool_execution_timeout_secs.clamp(10, 600);
         self
     }
 }
@@ -179,24 +199,6 @@ pub enum SecurityLevel {
 impl Default for SecurityLevel {
     fn default() -> Self {
         Self::Standard
-    }
-}
-
-impl SecurityLevel {
-    pub fn from_u8(level: u8) -> Self {
-        match level {
-            0 => Self::Permissive,
-            1 => Self::Standard,
-            2.. => Self::Strict,
-        }
-    }
-
-    pub fn as_u8(self) -> u8 {
-        match self {
-            Self::Permissive => 0,
-            Self::Standard => 1,
-            Self::Strict => 2,
-        }
     }
 }
 

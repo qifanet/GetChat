@@ -91,6 +91,20 @@ export function MessageList() {
     if (isStreaming) { setAutoFollow(true); userScrolledRef.current = false; }
   }, [isStreaming]);
 
+  // On initial mount or when the conversation/branch changes, scroll to bottom
+  // to show the latest message instead of the first message.
+  const activeConversationId = useAppStore((s) => s.workspace.activeConversationId);
+  const currentBranchId = useAppStore((s) => s.workspace.currentBranchId);
+  useEffect(() => {
+    if (messages.length > 0 && bottomRef.current) {
+      // Use requestAnimationFrame to ensure DOM is rendered before scrolling
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" as ScrollBehavior });
+      });
+      setAutoFollow(true);
+    }
+  }, [activeConversationId, currentBranchId]);
+
   // Scroll to a specific message (set by search navigation)
   useEffect(() => {
     const targetId = scrollToMessageId;

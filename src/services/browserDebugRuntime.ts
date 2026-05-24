@@ -91,6 +91,9 @@ export type BrowserDebugCommandName =
   | "set_builtin_tool_enabled"
   | "get_security_policy"
   | "update_security_policy"
+  | "list_directory_entries"
+  | "read_file_preview"
+  | "reveal_in_file_manager"
   | "list_mcp_servers"
   | "add_mcp_server"
   | "remove_mcp_server"
@@ -825,6 +828,23 @@ function startBrowserDebugStream(
   const chunks = chunkBrowserDebugReply(reply);
   let nextDelayMs = 45;
 
+  const promptTokens = Math.max(24, input.promptMessages.length * 14);
+  const statusTimer = setTimeout(() => {
+    if (controller.aborted) {
+      return;
+    }
+
+    onEvent({
+      kind: "CONTEXT_STATUS_UPDATED",
+      requestId: input.requestId,
+      usedTokens: promptTokens,
+      totalTokens: 65536,
+      percentage: (promptTokens / 65536) * 100,
+      messageCount: input.promptMessages.length,
+    });
+  }, 25);
+  controller.timers.add(statusTimer);
+
   chunks.forEach((chunk) => {
     const timer = setTimeout(() => {
       if (controller.aborted) {
@@ -847,7 +867,6 @@ function startBrowserDebugStream(
       return;
     }
 
-    const promptTokens = Math.max(24, input.promptMessages.length * 14);
     const completionTokens = Math.max(30, Math.ceil(reply.length / 5));
     onEvent({
       kind: "COMPLETED",
@@ -2002,9 +2021,13 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
       return readBrowserDebugCommand((_state): T => {
         return {
           usedTokens: 0,
+          rawUsedTokens: 0,
           totalTokens: 65536,
           percentage: 0,
+          rawPercentage: 0,
           messageCount: 0,
+          rawMessageCount: 0,
+          promptBudgetTokens: 0,
           breakdown: {
             systemTokens: 0,
             toolPromptTokens: 0,
@@ -2039,6 +2062,8 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
           summaryText: "Mock compressed summary",
           compressedMessageCount: 3,
           estimatedTokens: 150,
+          skipped: false,
+          skipReason: undefined,
         } as T;
       });
 

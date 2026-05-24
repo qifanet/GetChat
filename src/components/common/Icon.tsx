@@ -124,6 +124,16 @@ export function IconFolderOpen({ size = 16, ...props }: IconBaseProps) {
   );
 }
 
+/** Generic file icon — used in file explorer tree */
+export function IconFile({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M6 2h8l6 6v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z" />
+      <path d="M14 2v6h6" />
+    </svg>
+  );
+}
+
 /**
  * Close / dismiss icon (X).
  */

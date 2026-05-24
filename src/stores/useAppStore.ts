@@ -73,6 +73,8 @@ const initialUi: UiState = {
   exportDialogOpen: false,
   branchRenameDialogOpen: false,
   scrollToMessageId: null,
+  fileExplorerOpen: false,
+  previewFilePath: null,
 };
 
 // ============================================================================
@@ -1466,6 +1468,29 @@ export const useAppStore = create<AppStore>()(
             },
             undefined,
             "ui/rightPanelTabChanged"
+          );
+        },
+
+        setFileExplorerOpen: (open) => {
+          set(
+            (s) => {
+              s.ui.fileExplorerOpen = open;
+              if (!open) {
+                s.ui.previewFilePath = null;
+              }
+            },
+            undefined,
+            "ui/fileExplorerOpen"
+          );
+        },
+
+        setPreviewFilePath: (path) => {
+          set(
+            (s) => {
+              s.ui.previewFilePath = path;
+            },
+            undefined,
+            "ui/previewFilePath"
           );
         },
 

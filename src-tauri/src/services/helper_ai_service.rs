@@ -370,15 +370,17 @@ async fn call_openai_compatible(
     // max_tokens must be generous enough for models with built-in reasoning
     // (e.g. DeepSeek V4 Flash uses reasoning_content + content; if max_tokens
     // is too small, the reasoning chain consumes all tokens and content is empty).
+    // 1024 tokens allows structured summary output even when reasoning model
+    // uses ~700 tokens for its internal thinking chain.
     let mut request = reqwest::Client::new()
         .post(&url)
         .json(&json!({
             "model": model_name,
             "messages": messages,
             "stream": false,
-            "max_tokens": 256,
+            "max_tokens": 1024,
         }))
-        .timeout(std::time::Duration::from_secs(30));
+        .timeout(std::time::Duration::from_secs(60));
 
     if let Some(key) = api_key {
         request = request.bearer_auth(key);
@@ -599,27 +601,40 @@ fn build_diff_user_prompt(left: &[String], right: &[String]) -> String {
 }
 
 // ============================================================================
-// Context Compression
+// Context Compression — opencode-inspired anchored iterative summarization
 // ============================================================================
 
 const COMPRESS_SYSTEM_PROMPT: &str = concat!(
-    "你是一个对话总结助手。用户会给你一段对话历史，请生成**结构化**摘要。\n\n",
-    "输出格式必须严格遵循以下 Markdown 结构：\n\n",
+    "你是一个锚定对话上下文总结助手，专为编程会话设计。\n\n",
+    "任务：总结你收到的对话历史。最新的几轮可能被完整保留在摘要之外，因此请聚焦于更早但仍然重要的上下文。\n\n",
+    "如果提示包含 <previous-summary> 块，将其视为当前锚定摘要，用新历史更新它：",
+    "保留仍然有效的细节，移除过时内容，合并新事实。\n\n",
+    "严格输出以下 Markdown 结构，保持章节顺序不变：\n\n",
+    "## 目标\n",
+    "- [一句话任务总结]\n\n",
+    "## 约束与偏好\n",
+    "- [用户约束、偏好、规格说明，或\"(无)\"]\n\n",
+    "## 进展\n",
+    "### 已完成\n",
+    "- [已完成的工作，或\"(无)\"]\n\n",
+    "### 进行中\n",
+    "- [当前正在做的工作，或\"(无)\"]\n\n",
+    "### 阻塞\n",
+    "- [阻塞项，或\"(无)\"]\n\n",
     "## 关键决策\n",
-    "- [列出所有重要决策、结论和共识]\n\n",
-    "## 技术实体\n",
-    "- [保留所有变量名、函数名、文件路径、配置值、API 端点等技术细节]\n\n",
-    "## 用户意图\n",
-    "- [总结用户的核心需求、偏好和约束]\n\n",
-    "## 工具使用记录\n",
-    "- [简述已执行的工具操作及其关键结果，尤其是文件变更和命令输出]\n\n",
-    "## 待解决事项\n",
-    "- [列出尚未完成的事项或未回答的问题]\n\n",
-    "要求：\n",
-    "- 使用与原文相同的语言\n",
-    "- 每个条目保持精炼，但不得丢失关键技术细节\n",
-    "- 如果某个分类下没有相关内容，省略该分类标题\n",
-    "- 只输出摘要，不要添加额外说明"
+    "- [决策及原因，或\"(无)\"]\n\n",
+    "## 下一步\n",
+    "- [按优先级排列的后续行动，或\"(无)\"]\n\n",
+    "## 关键上下文\n",
+    "- [重要技术事实、错误信息、未解决问题，或\"(无)\"]\n\n",
+    "## 相关文件\n",
+    "- [文件或目录路径：为何重要，或\"(无)\"]\n\n",
+    "规则：\n",
+    "- 每个章节都必须保留，即使内容为\"(无)\"\n",
+    "- 使用简洁的要点，不要写段落\n",
+    "- 保留确切的文件路径、命令、错误字符串和标识符\n",
+    "- 使用与对话相同的语言\n",
+    "- 不要提及总结过程或上下文被压缩"
 );
 
 const COMPRESS_KEEP_RECENT_SOURCE_MESSAGES: usize = 6;
@@ -628,6 +643,7 @@ const COMPRESS_MAX_MESSAGE_CHARS: usize = 2_000;
 const COMPRESS_MIN_INPUT_CHARS: usize = 6_000;
 const COMPRESS_MAX_INPUT_CHARS: usize = 60_000;
 
+#[derive(Clone)]
 struct CompressionSourceGroup<'a> {
     source_message_id: String,
     messages: Vec<&'a PromptMessage>,
@@ -792,6 +808,10 @@ pub async fn compress_context(
         .unwrap_or_default();
 
     let messages = crate::services::prompt_service::build_prompt_messages(&state.db, &prompt_input).await?;
+
+    // 3. Split into prefix (synthetic) and persisted source groups.
+    //    Only persisted messages with source_message_id are candidates
+    //    for compression; synthetic prefixes are always retained.
     let mut source_groups: Vec<CompressionSourceGroup<'_>> = Vec::new();
     for msg in messages.iter().filter(|msg| msg.source_message_id.is_some()) {
         let source_message_id = msg.source_message_id.clone().unwrap_or_default();
@@ -814,21 +834,116 @@ pub async fn compress_context(
         return Err(AppError::invalid_argument("Not enough messages to compress"));
     }
 
-    // Keep the recent tail verbatim; compression only targets older persisted
-    // conversation/tool transcript groups and never rewrites system/tool prompts.
+    // 4. Compute token usage ratio and determine compression level.
+    let context_budget = (model_row.context_window_kb.max(8) as u32) * 1000;
+    let total_tokens: u32 = messages
+        .iter()
+        .map(crate::services::token_estimator::estimate_prompt_message_tokens)
+        .sum();
+    let usage_ratio = if context_budget > 0 {
+        total_tokens as f32 / context_budget as f32
+    } else {
+        0.0
+    };
+
+    let compression_level = crate::services::importance_scorer::CompressionLevel::from_usage_ratio(usage_ratio);
+
+    tracing::info!(
+        conv_id = %conversation_id,
+        branch_id = %branch_id,
+        total_tokens,
+        context_budget,
+        usage_ratio = format!("{:.2}", usage_ratio),
+        level = ?compression_level,
+        source_groups = source_groups.len(),
+        "compress_context: starting importance-aware compression"
+    );
+
+    if compression_level == crate::services::importance_scorer::CompressionLevel::None {
+        return Err(AppError::invalid_argument(
+            "Context usage is below compression threshold",
+        ));
+    }
+
+    // 5. Score groups and plan compression actions.
     let keep_recent = if source_groups.len() > COMPRESS_KEEP_RECENT_SOURCE_MESSAGES + COMPRESS_MIN_SOURCE_MESSAGES {
         COMPRESS_KEEP_RECENT_SOURCE_MESSAGES
     } else {
         2
     };
-    let max_compress_group_count = source_groups.len().saturating_sub(keep_recent);
-    if max_compress_group_count == 0 {
+
+    let cloned_groups: Vec<Vec<PromptMessage>> = source_groups
+        .iter()
+        .map(|g| g.messages.iter().map(|m| (*m).clone()).collect())
+        .collect();
+
+    let scored = crate::services::importance_scorer::score_groups(&cloned_groups);
+
+    let plan = crate::services::importance_scorer::plan_compression(
+        &scored,
+        compression_level,
+        keep_recent,
+    );
+
+    tracing::info!(
+        level = ?compression_level,
+        keep = plan.keep_count,
+        compress = plan.compress_count,
+        drop = plan.drop_count,
+        "compress_context: compression plan"
+    );
+
+    // 6. Collect groups to compress (Compress action only; Keep and Drop are
+    //    handled by the prompt builder skipping them).
+    let mut compress_indices: Vec<usize> = plan
+        .actions
+        .iter()
+        .filter(|(_, action, _)| *action == crate::services::importance_scorer::GroupAction::Compress)
+        .map(|(idx, _, _)| *idx)
+        .collect();
+
+    if compress_indices.is_empty() {
+        let recent_start = source_groups.len().saturating_sub(keep_recent);
+        let fallback_take = match compression_level {
+            crate::services::importance_scorer::CompressionLevel::Level1 => 1,
+            crate::services::importance_scorer::CompressionLevel::Level2 => 2,
+            crate::services::importance_scorer::CompressionLevel::Level3 => 3,
+            crate::services::importance_scorer::CompressionLevel::None => 0,
+        };
+        compress_indices = plan
+            .actions
+            .iter()
+            .filter(|(idx, action, _)| {
+                *idx < recent_start
+                    && *action == crate::services::importance_scorer::GroupAction::Keep
+            })
+            .map(|(idx, _, _)| *idx)
+            .take(fallback_take)
+            .collect();
+
+        if !compress_indices.is_empty() {
+            tracing::info!(
+                selected = compress_indices.len(),
+                level = ?plan.level,
+                "compress_context: selected oldest retained groups as fallback compression input"
+            );
+        }
+    }
+
+    if compress_indices.is_empty() {
         return Err(AppError::invalid_argument("No compressible content"));
     }
 
-    // 3. Call the helper model for compression. If the helper provider rejects
-    // an oversized request, retry with a smaller oldest-message batch; the DB is
-    // only written after a summary succeeds, so failed attempts are atomic.
+    // Build the compression input from only the groups selected for compression.
+    let compress_groups: Vec<CompressionSourceGroup<'_>> = compress_indices
+        .iter()
+        .map(|&idx| source_groups[idx].clone())
+        .collect();
+
+    // 7. Call the helper model for compression (single attempt, no retry loop).
+    //    The structured summary template + generous max_tokens (1024) make
+    //    empty summaries very unlikely. If the model still returns empty,
+    //    the error propagates and the caller falls back to deterministic trimming.
     let api_key = if provider_row.r#type == "OLLAMA" {
         None
     } else {
@@ -841,71 +956,66 @@ pub async fn compress_context(
     };
 
     let input_char_budget = compression_input_char_budget(model_row.context_window_kb);
-    let mut attempt_group_count = max_compress_group_count;
-    let (summary, compressed_ids, compressed_count) = loop {
-        let (conversation_text, new_compressed_ids) = build_compression_prompt_text(
-            prior_summary,
-            &source_groups[..attempt_group_count],
-            input_char_budget,
-        );
+    let (conversation_text, new_compressed_ids) = build_compression_prompt_text(
+        prior_summary,
+        &compress_groups,
+        input_char_budget,
+    );
 
-        if conversation_text.trim().is_empty() || new_compressed_ids.is_empty() {
-            return Err(AppError::invalid_argument("No compressible content"));
+    if conversation_text.trim().is_empty() || new_compressed_ids.is_empty() {
+        return Err(AppError::invalid_argument("No compressible content"));
+    }
+
+    let compress_messages = vec![
+        TitlePromptMessage { role: "system".to_string(), content: COMPRESS_SYSTEM_PROMPT.to_string() },
+        TitlePromptMessage { role: "user".to_string(), content: conversation_text },
+    ];
+
+    let summary = match call_helper_model(
+        provider_type,
+        &provider_row.base_url,
+        api_key.as_deref(),
+        &model_row.request_name,
+        &compress_messages,
+    )
+    .await
+    {
+        Ok(summary) if !summary.trim().is_empty() => summary,
+        Ok(_) => {
+            tracing::warn!(
+                "compress_context: helper returned empty summary with structured template"
+            );
+            return Err(AppError::invalid_argument(
+                "Compression helper returned an empty summary",
+            ));
         }
-
-        let compress_messages = vec![
-            TitlePromptMessage { role: "system".to_string(), content: COMPRESS_SYSTEM_PROMPT.to_string() },
-            TitlePromptMessage { role: "user".to_string(), content: conversation_text },
-        ];
-
-        match call_helper_model(
-            provider_type,
-            &provider_row.base_url,
-            api_key.as_deref(),
-            &model_row.request_name,
-            &compress_messages,
-        )
-        .await
-        {
-            Ok(summary) if !summary.trim().is_empty() => {
-                for id in new_compressed_ids {
-                    if !prior_compressed_ids.contains(&id) {
-                        prior_compressed_ids.push(id);
-                    }
-                }
-                let compressed_count = prior_compressed_ids.len();
-                break (summary, prior_compressed_ids, compressed_count);
-            }
-            Ok(_) => {
-                if attempt_group_count <= 1 {
-                    return Err(AppError::invalid_argument(
-                        "Compression helper returned an empty summary",
-                    ));
-                }
-                attempt_group_count = (attempt_group_count / 2).max(1);
-                tracing::warn!(
-                    attempt_group_count,
-                    "compress_context: empty helper summary, retrying with smaller batch"
-                );
-            }
-            Err(error) => {
-                if attempt_group_count <= 1 || !should_retry_compression_error(&error) {
-                    return Err(error);
-                }
-                attempt_group_count = (attempt_group_count / 2).max(1);
-                tracing::warn!(
-                    error = %error.message,
-                    attempt_group_count,
-                    "compress_context: helper rejected request, retrying with smaller batch"
-                );
-            }
+        Err(error) => {
+            return Err(error);
         }
     };
 
-    // 5. Estimate tokens for the summary
+    // Collect compressed source IDs
+    for id in new_compressed_ids {
+        if !prior_compressed_ids.contains(&id) {
+            prior_compressed_ids.push(id);
+        }
+    }
+    // Also mark dropped groups as compressed (they're removed from context)
+    for (idx, action, _) in &plan.actions {
+        if *action == crate::services::importance_scorer::GroupAction::Drop {
+            let source_id = &source_groups[*idx].source_message_id;
+            if !prior_compressed_ids.contains(source_id) {
+                prior_compressed_ids.push(source_id.clone());
+            }
+        }
+    }
+    let compressed_count = prior_compressed_ids.len();
+    let compressed_ids = prior_compressed_ids;
+
+    // 8. Estimate tokens for the summary
     let estimated_tokens = crate::services::token_estimator::estimate_tokens(&summary);
 
-    // 6. Store in compressed_contexts
+    // 9. Store in compressed_contexts
     let compressed_id = format!("cc_{}", uuid::Uuid::new_v4());
     let compressed_msg_ids_json = serde_json::to_string(&compressed_ids).unwrap_or_else(|_| "[]".to_string());
 
@@ -930,7 +1040,9 @@ pub async fn compress_context(
         compressed_id = %compressed_id,
         msg_count = compressed_count,
         estimated_tokens,
-        "compress_context: compression complete"
+        level = ?compression_level,
+        usage_ratio = format!("{:.2}", usage_ratio),
+        "compress_context: importance-aware compression complete"
     );
 
     Ok(CompressContextResult {
@@ -939,4 +1051,51 @@ pub async fn compress_context(
         compressed_message_count: compressed_count as u32,
         estimated_tokens,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Manual smoke test for the real local Ollama compression path.
+    ///
+    /// Run only when a local Ollama server and model are available, for example:
+    /// `GETCHAT_TEST_OLLAMA_MODEL=qwen3:4b cargo test local_ollama_compression_smoke -- --ignored`.
+    #[tokio::test]
+    #[ignore = "requires a running local Ollama server and GETCHAT_TEST_OLLAMA_MODEL"]
+    async fn local_ollama_compression_smoke() {
+        let base_url = std::env::var("GETCHAT_TEST_OLLAMA_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let model_name = std::env::var("GETCHAT_TEST_OLLAMA_MODEL")
+            .expect("set GETCHAT_TEST_OLLAMA_MODEL to an installed Ollama model name");
+        let conversation_text = [
+            "【用户】请调研上下文压缩方案，并列出风险。",
+            "【助手】方案一：保留最近消息，压缩旧工具结果。风险是摘要丢失细节。",
+            "【用户】继续补充 ReAct loop 中每轮预算检查和状态推送设计。",
+            "【助手】每轮请求前估算 prompt + tools token，超过阈值时触发压缩或裁剪。",
+        ]
+        .join("\n\n");
+        let messages = vec![
+            TitlePromptMessage {
+                role: "system".to_string(),
+                content: COMPRESS_SYSTEM_PROMPT.to_string(),
+            },
+            TitlePromptMessage {
+                role: "user".to_string(),
+                content: conversation_text,
+            },
+        ];
+
+        let summary = call_helper_model(
+            ProviderType::Ollama,
+            &base_url,
+            None,
+            &model_name,
+            &messages,
+        )
+        .await
+        .expect("local Ollama compression call should succeed");
+
+        assert!(!summary.trim().is_empty());
+    }
 }

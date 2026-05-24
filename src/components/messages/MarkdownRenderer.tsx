@@ -7,6 +7,7 @@
  *   - LaTeX math via remark-math + rehype-katex
  *   - Mermaid diagrams (dynamic import, rendered as SVG) — can be disabled
  *   - Syntax-highlighted fenced code blocks with language label and copy button
+ *   - File path detection with clickable links that open file preview panel
  *   - Safe external link handling
  *   - Tables, lists, blockquotes, and inline code
  *
@@ -47,7 +48,9 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTranslation } from "react-i18next";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { FILE_LINK_PROTOCOL, parseFileLinkUrl, remarkFilePaths } from "../../utils/remarkFilePaths";
 import { MermaidBlock } from "./MermaidBlock";
+import { useAppStore } from "../../stores/useAppStore";
 
 import "katex/dist/katex.min.css";
 
@@ -177,6 +180,32 @@ function CodeBlockHeader({
   );
 }
 
+/** Clickable file path link that opens the file preview panel. */
+function FileLink({ path, children }: { path: string; children: ReactNode }) {
+  const setPreviewFilePath = useAppStore((s) => s.setPreviewFilePath);
+  const setFileExplorerOpen = useAppStore((s) => s.setFileExplorerOpen);
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setPreviewFilePath(path);
+      setFileExplorerOpen(true);
+    },
+    [path, setPreviewFilePath, setFileExplorerOpen],
+  );
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="inline cursor-pointer font-mono text-[0.9em] text-miro-blue underline decoration-miro-blue/30 transition-colors hover:bg-miro-blue-light/30 hover:decoration-miro-blue"
+      title={path}
+    >
+      {children}
+    </button>
+  );
+}
+
 function buildMarkdownComponents(
   copyLabel: string,
   copiedLabel: string,
@@ -235,8 +264,19 @@ function buildMarkdownComponents(
     );
   },
   a({ node: _node, href, children, ...props }) {
+    const hrefStr = typeof href === "string" ? href : undefined;
+
+    // Intercept file-preview: links for in-app file preview
+    if (hrefStr && hrefStr.startsWith(FILE_LINK_PROTOCOL)) {
+      const parsed = parseFileLinkUrl(hrefStr);
+      if (parsed) {
+        // Use a wrapper component to access the store
+        return <FileLink path={parsed.path}>{children}</FileLink>;
+      }
+    }
+
     return (
-      <a href={typeof href === "string" ? href : undefined} target="_blank" rel="noreferrer noopener" {...props}>
+      <a href={hrefStr} target="_blank" rel="noreferrer noopener" {...props}>
         {children}
       </a>
     );
@@ -337,7 +377,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, disabl
   return (
     <div className="markdown-content max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkFilePaths]}
         rehypePlugins={[rehypeKatex]}
         components={markdownComponents}
       >

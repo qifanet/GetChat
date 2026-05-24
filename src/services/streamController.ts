@@ -38,6 +38,7 @@ import { createTextSurface } from "./surfaces/surfaceFactory";
 import type { RequestId, MessageId } from "../types/base";
 import type { ModelStreamEvent } from "./tauriTypes";
 import type { ToolCallInfo } from "../types/conversation";
+import type { StreamSessionMeta } from "../types/stream";
 import * as tauriCmd from "./tauriCommands";
 
 /** Default flush interval in milliseconds (~24ms ≈ 40fps) */
@@ -49,6 +50,11 @@ const LONG_TEXT_THRESHOLD = 50_000;
 /** Slower flush interval for very long texts */
 const LONG_TEXT_FLUSH_INTERVAL_MS = 48;
 
+function safePercent(value: unknown): string {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return (numeric * 100).toFixed(0);
+}
+
 /**
  * Generate a request ID that remains unique across rapid consecutive sends.
  * Uses crypto.randomUUID when available and falls back to timestamp + random.
@@ -59,6 +65,93 @@ function createRequestId(): RequestId {
   }
 
   return `req_${Date.now()}_${Math.random().toString(36).slice(2)}` as RequestId;
+}
+
+type ActiveStreamFilters = {
+  conversationId?: string | null;
+  branchId?: string | null;
+};
+
+const STREAM_START_LOCK_STALE_MS = 120_000;
+let activeStreamStartLock: { startedAt: number } | null = null;
+
+function isStreamStartLocked(): boolean {
+  if (!activeStreamStartLock) {
+    return false;
+  }
+  if (Date.now() - activeStreamStartLock.startedAt > STREAM_START_LOCK_STALE_MS) {
+    activeStreamStartLock = null;
+    return false;
+  }
+  return true;
+}
+
+function tryAcquireStreamStartLock(): boolean {
+  if (isStreamStartLocked()) {
+    return false;
+  }
+  activeStreamStartLock = { startedAt: Date.now() };
+  return true;
+}
+
+function releaseStreamStartLock(): void {
+  activeStreamStartLock = null;
+}
+
+function isActiveStreamSession(session: StreamSessionMeta): boolean {
+  return session.status === "STARTING" || session.status === "STREAMING";
+}
+
+function matchesActiveStreamFilters(
+  session: StreamSessionMeta,
+  filters: ActiveStreamFilters
+): boolean {
+  if (filters.conversationId && session.conversationId !== filters.conversationId) {
+    return false;
+  }
+  if (filters.branchId && session.branchId !== filters.branchId) {
+    return false;
+  }
+  return true;
+}
+
+/** Return active assistant streams from the lightweight stream store. */
+export function getActiveAssistantStreams(
+  filters: ActiveStreamFilters = {}
+): StreamSessionMeta[] {
+  return Object.values(useStreamStore.getState().sessionsByRequestId).filter(
+    (session) => isActiveStreamSession(session) && matchesActiveStreamFilters(session, filters)
+  );
+}
+
+/** Return the most recent active assistant stream, if any. */
+export function findActiveAssistantStream(
+  filters: ActiveStreamFilters = {}
+): StreamSessionMeta | null {
+  const sessions = getActiveAssistantStreams(filters);
+  if (sessions.length === 0) {
+    return null;
+  }
+  return sessions.reduce((latest, session) =>
+    session.startedAt > latest.startedAt ? session : latest
+  );
+}
+
+/** Cancel all active streams matching the current workspace scope. */
+export function cancelActiveStreams(filters: ActiveStreamFilters = {}): number {
+  const sessions = getActiveAssistantStreams(filters);
+  for (const session of sessions) {
+    void cancelStream(session.requestId);
+  }
+  return sessions.length;
+}
+
+function syncComposerSendingStateToActiveStreams(): void {
+  const activeStream = findActiveAssistantStream();
+  useAppStore.getState().setSendingState({
+    isSending: Boolean(activeStream),
+    activeRequestId: activeStream?.requestId ?? null,
+  });
 }
 
 // ============================================================================
@@ -87,8 +180,21 @@ export async function startAssistantStream(params: {
   tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
   toolChoice?: string;
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
-  const requestId = createRequestId();
-  const now = Date.now();
+  const existingStream = findActiveAssistantStream();
+  if (existingStream) {
+    useAppStore.getState().setSendingState({
+      isSending: true,
+      activeRequestId: existingStream.requestId,
+    });
+    throw new Error("A model response is already running");
+  }
+  if (!tryAcquireStreamStartLock()) {
+    throw new Error("A model response is already being prepared");
+  }
+
+  try {
+    const requestId = createRequestId();
+    const now = Date.now();
 
   // 1) Persist the placeholder assistant message through Tauri first
   const assistantMessage = await tauriCmd.createAssistantPlaceholderForBranch({
@@ -167,6 +273,7 @@ export async function startAssistantStream(params: {
         tools: params.tools,
         toolChoice: params.toolChoice,
         conversationId: params.conversationId,
+        branchId: params.branchId,
       },
       (event) => {
         void handleModelStreamEvent(event);
@@ -176,7 +283,10 @@ export async function startAssistantStream(params: {
       void failStream(requestId, normalizeStreamError(error));
     });
 
-  return { requestId, assistantMessageId };
+    return { requestId, assistantMessageId };
+  } finally {
+    releaseStreamStartLock();
+  }
 }
 
 /**
@@ -200,8 +310,21 @@ export async function startAssistantVariantStream(params: {
   tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
   toolChoice?: string;
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
-  const requestId = createRequestId();
-  const now = Date.now();
+  const existingStream = findActiveAssistantStream();
+  if (existingStream) {
+    useAppStore.getState().setSendingState({
+      isSending: true,
+      activeRequestId: existingStream.requestId,
+    });
+    throw new Error("A model response is already running");
+  }
+  if (!tryAcquireStreamStartLock()) {
+    throw new Error("A model response is already being prepared");
+  }
+
+  try {
+    const requestId = createRequestId();
+    const now = Date.now();
   const assistantMessage = await tauriCmd.createAssistantVariantPlaceholder({
     conversationId: params.conversationId,
     parentMessageId: params.parentMessageId,
@@ -274,6 +397,7 @@ export async function startAssistantVariantStream(params: {
         tools: params.tools,
         toolChoice: params.toolChoice,
         conversationId: params.conversationId,
+        branchId: params.branchId,
       },
       (event) => {
         void handleModelStreamEvent(event);
@@ -283,7 +407,10 @@ export async function startAssistantVariantStream(params: {
       void failStream(requestId, normalizeStreamError(error));
     });
 
-  return { requestId, assistantMessageId };
+    return { requestId, assistantMessageId };
+  } finally {
+    releaseStreamStartLock();
+  }
 }
 
 // ============================================================================
@@ -418,6 +545,64 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
       console.info(
         `[stream] tool_result request=${event.requestId} callId=${event.callId} success=${event.success}`
       );
+      return;
+    }
+    case "CONTEXT_COMPRESSING": {
+      console.info(
+        `[stream] context_compressing request=${event.requestId} level=${event.level} usage=${safePercent(event.usageRatio)}%`
+      );
+      useStreamStore.getState().patchSession(event.requestId, {
+        contextCompressing: {
+          level: event.level,
+          usageRatio: Number.isFinite(event.usageRatio) ? event.usageRatio : 0,
+          receivedAt: Date.now(),
+        },
+      });
+      return;
+    }
+    case "CONTEXT_COMPRESSION_SKIPPED": {
+      console.info(
+        `[stream] context_compression_skipped request=${event.requestId} reason=${event.reason} usage=${safePercent(event.usageRatio)}%`
+      );
+      useStreamStore.getState().patchSession(event.requestId, {
+        contextCompressing: undefined,
+      });
+      return;
+    }
+    case "CONTEXT_STATUS_UPDATED": {
+      useStreamStore.getState().patchSession(event.requestId, {
+        contextStatus: {
+          usedTokens: event.usedTokens,
+          totalTokens: event.totalTokens,
+          percentage: Number.isFinite(event.percentage) ? event.percentage : 0,
+          messageCount: event.messageCount,
+          receivedAt: Date.now(),
+        },
+      });
+      return;
+    }
+    case "CONTEXT_COMPRESSED": {
+      console.info(
+        `[stream] context_compressed request=${event.requestId} count=${event.compressedCount} saved=${event.tokensSaved} newUsage=${safePercent(event.newUsageRatio)}%`
+      );
+      useStreamStore.getState().patchSession(event.requestId, {
+        contextCompressed: {
+          compressedCount: event.compressedCount,
+          tokensSaved: event.tokensSaved,
+          newUsageRatio: Number.isFinite(event.newUsageRatio) ? event.newUsageRatio : 0,
+          receivedAt: Date.now(),
+        },
+        contextCompressing: undefined,
+      });
+      // Auto-clear the compressed notification after 4 seconds
+      setTimeout(() => {
+        const s = useStreamStore.getState().sessionsByRequestId[event.requestId];
+        if (s?.contextCompressed && Date.now() - s.contextCompressed.receivedAt > 3000) {
+          useStreamStore.getState().patchSession(event.requestId, {
+            contextCompressed: undefined,
+          });
+        }
+      }, 4000);
       return;
     }
     case "APPROVAL_REQUIRED": {
@@ -685,11 +870,8 @@ export async function completeStream(
   // 4) Update stream session status
   useStreamStore.getState().completeSession(requestId);
 
-  // 4) Reset composer state
-  useAppStore.getState().setSendingState({
-    isSending: false,
-    activeRequestId: null,
-  });
+  // 4) Reset composer state only when no other stream is still active.
+  syncComposerSendingStateToActiveStreams();
 
   // 5) Clean up runtime session
   deleteRuntimeSession(requestId);
@@ -809,11 +991,8 @@ export async function failStream(
   // 4) Update stream session
   useStreamStore.getState().failSession(requestId, error);
 
-  // 4) Reset composer
-  useAppStore.getState().setSendingState({
-    isSending: false,
-    activeRequestId: null,
-  });
+  // 4) Reset composer only when no other stream is still active.
+  syncComposerSendingStateToActiveStreams();
 
   // 5) Clean up runtime
   deleteRuntimeSession(requestId);
@@ -912,11 +1091,8 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     });
   }
 
-  // Reset composer
-  useAppStore.getState().setSendingState({
-    isSending: false,
-    activeRequestId: null,
-  });
+  // Reset composer only when no other stream is still active.
+  syncComposerSendingStateToActiveStreams();
 
   // Clean up
   deleteRuntimeSession(requestId);
