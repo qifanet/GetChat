@@ -165,12 +165,13 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
   }, [currentMatchIndex, searchResults]);
 
   const handleOpenInFileManager = useCallback(async () => {
+    if (!activeConversationId) return;
     try {
-      await tauriCmd.revealInFileManager(filePath);
+      await tauriCmd.revealInFileManager(activeConversationId, filePath);
     } catch (err) {
       console.error("[filePreview] failed to reveal in file manager", err);
     }
-  }, [filePath]);
+  }, [activeConversationId, filePath]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -207,7 +208,10 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
     <div
       className="flex h-full flex-col overflow-hidden bg-white"
       onKeyDown={handleKeyDown}
-      tabIndex={-1}
+      ref={(el) => {
+        if (el) el.focus();
+      }}
+      tabIndex={0}
     >
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-miro-border/20 px-4 py-2.5">
@@ -355,9 +359,8 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
             <div className="px-2 py-1">
               {lines.map((line, index) => {
                 const isMatch = matchedLineIndices.has(index);
-                const isCurrentMatch = searchResults.some(
-                  (r) => r.lineIndex === index && searchResults.indexOf(r) === currentMatchIndex
-                );
+                const currentMatchLine = searchResults[currentMatchIndex]?.lineIndex;
+                const isCurrentMatch = isMatch && index === currentMatchLine;
 
                 return (
                   <div

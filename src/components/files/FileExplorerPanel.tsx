@@ -37,6 +37,7 @@ const DirectoryTreeItem = memo(function DirectoryTreeItem({
   selectedPath,
   onSelect,
 }: DirectoryTreeItemProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirectoryEntryDto[]>([]);
   const [loading, setLoading] = useState(false);
@@ -121,7 +122,7 @@ const DirectoryTreeItem = memo(function DirectoryTreeItem({
           className="px-2 py-1 text-[11px] text-miro-text-secondary"
           style={{ paddingLeft: `${(depth + 1) * 16 + 24}px` }}
         >
-          Empty directory
+          {t("fileExplorer.emptyDirectory")}
         </div>
       )}
     </div>

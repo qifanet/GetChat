@@ -186,7 +186,7 @@ export async function startAssistantStream(params: {
       isSending: true,
       activeRequestId: existingStream.requestId,
     });
-    throw new Error("A model response is already running for this branch");
+    throw new Error("A model response is already running");
   }
   if (!tryAcquireStreamStartLock()) {
     throw new Error("A model response is already being prepared");
@@ -316,7 +316,7 @@ export async function startAssistantVariantStream(params: {
       isSending: true,
       activeRequestId: existingStream.requestId,
     });
-    throw new Error("A model response is already running for this branch");
+    throw new Error("A model response is already running");
   }
   if (!tryAcquireStreamStartLock()) {
     throw new Error("A model response is already being prepared");

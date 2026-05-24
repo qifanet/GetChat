@@ -220,6 +220,18 @@ fn is_known_binary_extension(path: &Path) -> bool {
     BINARY_EXTENSIONS.contains(&ext.as_str())
 }
 
+fn format_file_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 /// Read a file's content for preview. Handles binary files gracefully.
 #[tauri::command]
 pub async fn read_file_preview(
@@ -247,6 +259,24 @@ pub async fn read_file_preview(
             truncated: false,
             language: infer_language(&resolved),
             is_binary: true,
+            file_size,
+        });
+    }
+
+    // Enforce maximum file size to prevent OOM on large files
+    const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024; // 4 MB
+    if file_size > MAX_PREVIEW_BYTES {
+        return Ok(FilePreviewDto {
+            path: resolved.to_str().unwrap_or("").to_string(),
+            content: format!(
+                "File too large to preview ({}). Maximum preview size is {}.",
+                format_file_size(file_size),
+                format_file_size(MAX_PREVIEW_BYTES),
+            ),
+            total_lines: 0,
+            truncated: true,
+            language: infer_language(&resolved),
+            is_binary: false,
             file_size,
         });
     }
@@ -293,13 +323,25 @@ pub async fn read_file_preview(
 }
 
 /// Open a path in the system file manager (Finder / Explorer / etc.).
-/// For files, the file manager will open the parent directory and select the file.
-/// For directories, the file manager will open and select the directory itself.
+/// Validates that the path falls within the conversation's workspace directory.
 #[tauri::command]
-pub async fn reveal_in_file_manager(path: String) -> Result<(), AppError> {
+pub async fn reveal_in_file_manager(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    path: String,
+) -> Result<(), AppError> {
+    let workspace = resolve_workspace_path(&state, &conversation_id, "").await?;
     let p = Path::new(&path);
+
     if !p.exists() {
         return Err(AppError::not_found("Path does not exist"));
+    }
+
+    // Ensure the path is within the workspace directory
+    let canonical_path = p.canonicalize().map_err(|_| AppError::invalid_argument("Invalid path"))?;
+    let canonical_workspace = workspace.canonicalize().map_err(|_| AppError::invalid_argument("Invalid workspace"))?;
+    if !canonical_path.starts_with(&canonical_workspace) {
+        return Err(AppError::invalid_argument("Path is outside the workspace directory"));
     }
 
     tauri_plugin_opener::reveal_item_in_dir(

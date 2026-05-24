@@ -10,7 +10,7 @@
  *   - Absolute paths (Unix): /home/..., /usr/..., /var/...
  *   - Paths with line references: path/to/file.ext:42 or file.ext:10-20
  *
- * The plugin wraps matched paths in link nodes with a "file://" scheme prefix.
+ * The plugin wraps matched paths in link nodes with a custom "file-preview:" protocol.
  * The MarkdownRenderer components then intercept these links for in-app preview.
  */
 
@@ -147,8 +147,12 @@ function visitTextNodes(
     if (child.type === "text") {
       const textChild = child as Text;
 
+      // Include current node as an ancestor so isInsideCode can detect
+      // immediate parent (e.g. link, inlineCode, code).
+      const fullAncestors = [...ancestors, node as Parent];
+
       // Skip text inside code blocks, inline code, or existing links
-      if (isInsideCode(textChild, ancestors)) {
+      if (isInsideCode(textChild, fullAncestors)) {
         continue;
       }
 
@@ -165,7 +169,7 @@ function visitTextNodes(
         children.splice(i, 1, ...segments);
       }
     } else if ("children" in child && child.children) {
-      // Recurse into child nodes
+      // Recurse into child nodes — pass current node + existing ancestors
       visitTextNodes(child as Parent, [...ancestors, node as Parent]);
     }
   }
@@ -193,13 +197,15 @@ export function parseFileLinkUrl(
 
   const raw = href.slice(FILE_LINK_PROTOCOL.length);
 
-  // Check for line reference suffix: :42 or :10-20
-  const lineMatch = raw.match(/^(.+?):(\d+)(?:-(\d+))?$/);
+  // Parse trailing line reference from the end: :42 or :10-20
+  // This avoids issues with Windows absolute paths like C:\repo\file.ts:12
+  // where splitting on the first colon would break.
+  const lineMatch = raw.match(/:(\d+)(?:-(\d+))?$/);
   if (lineMatch) {
     return {
-      path: lineMatch[1],
-      line: parseInt(lineMatch[2], 10),
-      lineEnd: lineMatch[3] ? parseInt(lineMatch[3], 10) : undefined,
+      path: raw.slice(0, raw.length - lineMatch[0].length),
+      line: parseInt(lineMatch[1], 10),
+      lineEnd: lineMatch[2] ? parseInt(lineMatch[2], 10) : undefined,
     };
   }
 

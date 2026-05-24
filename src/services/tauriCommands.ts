@@ -804,6 +804,6 @@ export async function readFilePreview(
   });
 }
 
-export async function revealInFileManager(path: string): Promise<void> {
-  return executeCommand<void>("reveal_in_file_manager", { path });
+export async function revealInFileManager(conversationId: string, path: string): Promise<void> {
+  return executeCommand<void>("reveal_in_file_manager", { conversationId, path });
 }
