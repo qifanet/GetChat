@@ -501,7 +501,7 @@ export function Composer() {
                 onKeyDown={handleKeyDown}
                 placeholder={disabledReason ?? t("composer.placeholder")}
                 rows={1}
-                className={`min-h-[34px] w-full resize-none border-none bg-transparent px-1 py-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none focus:ring-0 ${
+                className={`min-h-[34px] w-full resize-none border-none bg-transparent pl-3 pr-1 pt-2 pb-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none focus:ring-0 ${
                   scrollable
                     ? "overflow-y-auto composer-scrollbar"
                     : "overflow-hidden"

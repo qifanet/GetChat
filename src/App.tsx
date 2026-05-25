@@ -282,7 +282,7 @@ function WorkspaceEmptyState({
 }: WorkspaceEmptyStateProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-full items-center justify-center px-4 py-8">
+    <div className="flex h-full justify-center px-4 py-8 pt-40">
       <div className="w-full max-w-5xl">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mx-auto mb-8 flex justify-center">
