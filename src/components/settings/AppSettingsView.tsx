@@ -5,9 +5,16 @@
  * Contains default model, helper model, system prompt, language,
  * close behavior, shell path, and keyboard shortcuts.
  */
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  ToolSettingsSection,
+  SecurityPolicySection,
+  BuiltinToolsSection,
+  McpServersSection,
+  SkillsSection,
+} from "./GlobalSettingsSections";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
 import {
   getModelDisplayName,
@@ -186,7 +193,7 @@ export function AppSettingsView() {
       <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-4 min-[1800px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
           {/* Default Model */}
-          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+          <section id="section-default-model" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
             <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
@@ -222,7 +229,7 @@ export function AppSettingsView() {
           </section>
 
           {/* Helper Model */}
-          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+          <section id="section-helper-model" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
             <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
@@ -263,7 +270,7 @@ export function AppSettingsView() {
           </section>
 
           {/* System Prompt */}
-          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+          <section id="section-system-prompt" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
             <div className="mb-4 flex min-w-0 flex-col gap-3 min-[1800px]:flex-row min-[1800px]:items-start min-[1800px]:justify-between">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
@@ -310,6 +317,21 @@ export function AppSettingsView() {
             </div>
           </section>
 
+          {/* Tool Settings */}
+          <ToolSettingsSection />
+
+          {/* Security Policy */}
+          <SecurityPolicySection />
+
+          {/* Builtin Tools */}
+          <BuiltinToolsSection />
+
+          {/* MCP Servers */}
+          <McpServersSection />
+
+          {/* Skills */}
+          <SkillsSection />
+
           {/* Error / Feedback */}
           {error && (
             <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -325,7 +347,7 @@ export function AppSettingsView() {
 
         <aside className="min-w-0 space-y-4">
           {/* Language */}
-          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
+          <section id="section-language" className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
@@ -357,10 +379,12 @@ export function AppSettingsView() {
           </section>
 
           {/* Close Behavior & Shell Path */}
+          <div id="section-close-behavior">
           <CloseBehaviorSection />
+          </div>
 
           {/* Shortcuts */}
-          <section className="app-panel rounded-shell bg-white/95 p-5">
+          <section id="section-shortcuts" className="app-panel rounded-shell bg-white/95 p-5">
             <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
               {t("settings.shortcutsTitle")}
             </h3>
@@ -496,6 +520,7 @@ function CloseBehaviorSection() {
         </button>
       </div>
 
+      <div id="section-shell-path">
       <h3 className="mt-6 font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
         {t("settings.shellPathTitle")}
       </h3>
@@ -528,6 +553,7 @@ function CloseBehaviorSection() {
         >
           {saving ? t("common.saving") : t("common.save")}
         </button>
+      </div>
       </div>
     </section>
   );
