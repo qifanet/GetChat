@@ -7,10 +7,9 @@
  * maintain providers, manage multiple model profiles under each provider, and
  * set the application-level fallback model without leaving the workspace.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
 import {
   createModelProfileId,
   getModelDisplayName,
@@ -23,46 +22,14 @@ import { fetchOllamaModels, type OllamaModelInfo } from "../../services/tauriCom
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
+import { AppSettingsView, SettingsToastContext, useSettingsToast } from "./AppSettingsView";
 const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
-const _sel_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
-const _sel_helperModelId = (s: import("../../stores/appStore.types").AppStore) => s.helperModelId;
-const _sel_systemPrompt = (s: import("../../stores/appStore.types").AppStore) => s.systemPrompt;
 const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
 const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
-const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
-const _sel_setHelperModel = (s: import("../../stores/appStore.types").AppStore) => s.setHelperModel;
-const _sel_setSystemPrompt = (s: import("../../stores/appStore.types").AppStore) => s.setSystemPrompt;
 const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
 
-const SHORTCUT_ITEMS = [
-  { key: "newChat", labelKey: "settings.shortcutNewChat", display: "⌘ N" },
-  { key: "send", labelKey: "settings.shortcutSend", display: "⌘ Enter" },
-  { key: "stop", labelKey: "settings.shortcutStop", display: "Esc" },
-  { key: "settings", labelKey: "settings.shortcutSettings", display: "⌘ ," },
-  { key: "sidebar", labelKey: "settings.shortcutSidebar", display: "⌘ B" },
-  { key: "panel", labelKey: "settings.shortcutPanel", display: "⌘ ." },
-  { key: "search", labelKey: "settings.shortcutSearch", display: "⌘ K" },
-] as const;
-function hasUserAgentData(
-  nav: Navigator
-): nav is Navigator & { userAgentData: { platform?: string } } {
-  return "userAgentData" in nav;
-}
-
-function getNavigatorPlatform(): string {
-  if (typeof navigator === "undefined") return "";
-  if (hasUserAgentData(navigator)) {
-    return navigator.userAgentData.platform ?? navigator.platform ?? "";
-  }
-  return navigator.platform ?? "";
-}
-
-function getShortcutModifierLabel(): string {
-  const platform = getNavigatorPlatform();
-  return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
-}
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -93,12 +60,6 @@ interface SettingsToastState {
   visible: boolean;
   tone: "success" | "error";
   message: string;
-}
-
-const SettingsToastContext = createContext<(message: string, tone?: "success" | "error") => void>(() => {});
-
-function useSettingsToast() {
-  return useContext(SettingsToastContext);
 }
 
 const TOAST_AUTO_DISMISS_MS = 2000;
@@ -314,31 +275,21 @@ function resolveDraftModelDisplayName(
 interface ProviderSettingsScreenProps {
   onClose: () => void;
 }
+
+/** Available tabs within the settings page. */
+type SettingsTab = "providers" | "app";
+
 /** Render the provider settings workspace with multi-model configuration support. */
 export function ProviderSettingsScreen({
   onClose,
 }: ProviderSettingsScreenProps) {
-  const { t, i18n } = useTranslation();
-  const shortcutModifierLabel = useMemo(() => getShortcutModifierLabel(), []);
-  const shortcutItems = useMemo(
-    () =>
-      SHORTCUT_ITEMS.map((item) => ({
-        ...item,
-        display: item.display.replace("⌘", shortcutModifierLabel),
-      })),
-    [shortcutModifierLabel]
-  );
+  const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("providers");
   const providersById = useAppStore(_sel_providers);
   const providerModelsById = useAppStore(_sel_providerModels);
   const providerOrder = useAppStore(_sel_providerOrder);
-  const appDefaultModelId = useAppStore(_sel_defaultModelId);
-  const appHelperModelId = useAppStore(_sel_helperModelId);
-  const appSystemPrompt = useAppStore(_sel_systemPrompt);
   const saveProvider = useAppStore(_sel_saveProvider);
   const removeProvider = useAppStore(_sel_removeProvider);
-  const setDefaultModel = useAppStore(_sel_setDefaultModel);
-  const setHelperModel = useAppStore(_sel_setHelperModel);
-  const setSystemPrompt = useAppStore(_sel_setSystemPrompt);
   const loadSettings = useAppStore(_sel_loadSettings);
   const orderedProviders = useMemo(
     () =>
@@ -358,9 +309,6 @@ export function ProviderSettingsScreen({
     providerOrder[0] && providersById[providerOrder[0]]
       ? buildFormFromProvider(providersById[providerOrder[0]], providerModelsById)
       : buildEmptyProviderForm()
-  );
-  const [defaultModelDraft, setDefaultModelDraft] = useState(
-    appDefaultModelId ?? ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
@@ -402,9 +350,6 @@ export function ProviderSettingsScreen({
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
-  useEffect(() => {
-    setDefaultModelDraft(appDefaultModelId ?? "");
-  }, [appDefaultModelId]);
   useEffect(() => {
     if (
       selectedProviderId !== "new" &&
@@ -660,102 +605,6 @@ export function ProviderSettingsScreen({
       setIsSubmitting(false);
     }
   }
-  /** Persist the application-wide default model choice. */
-  async function handleSaveDefaultModel(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await setDefaultModel(defaultModelDraft.trim() || null);
-      setFeedback({
-        tone: "success",
-        message: t("settings.defaultModelSaved"),
-      });
-    } catch (modelError) {
-      setError(
-        modelError instanceof Error
-          ? modelError.message
-          : t("settings.defaultModelSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  const [helperModelDraft, setHelperModelDraft] = useState(
-    appHelperModelId ?? ""
-  );
-  const [systemPromptDraft, setSystemPromptDraft] = useState(appSystemPrompt);
-  const systemPromptCharCount = Array.from(systemPromptDraft).length;
-
-  useEffect(() => {
-    setHelperModelDraft(appHelperModelId ?? "");
-  }, [appHelperModelId]);
-  useEffect(() => {
-    setSystemPromptDraft(appSystemPrompt);
-  }, [appSystemPrompt]);
-
-  async function handleSaveHelperModel(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await setHelperModel(helperModelDraft.trim() || null);
-      setFeedback({
-        tone: "success",
-        message: t("settings.helperModelSaved"),
-      });
-    } catch (modelError) {
-      setError(
-        modelError instanceof Error
-          ? modelError.message
-          : t("settings.helperModelSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-  /** Persist the application-level prompt prefix used for future model requests. */
-  async function handleSaveSystemPrompt(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const savedPrompt = await setSystemPrompt(systemPromptDraft);
-      setSystemPromptDraft(savedPrompt);
-      setFeedback({
-        tone: "success",
-        message: t("settings.systemPromptSaved"),
-      });
-    } catch (promptError) {
-      setError(
-        promptError instanceof Error
-          ? promptError.message
-          : t("settings.systemPromptSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  /** Reset by saving an empty prompt; backend normalizes it to the release default. */
-  async function handleResetSystemPrompt(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const savedPrompt = await setSystemPrompt("");
-      setSystemPromptDraft(savedPrompt);
-      setFeedback({
-        tone: "success",
-        message: t("settings.systemPromptResetDone"),
-      });
-    } catch (promptError) {
-      setError(
-        promptError instanceof Error
-          ? promptError.message
-          : t("settings.systemPromptSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
   /** Probe the current saved provider through the backend connection test command. */
   async function handleTestConnection(): Promise<void> {
     if (selectedProviderId === "new" || isProviderDraftDirty) {
@@ -853,6 +702,30 @@ export function ProviderSettingsScreen({
             </div>
           </div>
         </div>
+        <div className="flex gap-1.5 px-5 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("providers")}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+              activeTab === "providers"
+                ? "bg-miro-blue-light text-miro-blue shadow-ring"
+                : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
+            }`}
+          >
+            {t("settings.providerTab")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("app")}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+              activeTab === "app"
+                ? "bg-miro-blue-light text-miro-blue shadow-ring"
+                : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
+            }`}
+          >
+            {t("settings.appTab")}
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-2 px-5 py-4">
           <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
             <p className="app-section-label mb-1">{t("settings.providerCount")}</p>
@@ -878,9 +751,6 @@ export function ProviderSettingsScreen({
           <div className="space-y-2">
             {orderedProviders.map((provider) => {
               const isSelected = selectedProviderId === provider.id;
-              const isAppDefault = Boolean(
-                appDefaultModelId && provider.modelIds.includes(appDefaultModelId)
-              );
               const providerDefaultModelName = getModelDisplayName(
                 provider.defaultModelId,
                 providerModelsById,
@@ -930,9 +800,6 @@ export function ProviderSettingsScreen({
                     <span className="inline-block max-w-full truncate align-bottom">
                       {providerDefaultModelName}
                     </span>
-                    {isAppDefault ? (
-                      <span className="text-miro-blue">{t("settings.appDefaultBadge")}</span>
-                    ) : null}
                   </div>
                 </button>
               );
@@ -941,21 +808,14 @@ export function ProviderSettingsScreen({
         </div>
         <AboutSection />
       </aside>
-      <div className="min-w-0 flex-1 overflow-auto">
+      <div className="min-w-0 flex-1 overflow-hidden">
+        {activeTab === "app" ? (
+          <AppSettingsView />
+        ) : (
         <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-4 min-[1800px]:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 space-y-4">
             <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
-                  <p className="app-section-label mb-2">{t("settings.defaultModelTitle")}</p>
-                  <p className="line-clamp-2 text-sm font-semibold text-miro-text">
-                    {getModelDisplayName(
-                      appDefaultModelId,
-                      providerModelsById,
-                      t("shell.modelUnset")
-                    )}
-                  </p>
-                </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
                   <p className="app-section-label mb-2">{t("settings.currentObject")}</p>
                   <p className="line-clamp-2 text-sm font-semibold text-miro-text">
@@ -968,127 +828,6 @@ export function ProviderSettingsScreen({
                     {selectedConnectionState}
                   </p>
                 </div>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.defaultModelTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.defaultModelHelp")}
-                  </p>
-                </div>
-                <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                  <select
-                    value={defaultModelDraft}
-                    onChange={(event) => setDefaultModelDraft(event.target.value)}
-                    className="app-input min-w-0 flex-1"
-                  >
-                    <option value="">{t("shell.modelUnset")}</option>
-                    {availableModelOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.providerName} / {option.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveDefaultModel()}
-                    disabled={isSubmitting}
-                    className="app-primary-button"
-                  >
-                    {t("settings.saveDefaultModel")}
-                  </button>
-                </div>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.helperModelTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.helperModelHelp")}
-                  </p>
-                </div>
-                <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                  <select
-                    value={helperModelDraft}
-                    onChange={(event) => setHelperModelDraft(event.target.value)}
-                    className="app-input min-w-0 flex-1"
-                  >
-                    <option value="">{t("settings.helperModelPlaceholder")}</option>
-                    {availableModelOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.providerName} / {option.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveHelperModel()}
-                    disabled={isSubmitting}
-                    className="app-primary-button"
-                  >
-                    {t("common.save")}
-                  </button>
-                </div>
-              </div>
-              {!appHelperModelId && (
-                <p className="mt-3 text-xs text-amber-600">
-                  {t("settings.helperModelNotConfigured")}
-                </p>
-              )}
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="mb-4 flex min-w-0 flex-col gap-3 min-[1800px]:flex-row min-[1800px]:items-start min-[1800px]:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.systemPromptTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.systemPromptHelp")}
-                  </p>
-                </div>
-                <p className="shrink-0 rounded-full bg-miro-surface-low px-3 py-1 text-xs font-medium text-miro-text-secondary">
-                  {t("settings.systemPromptCharCount", {
-                    count: systemPromptCharCount,
-                  })}
-                </p>
-              </div>
-              <textarea
-                value={systemPromptDraft}
-                onChange={(event) => setSystemPromptDraft(event.target.value)}
-                placeholder={t("settings.systemPromptPlaceholder")}
-                rows={12}
-                className="app-input min-h-[220px] w-full min-w-0 resize-y font-mono text-xs leading-5"
-              />
-              <div className="mt-3 rounded-panel bg-miro-surface-low px-4 py-3 text-xs leading-5 text-miro-text-secondary">
-                <p className="font-semibold text-miro-text">
-                  {t("settings.systemPromptPreviewTitle")}
-                </p>
-                <p className="mt-1">{t("settings.systemPromptPreview")}</p>
-              </div>
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => void handleResetSystemPrompt()}
-                  disabled={isSubmitting}
-                  className="app-secondary-button"
-                >
-                  {t("settings.systemPromptReset")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveSystemPrompt()}
-                  disabled={isSubmitting}
-                  className="app-primary-button"
-                >
-                  {t("common.save")}
-                </button>
               </div>
             </section>
             <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
@@ -1387,112 +1126,6 @@ export function ProviderSettingsScreen({
             </section>
           </div>
           <aside className="min-w-0 space-y-4">
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <p className="app-section-label mb-3">{t("settings.currentSummary")}</p>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerCount")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {selectedProviderSummaryName}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerType")}</span>
-                  <span className="font-semibold text-miro-text">
-                    {getProviderTypeLabel(t, form.type)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.connectionState")}</span>
-                  <span className="font-semibold text-miro-text">{selectedConnectionState}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.modelCount")}</span>
-                  <span className="font-semibold text-miro-text">{form.models.length}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerDefaultModel")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {draftDefaultModelName}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.baseUrl")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {form.baseUrl || "--"}
-                  </span>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {form.models.map((model) => (
-                  <span
-                    key={model.id}
-                    className={`rounded-full px-3 py-1 text-xs ${
-                      form.defaultModelId === model.id
-                        ? "bg-miro-blue-light text-miro-blue"
-                        : "bg-miro-surface-low text-miro-text-secondary"
-                    }`}
-                  >
-                    {model.displayName.trim() || model.requestName.trim() || model.id}
-                  </span>
-                ))}
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-                    {t("settings.languageTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.languageHelp")}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  {(Object.entries(SUPPORTED_LOCALES) as [SupportedLocale, string][]).map(
-                    ([localeKey, localeLabel]) => (
-                      <button
-                        key={localeKey}
-                        type="button"
-                        onClick={() => i18n.changeLanguage(localeKey)}
-                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                          i18n.language === localeKey
-                            ? "bg-miro-blue-light text-miro-blue shadow-ring"
-                            : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
-                        }`}
-                      >
-                        {localeLabel}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <p className="app-section-label mb-3">{t("settings.configurationAdvice")}</p>
-              <div className="space-y-3 text-sm leading-6 text-miro-text-secondary">
-                <p>{t("settings.adviceModels")}</p>
-                <p>{t("settings.adviceDefaultModel")}</p>
-                <p>{t("settings.adviceConnection")}</p>
-              </div>
-            </section>
-            <section className="app-panel rounded-shell bg-white/95 p-5">
-              <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-                {t("settings.shortcutsTitle")}
-              </h3>
-              <div className="mt-3 space-y-2">
-                {shortcutItems.map((item) => (
-                  <div key={item.key} className="flex min-w-0 items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate text-miro-text-secondary">
-                      {t(item.labelKey)}
-                    </span>
-                    <kbd className="shrink-0 rounded-md border border-miro-border/30 bg-miro-surface-low px-2 py-0.5 font-mono text-xs text-miro-text">
-                      {item.display}
-                    </kbd>
-                  </div>
-                ))}
-              </div>
-            </section>
             <ToolSettingsSection />
             <SecurityPolicySection />
             <BuiltinToolsSection />
@@ -1501,6 +1134,7 @@ export function ProviderSettingsScreen({
             <SkillsSection />
           </aside>
         </div>
+        )}
       </div>
     </section>
       </div>

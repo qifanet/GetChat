@@ -254,6 +254,10 @@
   "settings": {
     "title": "Provider settings",
     "subtitle": "Manage AI services, the default model, and connection status from one place.",
+    "providerTab": "Providers",
+    "appTab": "App Settings",
+    "appSettingsTitle": "Application settings",
+    "appSettingsSubtitle": "Configure default models, system prompts, language, and behavior.",
     "backToWorkspace": "Back to workspace",
     "providerCount": "Providers",
     "addProvider": "Add provider",
