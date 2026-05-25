@@ -5,6 +5,7 @@
  * The header keeps orientation and primary actions visible without letting
  * long titles, breadcrumbs, and sidebars crush the main reading area.
  */
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -99,11 +100,54 @@ export function TopContextBar() {
 
   const handleModelSelect = useCallback(
     (modelId: string | null) => {
+      if (!currentBranchId) return;
       void setBranchPreferredModel(currentBranchId, modelId);
       setModelDropdownOpen(false);
     },
     [currentBranchId, setBranchPreferredModel]
   );
+
+  const handleSetWorkspace = useCallback(async () => {
+    if (!summary?.id) return;
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("workspaceDir.dirPickerTitle"),
+    });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : selected;
+    await tauriCmd.setConversationWorkspace(summary.id, path);
+    useAppStore.setState(
+      (s) => {
+        if (s.activeSnapshot) {
+          s.activeSnapshot.summary.workspacePath = path;
+        }
+        if (s.summariesById[summary.id]) {
+          s.summariesById[summary.id].workspacePath = path;
+        }
+      },
+      undefined,
+      "workspace/dirSet"
+    );
+  }, [summary?.id, t]);
+
+  const handleClearWorkspace = useCallback(async () => {
+    if (!summary?.id) return;
+    await tauriCmd.setConversationWorkspace(summary.id, null);
+    useAppStore.setState(
+      (s) => {
+        if (s.activeSnapshot) {
+          s.activeSnapshot.summary.workspacePath = null;
+        }
+        if (s.summariesById[summary.id]) {
+          s.summariesById[summary.id].workspacePath = null;
+        }
+      },
+      undefined,
+      "workspace/dirClear"
+    );
+  }, [summary?.id]);
+
   /** Toggle the conversation sidebar while preventing two overlay drawers from overlapping. */
   function handleToggleLeftSidebar(): void {
     const nextCollapsed = !leftCollapsed;

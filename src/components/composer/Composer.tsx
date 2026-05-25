@@ -13,10 +13,8 @@
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStoreSelector";
-import { useStreamStore } from "../../stores/useStreamStore";
 import { sendMessageAction } from "../../features/composer/sendMessageAction";
-import { cancelActiveStreams, cancelStream } from "../../services/streamController";
-import * as tauriCmd from "../../services/tauriCommands";
+import { cancelStream } from "../../services/streamController";
 import type { SendMode } from "../../types/base";
 
 const _sel_workspace_workspaceMode = (s: import("../../stores/appStore.types").AppStore) => s.workspace.workspaceMode;
@@ -31,16 +29,11 @@ const _select_providers = (s: import("../../stores/appStore.types").AppStore) =>
 const _select_setDraft = (s: import("../../stores/appStore.types").AppStore) => s.setDraft;
 const _select_setSendMode = (s: import("../../stores/appStore.types").AppStore) => s.setSendMode;
 
-function finiteNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
 /** Message composer with textarea, send mode dropdown, and stop controls. */
 export function Composer() {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const submitInFlightRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrollable, setScrollable] = useState(false);
   const draft = useAppStore(_select_draft);
@@ -66,21 +59,13 @@ export function Composer() {
   const hasEnabledProvider = providerOrder.some(
     (providerId) => providers[providerId]?.enabled
   );
-  const [contextStatus, setContextStatus] = useState<tauriCmd.ContextStatusDto | null>(null);
-  const [compressing, setCompressing] = useState(false);
-  const enabledProviderCount = useMemo(
-    () => providerOrder.filter((providerId) => providers[providerId]?.enabled).length,
-    [providerOrder, providers]
-  );
-  );
-  const hasEnabledProvider = enabledProviderCount > 0;
   const disabledReason = !hasEnabledProvider
     ? t("composer.providerRequiredHint")
     : !selectedModelId
       ? t("composer.modelRequiredHint")
       : null;
   const canSend =
-    (draft.trim().length > 0 || activeSlashItem !== null) &&
+    draft.trim().length > 0 &&
     !isSending &&
     hasEnabledProvider &&
     Boolean(selectedModelId);
@@ -105,51 +90,21 @@ export function Composer() {
   }, [menuOpen]);
   /** Dispatch the real send action while keeping runtime failures visible in the console. */
   const handleSend = useCallback(async () => {
-    if (submitInFlightRef.current || !canSend) {
+    if (!canSend) {
       return;
     }
-
-    submitInFlightRef.current = true;
-
     try {
-      // If an active slash item is pending, render its template and prepend to draft.
-      if (activeSlashItem) {
-        try {
-          const { item, argsJson } = activeSlashItem;
-          let rendered: string;
-          if (item.itemType === "mcp_prompt" && item.serverName) {
-            rendered = await tauriCmd.executeMcpPrompt(item.serverName, item.name, argsJson);
-          } else {
-            rendered = await tauriCmd.executeSkill(item.name, argsJson);
-          }
-          const userText = draft.trim();
-          const fullText = userText ? `${rendered}\n\n${userText}` : rendered;
-          setDraft(fullText);
-          setActiveSlashItem(null);
-        } catch (err) {
-          console.error("[composer] slash render failed:", err);
-          return;
-        }
-        // Yield so the draft state update propagates before sendMessageAction reads it.
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-
-      try {
-        await sendMessageAction();
-      } catch (error) {
-        console.error("[composer] send failed:", error);
-      }
-    } finally {
-      submitInFlightRef.current = false;
+      await sendMessageAction();
+    } catch (error) {
+      console.error("[composer] send failed:", error);
     }
-  }, [canSend, activeSlashItem, draft, setDraft]);
+  }, [canSend]);
   /** Cancel the active streaming request when the user presses the stop control. */
   const handleStop = useCallback(() => {
-    const cancelled = cancelActiveStreams({ conversationId: activeConversationId });
-    if (cancelled === 0 && activeRequestId) {
-      void cancelStream(activeRequestId);
+    if (activeRequestId) {
+      cancelStream(activeRequestId);
     }
-  }, [activeConversationId, activeRequestId]);
+  }, [activeRequestId]);
   /** Select a send mode from the dropdown and close it. */
   const handleSelectMode = useCallback(
     (mode: SendMode) => {
@@ -175,8 +130,7 @@ export function Composer() {
   /** Auto-resize the textarea; enable scrollbar only when content exceeds 6 lines. */
   const handleInput = useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = event.target.value;
-      setDraft(value);
+      setDraft(event.target.value);
       const element = event.target;
       element.style.height = "auto";
       const newHeight = Math.min(element.scrollHeight, MAX_CONTENT_HEIGHT);
@@ -385,67 +339,6 @@ export function Composer() {
           )}
         </div>
       </div>
-
-      {/* Parameter fill dialog */}
-      {paramDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <button
-            type="button"
-            className="fixed inset-0 bg-slate-950/30 backdrop-blur-[2px]"
-            onClick={() => setParamDialog(null)}
-          />
-          <div className="relative z-10 w-full max-w-md rounded-shell bg-white px-7 py-7 shadow-panel">
-            <h2 className="mb-4 font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
-              /{paramDialog.item.name}
-            </h2>
-            <p className="mb-4 text-sm text-miro-text-secondary">
-              {paramDialog.item.description || "Fill in the parameters:"}
-            </p>
-            <div className="space-y-3">
-              {paramDialog.variables.map((variable) => (
-                <div key={variable}>
-                  <label className="text-xs font-medium text-miro-text">
-                    {variable}
-                  </label>
-                  <input
-                    type="text"
-                    className="app-input mt-1 w-full text-sm"
-                    value={paramDialog.values[variable] ?? ""}
-                    onChange={(e) =>
-                      setParamDialog((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              values: { ...prev.values, [variable]: e.target.value },
-                            }
-                          : null
-                      )
-                    }
-                    placeholder={variable}
-                    autoFocus={paramDialog.variables[0] === variable}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setParamDialog(null)}
-                className="app-secondary-button px-4 py-2 text-sm"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleParamSubmit()}
-                className="app-primary-button px-4 py-2 text-sm"
-              >
-                {t("settings.skillSave")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
