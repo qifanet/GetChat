@@ -52,6 +52,7 @@ export function Composer() {
   const menuRef = useRef<HTMLDivElement>(null);
   const submitInFlightRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrollable, setScrollable] = useState(false);
   // Slash command state
   const [slashItems, setSlashItems] = useState<tauriCmd.SlashItemDto[]>([]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -79,6 +80,13 @@ export function Composer() {
   const activeConversationId = useAppStore(
     (state) => state.workspace.activeConversationId
   );
+
+  // Line height 24px (15px font * 1.6), padding 20px (py-2.5), 6 lines = 164px
+  const MAX_LINES_BEFORE_SCROLL = 6;
+  const LINE_HEIGHT_PX = 24;
+  const PADDING_PX = 20;
+  const MAX_CONTENT_HEIGHT = MAX_LINES_BEFORE_SCROLL * LINE_HEIGHT_PX + PADDING_PX; // 164px
+
   const activeBranchId = useAppStore(
     (state) => state.workspace.currentBranchId
   );
@@ -199,7 +207,9 @@ export function Composer() {
       setDraft(value);
       const element = event.target;
       element.style.height = "auto";
-      element.style.height = `${Math.min(element.scrollHeight, 180)}px`;
+      const newHeight = Math.min(element.scrollHeight, 180);
+      element.style.height = `${newHeight}px`;
+      setScrollable(element.scrollHeight > MAX_CONTENT_HEIGHT);
 
       // Slash command detection: starts with "/" and no newline before the slash
       if (value.startsWith("/")) {
@@ -214,6 +224,16 @@ export function Composer() {
       }
     },
     [setDraft, showSlashMenu]
+  );
+
+  /** Prevent wheel events from bubbling to the message list when textarea is scrollable. */
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLTextAreaElement>) => {
+      if (scrollable) {
+        event.stopPropagation();
+      }
+    },
+    [scrollable]
   );
 
   /** Select a slash item — defer rendering to send time. */
@@ -471,15 +491,24 @@ export function Composer() {
             </div>
           )}
           <div className="flex items-end gap-2.5">
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-              placeholder={disabledReason ?? t("composer.placeholder")}
-              rows={1}
-              className="min-h-[34px] max-h-[180px] flex-1 resize-none bg-transparent px-1 py-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none"
-            />
+            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-white shadow-ring">
+              <div className="w-[calc(100%-6px)]">
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={handleInput}
+                onWheel={handleWheel}
+                onKeyDown={handleKeyDown}
+                placeholder={disabledReason ?? t("composer.placeholder")}
+                rows={1}
+                className={`min-h-[34px] w-full resize-none border-none bg-transparent px-1 py-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none focus:ring-0 ${
+                  scrollable
+                    ? "overflow-y-auto composer-scrollbar"
+                    : "overflow-hidden"
+                }`}
+              />
+              </div>
+            </div>
             {isSending ? (
               <button
                 type="button"
