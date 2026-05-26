@@ -18,7 +18,7 @@
  * original messages. DIRECT_OVERWRITE is the explicit exception and is handled
  * before the normal SendPlan path.
  */
-import { useAppStore } from "../../stores/useAppStore";
+import { useAppStore, sortSummaryOrder } from "../../stores/useAppStore";
 import { buildSendPlan } from "./buildSendPlan";
 import {
   findActiveAssistantStream,
@@ -301,9 +301,7 @@ export async function sendMessageAction(): Promise<void> {
           ...(s.summariesById[conversationId] ?? snapshot.summary),
           ...snapshot.summary,
         };
-        if (!s.summaryOrder.includes(conversationId)) {
-          s.summaryOrder.unshift(conversationId);
-        }
+        sortSummaryOrder(s);
         s.workspace.activeConversationId = conversationId;
         s.workspace.currentBranchId = targetBranchId;
         s.composer.draft = "";
@@ -421,6 +419,7 @@ export async function sendMessageAction(): Promise<void> {
         ...(s.summariesById[plan.conversationId] ?? s.activeSnapshot.summary),
         ...s.activeSnapshot.summary,
       };
+      sortSummaryOrder(s);
       s.workspace.currentBranchId = targetBranchId;
       // 4. Clear all transient state after confirmed persistence
       s.composer.draft = "";

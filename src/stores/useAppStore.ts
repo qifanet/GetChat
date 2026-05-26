@@ -354,6 +354,18 @@ async function persistWorkspaceSelection(
 // Store Implementation
 // ============================================================================
 
+/** Re-sort summaryOrder by updatedAt descending (most recent first). Exported for use in sendMessageAction. */
+export function sortSummaryOrder(s: {
+  summaryOrder: string[];
+  summariesById: Record<string, ConversationSummary>;
+}): void {
+  s.summaryOrder.sort((a, b) => {
+    const aTime = s.summariesById[a]?.updatedAt ?? 0;
+    const bTime = s.summariesById[b]?.updatedAt ?? 0;
+    return bTime - aTime;
+  });
+}
+
 export const useAppStore = create<AppStore>()(
   devtools(
     subscribeWithSelector(
@@ -874,6 +886,7 @@ export const useAppStore = create<AppStore>()(
               if (summary) {
                 summary.updatedAt = updatedBranch.updatedAt;
               }
+              sortSummaryOrder(s);
             },
             undefined,
             "branch/renamed"
@@ -902,6 +915,7 @@ export const useAppStore = create<AppStore>()(
               if (summary) {
                 summary.updatedAt = updatedBranch.updatedAt;
               }
+              sortSummaryOrder(s);
 
               if (s.workspace.currentBranchId === updatedBranch.id) {
                 s.composer.selectedModelId = selectInitialModelId({
@@ -944,6 +958,7 @@ export const useAppStore = create<AppStore>()(
               }
 
               syncBranchCounts(s.activeSnapshot, summary);
+              sortSummaryOrder(s);
 
               if (s.workspace.currentBranchId === branchId) {
                 nextBranchId = resolveNextActiveBranchId(
@@ -991,6 +1006,7 @@ export const useAppStore = create<AppStore>()(
               }
 
               syncBranchCounts(s.activeSnapshot, summary);
+              sortSummaryOrder(s);
             },
             undefined,
             "branch/unarchived"
@@ -1035,6 +1051,7 @@ export const useAppStore = create<AppStore>()(
                 summary.mainlineBranchId = result.newMainlineBranch.id;
                 summary.updatedAt = result.newMainlineBranch.updatedAt;
               }
+              sortSummaryOrder(s);
             },
             undefined,
             "branch/mainlineChanged"
@@ -1154,6 +1171,7 @@ export const useAppStore = create<AppStore>()(
                 ...(s.summariesById[msg.conversationId] ?? s.activeSnapshot.summary),
                 ...s.activeSnapshot.summary,
               };
+              sortSummaryOrder(s);
             },
             undefined,
             "conversation/assistantVariantDeleted"
