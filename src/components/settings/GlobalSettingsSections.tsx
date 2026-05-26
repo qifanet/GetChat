@@ -308,14 +308,17 @@ function BuiltinToolsSection() {
                 role="switch"
                 aria-checked={tool.enabled}
                 onClick={() => void handleToggle(tool.name, !tool.enabled)}
-                className={`relative ml-3 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                className={`relative ml-3 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
                   tool.enabled ? "bg-miro-blue" : "bg-miro-border/40"
                 }`}
               >
                 <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${
-                    tool.enabled ? "translate-x-4" : "translate-x-0.5"
-                  }`}
+                  className="block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-all duration-200"
+                  style={{
+                    transform: tool.enabled
+                      ? 'translate(20px, 3px)'
+                      : 'translate(2px, 3px)',
+                  }}
                 />
               </button>
             </div>
@@ -800,7 +803,7 @@ function McpServersSection() {
                     aria-busy={isPending || undefined}
                     disabled={isPending}
                     onClick={() => void handleToggleEnabled(server.name, !server.enabled)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
                       server.enabled ? "bg-miro-blue" : "bg-miro-border/40"
                     } ${
                       isPending ? "cursor-wait opacity-60" : "cursor-pointer"
@@ -808,9 +811,12 @@ function McpServersSection() {
                     title={server.enabled ? t("settings.mcpDisableServer") : t("settings.mcpEnableServer")}
                   >
                     <span
-                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-                        server.enabled ? "translate-x-4" : "translate-x-0.5"
-                      }`}
+                      className="block h-3.5 w-3.5 rounded-full bg-white shadow transition-all duration-200"
+                      style={{
+                        transform: server.enabled
+                          ? 'translate(20px, 3px)'
+                          : 'translate(2px, 3px)',
+                      }}
                     />
                   </button>
                   <button
