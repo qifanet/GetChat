@@ -1092,7 +1092,7 @@ export function ProviderSettingsScreen({
                     <button
                       type="button"
                       onClick={handleAddModel}
-                      className="app-secondary-button px-4 py-2 text-sm"
+                      className="app-secondary-button shrink-0 whitespace-nowrap px-4 py-2 text-sm"
                     >
                       + {t("settings.addModel")}
                     </button>
