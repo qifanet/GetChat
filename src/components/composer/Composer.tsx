@@ -491,7 +491,7 @@ export function Composer() {
             </div>
           )}
           <div className="flex items-end gap-2.5">
-            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-white shadow-ring">
+            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-white shadow-ring composer-input-box">
               <div className="w-[calc(100%-6px)]">
               <textarea
                 ref={textareaRef}

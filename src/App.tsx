@@ -935,11 +935,11 @@ export function App() {
       <div
         className="h-full pt-16"
         style={{
-          paddingLeft: isCompactShell ? 0 : desktopLeftInset,
-          paddingRight: isCompactShell ? 0 : desktopRightInset,
+          paddingLeft: isCompactShell ? 0 : (isSettingsPage ? 0 : desktopLeftInset),
+          paddingRight: isCompactShell ? 0 : (isSettingsPage ? 0 : desktopRightInset),
         }}
       >
-        <div className="h-full overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4">
+        <div className={`h-full overflow-hidden ${isSettingsPage ? "pr-1 pl-4 pb-4 pt-3" : "px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4"}`}>
           {isSettingsPage ? (
             <ProviderSettingsScreen onClose={handleOpenWorkspace} />
           ) : (

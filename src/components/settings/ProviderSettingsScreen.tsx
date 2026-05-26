@@ -668,7 +668,7 @@ export function ProviderSettingsScreen({
 
   return (
     <SettingsToastContext.Provider value={showToast}>
-      <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-4">
         {toast.visible && (
           <div
             className={`absolute left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
@@ -940,7 +940,7 @@ export function ProviderSettingsScreen({
         {activeTab === "app" ? (
           <AppSettingsView />
         ) : (
-        <div className="mx-auto min-w-0 w-full max-w-6xl space-y-4">
+        <div className="mx-auto w-full max-w-6xl space-y-4 pt-2">
           <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
