@@ -210,7 +210,7 @@ export function AppSettingsView() {
 
   return (
     <div className="min-w-0 flex-1 overflow-auto">
-      <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-4 min-[1800px]:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid min-w-0 w-full gap-4 min-[1800px]:grid-cols-[minmax(0,1fr)_minmax(360px,1fr)]">
         <div className="min-w-0 space-y-4">
           {/* Default Model */}
           <section id="section-default-model" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
@@ -469,11 +469,11 @@ export function AppSettingsView() {
           )}
         </div>
 
-        <aside className="min-w-0 space-y-4">
+        <aside className="space-y-4">
           {/* Language */}
-          <section id="section-language" className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-            <div className="flex items-center justify-between">
-              <div>
+          <section id="section-language" className="app-panel rounded-shell bg-white/95 px-5 py-4">
+            <div className="grid grid-cols-[1fr_auto] items-center gap-x-4">
+              <div className="min-w-0">
                 <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
                   {t("settings.languageTitle")}
                 </h3>
@@ -481,14 +481,14 @@ export function AppSettingsView() {
                   {t("settings.languageHelp")}
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex shrink-0 gap-1.5">
                 {(Object.entries(SUPPORTED_LOCALES) as [SupportedLocale, string][]).map(
                   ([localeKey, localeLabel]) => (
                     <button
                       key={localeKey}
                       type="button"
                       onClick={() => i18n.changeLanguage(localeKey)}
-                      className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold whitespace-nowrap transition-colors ${
                         i18n.language === localeKey
                           ? "bg-miro-blue-light text-miro-blue shadow-ring"
                           : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
@@ -609,7 +609,7 @@ function CloseBehaviorSection() {
       <p className="mt-1 text-xs text-miro-text-secondary">
         {t("settings.closeBehaviorHelp")}
       </p>
-      <div className="mt-3 flex gap-3">
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
         <button
           type="button"
           onClick={() => handleCloseBehaviorChange("exit")}
@@ -622,7 +622,7 @@ function CloseBehaviorSection() {
           <div className="text-sm font-medium text-miro-text">
             {t("settings.closeBehaviorExit")}
           </div>
-          <div className="mt-0.5 text-xs text-miro-text-secondary">
+          <div className="mt-0.5 text-xs leading-5 text-miro-text-secondary">
             {t("settings.closeBehaviorExitDesc")}
           </div>
         </button>
@@ -638,7 +638,7 @@ function CloseBehaviorSection() {
           <div className="text-sm font-medium text-miro-text">
             {t("settings.closeBehaviorTray")}
           </div>
-          <div className="mt-0.5 text-xs text-miro-text-secondary">
+          <div className="mt-0.5 text-xs leading-5 text-miro-text-secondary">
             {t("settings.closeBehaviorTrayDesc")}
           </div>
         </button>

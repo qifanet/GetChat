@@ -940,7 +940,7 @@ export function ProviderSettingsScreen({
         {activeTab === "app" ? (
           <AppSettingsView />
         ) : (
-        <div className="mx-auto w-full max-w-6xl space-y-4 pt-2">
+        <div className="w-full space-y-4 pt-2 pr-4">
           <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">

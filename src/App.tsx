@@ -263,7 +263,7 @@ function ShellHeader({
             : t("shell.providersMissing")}
         </span>
         {defaultModelName !== t("shell.modelUnset") ? (
-          <span className="app-status-pill hidden xl:inline-flex">
+          <span className="app-status-pill inline-flex">
             {defaultModelName}
           </span>
         ) : null}
