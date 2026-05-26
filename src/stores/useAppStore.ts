@@ -703,10 +703,6 @@ export const useAppStore = create<AppStore>()(
                 s.activeSnapshotStatus = "READY";
                 s.activeSnapshotError = undefined;
                 s.summariesById[conversationId] = summary;
-                s.summaryOrder = [
-                  conversationId,
-                  ...s.summaryOrder.filter((id) => id !== conversationId),
-                ];
                 s.workspace.activeConversationId = conversationId;
                 s.workspace.currentBranchId = resolvedBranchId;
                 s.workspace.workspaceMode = "NORMAL";
