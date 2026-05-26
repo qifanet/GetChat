@@ -671,7 +671,7 @@ export function ProviderSettingsScreen({
       <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-4">
         {toast.visible && (
           <div
-            className={`absolute left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
+            className={`fixed left-1/2 top-4 z-[9999] -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
               toast.tone === "success"
                 ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
                 : "border border-red-200 bg-red-50 text-red-700"
