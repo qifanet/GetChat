@@ -214,7 +214,7 @@ export function AppSettingsView() {
         <div className="min-w-0 space-y-4">
           {/* Default Model */}
           <section id="section-default-model" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-            <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
+            <div className="flex min-w-0 flex-col gap-4">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
                   {t("settings.defaultModelTitle")}
@@ -223,7 +223,7 @@ export function AppSettingsView() {
                   {t("settings.defaultModelHelp")}
                 </p>
               </div>
-              <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
+              <div className="flex min-w-0 items-end gap-3">
                 <div ref={defaultModelDropdownRef} className="relative min-w-0 flex-1">
                   <button
                     type="button"
@@ -292,9 +292,9 @@ export function AppSettingsView() {
                   type="button"
                   onClick={() => void handleSaveDefaultModel()}
                   disabled={isSubmitting}
-                  className="app-primary-button"
+                  className="app-primary-button shrink-0 whitespace-nowrap"
                 >
-                  {t("settings.saveDefaultModel")}
+                  {t("common.save")}
                 </button>
               </div>
             </div>
@@ -302,7 +302,7 @@ export function AppSettingsView() {
 
           {/* Helper Model */}
           <section id="section-helper-model" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-            <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
+            <div className="flex min-w-0 flex-col gap-4">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
                   {t("settings.helperModelTitle")}
@@ -311,7 +311,7 @@ export function AppSettingsView() {
                   {t("settings.helperModelHelp")}
                 </p>
               </div>
-              <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
+              <div className="flex min-w-0 items-end gap-3">
                 <div ref={helperModelDropdownRef} className="relative min-w-0 flex-1">
                   <button
                     type="button"
@@ -380,7 +380,7 @@ export function AppSettingsView() {
                   type="button"
                   onClick={() => void handleSaveHelperModel()}
                   disabled={isSubmitting}
-                  className="app-primary-button"
+                  className="app-primary-button shrink-0 whitespace-nowrap"
                 >
                   {t("common.save")}
                 </button>
