@@ -693,10 +693,12 @@ function SidebarEdgeStrip({
   side,
   onExpand,
   panelWidth,
+  isCollapsed,
 }: {
   side: "left" | "right";
   onExpand: () => void;
   panelWidth?: number;
+  isCollapsed?: boolean;
 }) {
   const { t } = useTranslation();
   const buttonOffset = panelWidth !== undefined ? panelWidth - 18 : 8;
@@ -717,9 +719,17 @@ function SidebarEdgeStrip({
       }
     >
       {side === "left" ? (
-        <IconChevronRight size={14} className="text-miro-text-secondary" />
+        isCollapsed ? (
+          <IconChevronRight size={14} className="text-miro-text-secondary" />
+        ) : (
+          <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        )
       ) : (
-        <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        isCollapsed ? (
+          <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        ) : (
+          <IconChevronRight size={14} className="text-miro-text-secondary" />
+        )
       )}
     </button>
   );
@@ -877,8 +887,9 @@ export function App() {
       {!isCompactShell && (
         <SidebarEdgeStrip
           side="left"
-          onExpand={() => setLeftSidebarCollapsed(false)}
+          onExpand={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
           panelWidth={leftSidebarCollapsed ? undefined : DESKTOP_LEFT_SIDEBAR_WIDTH_PX}
+          isCollapsed={leftSidebarCollapsed}
         />
       )}
       {showRightRail ? (
@@ -916,8 +927,9 @@ export function App() {
       {!isCompactShell && showRightRail && (
         <SidebarEdgeStrip
           side="right"
-          onExpand={() => setRightPanelCollapsed(false)}
+          onExpand={() => setRightPanelCollapsed(!rightPanelCollapsed)}
           panelWidth={rightPanelCollapsed ? undefined : DESKTOP_RIGHT_RAIL_WIDTH_PX}
+          isCollapsed={rightPanelCollapsed}
         />
       )}
       <div
