@@ -105,16 +105,7 @@ export function AppSettingsView() {
   const helperModelDropdownRef = useRef<HTMLDivElement>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ tone: "success" | "error" | "info"; message: string } | null>(null);
   const showToast = useSettingsToast();
-
-  const feedbackClassName =
-    feedback?.tone === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : feedback?.tone === "error"
-        ? "border-red-200 bg-red-50 text-red-700"
-        : "border-miro-border bg-miro-bg text-miro-text-secondary";
 
   useEffect(() => {
     setDefaultModelDraft(appDefaultModelId ?? "");
@@ -145,13 +136,13 @@ export function AppSettingsView() {
   /** Persist the application-wide default model choice. */
   async function handleSaveDefaultModel(): Promise<void> {
     setIsSubmitting(true);
-    setError(null);
     try {
       await setDefaultModel(defaultModelDraft.trim() || null);
-      setFeedback({ tone: "success", message: t("settings.defaultModelSaved") });
+      showToast(t("common.saved"));
     } catch (modelError) {
-      setError(
-        modelError instanceof Error ? modelError.message : t("settings.defaultModelSaveFailed")
+      showToast(
+        modelError instanceof Error ? modelError.message : t("settings.defaultModelSaveFailed"),
+        "error"
       );
     } finally {
       setIsSubmitting(false);
@@ -161,13 +152,13 @@ export function AppSettingsView() {
   /** Persist the helper model used for background AI tasks. */
   async function handleSaveHelperModel(): Promise<void> {
     setIsSubmitting(true);
-    setError(null);
     try {
       await setHelperModel(helperModelDraft.trim() || null);
-      setFeedback({ tone: "success", message: t("settings.helperModelSaved") });
+      showToast(t("common.saved"));
     } catch (modelError) {
-      setError(
-        modelError instanceof Error ? modelError.message : t("settings.helperModelSaveFailed")
+      showToast(
+        modelError instanceof Error ? modelError.message : t("settings.helperModelSaveFailed"),
+        "error"
       );
     } finally {
       setIsSubmitting(false);
@@ -177,14 +168,14 @@ export function AppSettingsView() {
   /** Persist the application-level prompt prefix used for future model requests. */
   async function handleSaveSystemPrompt(): Promise<void> {
     setIsSubmitting(true);
-    setError(null);
     try {
       const savedPrompt = await setSystemPrompt(systemPromptDraft);
       setSystemPromptDraft(savedPrompt);
-      setFeedback({ tone: "success", message: t("settings.systemPromptSaved") });
+      showToast(t("common.saved"));
     } catch (promptError) {
-      setError(
-        promptError instanceof Error ? promptError.message : t("settings.systemPromptSaveFailed")
+      showToast(
+        promptError instanceof Error ? promptError.message : t("settings.systemPromptSaveFailed"),
+        "error"
       );
     } finally {
       setIsSubmitting(false);
@@ -194,14 +185,14 @@ export function AppSettingsView() {
   /** Reset the system prompt by saving an empty value. */
   async function handleResetSystemPrompt(): Promise<void> {
     setIsSubmitting(true);
-    setError(null);
     try {
       const savedPrompt = await setSystemPrompt("");
       setSystemPromptDraft(savedPrompt);
-      setFeedback({ tone: "success", message: t("settings.systemPromptResetDone") });
+      showToast(t("common.saved"));
     } catch (promptError) {
-      setError(
-        promptError instanceof Error ? promptError.message : t("settings.systemPromptSaveFailed")
+      showToast(
+        promptError instanceof Error ? promptError.message : t("settings.systemPromptSaveFailed"),
+        "error"
       );
     } finally {
       setIsSubmitting(false);
@@ -457,16 +448,6 @@ export function AppSettingsView() {
           <SkillsSection />
 
           {/* Error / Feedback */}
-          {error && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-          {feedback && (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackClassName}`}>
-              {feedback.message}
-            </div>
-          )}
         </div>
 
         <aside className="space-y-4">
