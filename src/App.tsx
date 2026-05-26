@@ -688,40 +688,40 @@ function WorkspaceCenter({
     </main>
   );
 }
-/** Fixed edge strip used to reopen a collapsed desktop sidebar. */
+/** Fixed edge strip used to reopen or collapse a desktop sidebar. */
 function SidebarEdgeStrip({
   side,
   onExpand,
+  panelWidth,
 }: {
   side: "left" | "right";
   onExpand: () => void;
+  panelWidth?: number;
 }) {
   const { t } = useTranslation();
+  const buttonOffset = panelWidth !== undefined ? panelWidth - 18 : 8;
   return (
-    <div
-      className={`group fixed top-16 bottom-8 z-20 w-12 ${
-        side === "left" ? "left-0" : "right-0"
-      }`}
+    <button
+      type="button"
+      onClick={onExpand}
+      title={
+        side === "left"
+          ? t("common.toggleLeftSidebar")
+          : t("common.toggleRightSidebar")
+      }
+      className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-white/88 shadow-float opacity-0 transition-all duration-200 hover:opacity-100 hover:bg-white`}
+      style={
+        side === "left"
+          ? { left: buttonOffset }
+          : { right: buttonOffset }
+      }
     >
-      <button
-        type="button"
-        onClick={onExpand}
-        title={
-          side === "left"
-            ? t("common.toggleLeftSidebar")
-            : t("common.toggleRightSidebar")
-        }
-        className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-white/88 shadow-float opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-white ${
-          side === "left" ? "left-2" : "right-2"
-        }`}
-      >
-        {side === "left" ? (
-          <IconChevronRight size={14} className="text-miro-text-secondary" />
-        ) : (
-          <IconChevronLeft size={14} className="text-miro-text-secondary" />
-        )}
-      </button>
-    </div>
+      {side === "left" ? (
+        <IconChevronRight size={14} className="text-miro-text-secondary" />
+      ) : (
+        <IconChevronLeft size={14} className="text-miro-text-secondary" />
+      )}
+    </button>
   );
 }
 // ============================================================================
@@ -874,12 +874,13 @@ export function App() {
           onOpenSettings={handleOpenSettings}
         />
       </div>
-      {!isCompactShell && leftSidebarCollapsed ? (
+      {!isCompactShell && (
         <SidebarEdgeStrip
           side="left"
           onExpand={() => setLeftSidebarCollapsed(false)}
+          panelWidth={leftSidebarCollapsed ? undefined : DESKTOP_LEFT_SIDEBAR_WIDTH_PX}
         />
-      ) : null}
+      )}
       {showRightRail ? (
         <div
           className={
@@ -912,12 +913,13 @@ export function App() {
           </aside>
         </div>
       ) : null}
-      {!isCompactShell && showRightRail && rightPanelCollapsed ? (
+      {!isCompactShell && showRightRail && (
         <SidebarEdgeStrip
           side="right"
           onExpand={() => setRightPanelCollapsed(false)}
+          panelWidth={rightPanelCollapsed ? undefined : DESKTOP_RIGHT_RAIL_WIDTH_PX}
         />
-      ) : null}
+      )}
       <div
         className="h-full pt-16"
         style={{
