@@ -345,6 +345,7 @@
     "shortcutSidebar": "Toggle sidebar",
     "shortcutPanel": "Toggle right panel",
     "shortcutSearch": "Full-text search",
+    "shortcutsHelp": "View and manage all keyboard shortcuts",
     "toolSettingsTitle": "Tool Settings",
     "toolSettingsHelp": "Configure tool calling limits and approval behavior for the AI assistant.",
     "maxIterations": "Max tool call rounds",

@@ -929,7 +929,7 @@ export function ProviderSettingsScreen({
                     className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.shortcutsTitle")}</div>
-                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shortcutsHelp", "查看和管理所有快捷键")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shortcutsHelp")}</div>
                   </button>
                 </div>
               </div>
