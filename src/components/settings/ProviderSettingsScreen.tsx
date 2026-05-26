@@ -682,8 +682,8 @@ export function ProviderSettingsScreen({
             {toast.message}
           </div>
         )}
-        <section className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-transparent xl:flex-row">
-          <aside className="app-panel flex min-w-0 w-full shrink-0 flex-col rounded-shell bg-white/95 xl:w-[330px]">
+        <section className="flex h-full min-w-0 flex-1 gap-4 overflow-auto bg-transparent">
+          <aside className="app-panel flex min-w-0 shrink-0 flex-col rounded-shell bg-white/95 w-[330px]">
             <div className="border-b border-miro-border/10 px-5 py-5">
               <button
                 type="button"
