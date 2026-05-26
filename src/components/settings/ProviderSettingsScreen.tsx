@@ -958,15 +958,26 @@ export function ProviderSettingsScreen({
               </div>
             </section>
             <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="mb-6 flex flex-col gap-2">
-                <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                  {selectedProviderId === "new"
-                    ? t("settings.createProviderTitle")
-                    : t("settings.editProviderTitle")}
-                </h3>
-                <p className="text-sm leading-6 text-miro-text-secondary">
-                  {t("settings.providerFormHelp")}
-                </p>
+              <div className="mb-6 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
+                    {selectedProviderId === "new"
+                      ? t("settings.createProviderTitle")
+                      : t("settings.editProviderTitle")}
+                  </h3>
+                  <p className="text-sm leading-6 text-miro-text-secondary">
+                    {t("settings.providerFormHelp")}
+                  </p>
+                </div>
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-panel bg-miro-surface-low px-4 py-3 text-sm text-miro-text shadow-ring">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(event) => patchForm("enabled", event.target.checked)}
+                    className="rounded border-miro-border text-miro-blue focus:ring-miro-blue/30"
+                  />
+                  <span>{t("settings.enabledProvider")}</span>
+                </label>
               </div>
               <form className="space-y-5" onSubmit={(event) => void handleSaveProvider(event)}>
                 <div className="grid gap-5 md:grid-cols-2">
@@ -1042,15 +1053,6 @@ export function ProviderSettingsScreen({
                     className="app-input"
                     required
                   />
-                </label>
-                <label className="inline-flex items-center gap-3 rounded-panel bg-miro-surface-low px-4 py-3 text-sm text-miro-text shadow-ring">
-                  <input
-                    type="checkbox"
-                    checked={form.enabled}
-                    onChange={(event) => patchForm("enabled", event.target.checked)}
-                    className="rounded border-miro-border text-miro-blue focus:ring-miro-blue/30"
-                  />
-                  <span>{t("settings.enabledProvider")}</span>
                 </label>
                 {form.type !== "OLLAMA" && (
                 <label className="space-y-2">
