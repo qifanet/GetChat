@@ -1126,12 +1126,12 @@ export function ProviderSettingsScreen({
                                 {t("settings.modelRoutingHelp")}
                               </p>
                             </div>
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-2">
                               {!isProviderDefault ? (
                                 <button
                                   type="button"
                                   onClick={() => patchForm("defaultModelId", model.id)}
-                                  className="app-secondary-button px-3 py-2 text-xs"
+                                  className="app-secondary-button shrink-0 whitespace-nowrap px-3 py-2 text-xs"
                                 >
                                   {t("settings.setAsProviderDefault")}
                                 </button>
@@ -1140,7 +1140,7 @@ export function ProviderSettingsScreen({
                                 type="button"
                                 onClick={() => handleRemoveModel(model.id)}
                                 disabled={form.models.length <= 1}
-                                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-red-200 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-red-200 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
                                 title={t("settings.deleteProvider")}
                               >
                                 <IconTrash size={14} />
