@@ -395,7 +395,7 @@ export function AppSettingsView() {
 
           {/* System Prompt */}
           <section id="section-system-prompt" className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-            <div className="mb-4 flex min-w-0 flex-col gap-3 min-[1800px]:flex-row min-[1800px]:items-start min-[1800px]:justify-between">
+            <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
                   {t("settings.systemPromptTitle")}
