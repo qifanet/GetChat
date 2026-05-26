@@ -42,19 +42,30 @@ function ToolSettingsSection() {
   const { t } = useTranslation();
   const showToast = useSettingsToast();
   const [settings, setSettings] = useState<tauriCmd.ToolSettingsDto | null>(null);
+  const [draft, setDraft] = useState<tauriCmd.ToolSettingsDto | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    tauriCmd.getToolSettings().then(setSettings).catch(() => {});
+    tauriCmd.getToolSettings().then((loaded) => {
+      setSettings(loaded);
+      setDraft(loaded);
+    }).catch(() => {});
   }, []);
 
-  if (!settings) return null;
+  if (!settings || !draft) return null;
 
-  async function handleSave(patch: Partial<tauriCmd.ToolSettingsDto>) {
+  async function handleSave() {
+    if (!draft) return;
     setSaving(true);
     try {
-      const updated = await tauriCmd.updateToolSettings(patch);
+      const updated = await tauriCmd.updateToolSettings({
+        max_iterations: draft!.max_iterations,
+        max_consecutive_failures: draft!.max_consecutive_failures,
+        approval_timeout_secs: draft!.approval_timeout_secs,
+        tool_execution_timeout_secs: draft!.tool_execution_timeout_secs,
+      });
       setSettings(updated);
+      setDraft(updated);
       showToast(t("common.saved"));
     } catch (err) {
       console.error("[tool-settings] failed to save", err);
@@ -64,114 +75,125 @@ function ToolSettingsSection() {
     }
   }
 
+  function updateField<K extends keyof tauriCmd.ToolSettingsDto>(key: K, value: tauriCmd.ToolSettingsDto[K]) {
+    setDraft((prev) => prev ? { ...prev, [key]: value } : prev);
+  }
+
   return (
     <section id="section-tool-settings" className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.toolSettingsTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.toolSettingsHelp")}
-      </p>
-      <div className="mt-4 space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.maxIterations")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={settings.max_iterations}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 100) {
-                  setSettings({ ...settings, max_iterations: v });
-                }
-              }}
-              onBlur={() => void handleSave({ max_iterations: settings.max_iterations })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.maxIterationsHelp")}
-            </span>
-          </div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+            {t("settings.toolSettingsTitle")}
+          </h3>
+          <p className="mt-1 text-xs text-miro-text-secondary">
+            {t("settings.toolSettingsHelp")}
+          </p>
         </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.maxConsecutiveFailures")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={settings.max_consecutive_failures}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 20) {
-                  setSettings({ ...settings, max_consecutive_failures: v });
-                }
-              }}
-              onBlur={() => void handleSave({ max_consecutive_failures: settings.max_consecutive_failures })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.maxConsecutiveFailuresHelp")}
-            </span>
+        <div className="flex min-w-0 items-end gap-3">
+          <div className="min-w-0 flex-1 space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-miro-text">
+                {t("settings.maxIterations")}
+              </label>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={draft.max_iterations}
+                  className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 100) {
+                      updateField("max_iterations", v);
+                    }
+                  }}
+                />
+                <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
+                  {t("settings.maxIterationsHelp")}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-miro-text">
+                {t("settings.maxConsecutiveFailures")}
+              </label>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={draft.max_consecutive_failures}
+                  className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 20) {
+                      updateField("max_consecutive_failures", v);
+                    }
+                  }}
+                />
+                <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
+                  {t("settings.maxConsecutiveFailuresHelp")}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-miro-text">
+                {t("settings.approvalTimeout")}
+              </label>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <input
+                  type="number"
+                  min={10}
+                  max={600}
+                  value={draft.approval_timeout_secs}
+                  className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 10 && v <= 600) {
+                      updateField("approval_timeout_secs", v);
+                    }
+                  }}
+                />
+                <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
+                  {t("settings.approvalTimeoutHelp")}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-miro-text">
+                {t("settings.toolExecutionTimeout")}
+              </label>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <input
+                  type="number"
+                  min={10}
+                  max={600}
+                  value={draft.tool_execution_timeout_secs}
+                  className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 10 && v <= 600) {
+                      updateField("tool_execution_timeout_secs", v);
+                    }
+                  }}
+                />
+                <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
+                  {t("settings.toolExecutionTimeoutHelp")}
+                </span>
+              </div>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="app-primary-button shrink-0 whitespace-nowrap"
+          >
+            {t("common.save")}
+          </button>
         </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.approvalTimeout")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={10}
-              max={600}
-              value={settings.approval_timeout_secs}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 600) {
-                  setSettings({ ...settings, approval_timeout_secs: v });
-                }
-              }}
-              onBlur={() => void handleSave({ approval_timeout_secs: settings.approval_timeout_secs })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.approvalTimeoutHelp")}
-            </span>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.toolExecutionTimeout")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={10}
-              max={600}
-              value={settings.tool_execution_timeout_secs}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 600) {
-                  setSettings({ ...settings, tool_execution_timeout_secs: v });
-                }
-              }}
-              onBlur={() => void handleSave({ tool_execution_timeout_secs: settings.tool_execution_timeout_secs })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.toolExecutionTimeoutHelp")}
-            </span>
-          </div>
-        </div>
-        {saving && (
-          <p className="text-xs text-miro-text-secondary">{t("common.saving")}</p>
-        )}
       </div>
     </section>
   );
