@@ -298,6 +298,29 @@ export function ProviderSettingsScreen({
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<SettingsFeedbackState | null>(null);
+
+  // Dropdown state for provider type
+  const [providerTypeDropdownOpen, setProviderTypeDropdownOpen] = useState(false);
+  const providerTypeDropdownRef = useRef<HTMLDivElement>(null);
+
+  const providerTypeOptions: { value: ProviderType; label: string }[] = [
+    { value: "OPENAI_COMPATIBLE", label: t("settings.providerTypeOpenAI") },
+    { value: "DEEPSEEK", label: t("settings.providerTypeDeepSeek") },
+    { value: "OPENROUTER", label: t("settings.providerTypeOpenRouter") },
+    { value: "GROQ", label: t("settings.providerTypeGroq") },
+    { value: "OLLAMA", label: t("settings.providerTypeOllama") },
+  ];
+
+  // External click handler to close provider type dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (providerTypeDropdownOpen && providerTypeDropdownRef.current && !providerTypeDropdownRef.current.contains(event.target as Node)) {
+        setProviderTypeDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [providerTypeDropdownOpen]);
   const selectedSavedProvider =
     selectedProviderId !== "new" ? providersById[selectedProviderId] ?? null : null;
   const isProviderDraftDirty = useMemo(
@@ -947,34 +970,56 @@ export function ProviderSettingsScreen({
               </div>
               <form className="space-y-5" onSubmit={(event) => void handleSaveProvider(event)}>
                 <div className="grid gap-5 md:grid-cols-2">
-                  <label className="space-y-2">
+                  <div className="space-y-2">
                     <span className="text-sm font-medium text-miro-text">
                       {t("settings.providerType")}
                     </span>
-                    <select
-                      value={form.type}
-                      onChange={(event) =>
-                        applyProviderType(event.target.value as ProviderType)
-                      }
-                      className="app-input"
-                    >
-                      <option value="OPENAI_COMPATIBLE">
-                        {t("settings.providerTypeOpenAI")}
-                      </option>
-                      <option value="DEEPSEEK">
-                        {t("settings.providerTypeDeepSeek")}
-                      </option>
-                      <option value="OPENROUTER">
-                        {t("settings.providerTypeOpenRouter")}
-                      </option>
-                      <option value="GROQ">
-                        {t("settings.providerTypeGroq")}
-                      </option>
-                      <option value="OLLAMA">
-                        {t("settings.providerTypeOllama")}
-                      </option>
-                    </select>
-                  </label>
+                    <div ref={providerTypeDropdownRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setProviderTypeDropdownOpen((prev) => !prev)}
+                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                      >
+                        <span className="flex-1">
+                          {getProviderTypeLabel(t, form.type as ProviderType)}
+                        </span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-miro-text-secondary">
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                      </button>
+                      {providerTypeDropdownOpen && (
+                        <div
+                          role="listbox"
+                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                        >
+                          {providerTypeOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              role="option"
+                              type="button"
+                              aria-selected={form.type === option.value}
+                              onClick={() => {
+                                applyProviderType(option.value);
+                                setProviderTypeDropdownOpen(false);
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                                form.type === option.value
+                                  ? "bg-miro-blue-light/65 text-miro-blue"
+                                  : "text-miro-text hover:bg-miro-surface-high"
+                              }`}
+                            >
+                              <span className="flex-1">{option.label}</span>
+                              {form.type === option.value && (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-miro-text">
                       {t("settings.providerName")}

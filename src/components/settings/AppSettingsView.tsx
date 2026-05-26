@@ -5,7 +5,7 @@
  * Contains default model, helper model, system prompt, language,
  * close behavior, shell path, and keyboard shortcuts.
  */
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -98,6 +98,12 @@ export function AppSettingsView() {
   const [systemPromptDraft, setSystemPromptDraft] = useState(appSystemPrompt);
   const systemPromptCharCount = Array.from(systemPromptDraft).length;
 
+  // Dropdown state
+  const [defaultModelDropdownOpen, setDefaultModelDropdownOpen] = useState(false);
+  const [helperModelDropdownOpen, setHelperModelDropdownOpen] = useState(false);
+  const defaultModelDropdownRef = useRef<HTMLDivElement>(null);
+  const helperModelDropdownRef = useRef<HTMLDivElement>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: "success" | "error" | "info"; message: string } | null>(null);
@@ -121,6 +127,20 @@ export function AppSettingsView() {
   useEffect(() => {
     setSystemPromptDraft(appSystemPrompt);
   }, [appSystemPrompt]);
+
+  // External click handler to close dropdowns
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (defaultModelDropdownOpen && defaultModelDropdownRef.current && !defaultModelDropdownRef.current.contains(event.target as Node)) {
+        setDefaultModelDropdownOpen(false);
+      }
+      if (helperModelDropdownOpen && helperModelDropdownRef.current && !helperModelDropdownRef.current.contains(event.target as Node)) {
+        setHelperModelDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [defaultModelDropdownOpen, helperModelDropdownOpen]);
 
   /** Persist the application-wide default model choice. */
   async function handleSaveDefaultModel(): Promise<void> {
@@ -204,18 +224,70 @@ export function AppSettingsView() {
                 </p>
               </div>
               <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                <select
-                  value={defaultModelDraft}
-                  onChange={(event) => setDefaultModelDraft(event.target.value)}
-                  className="app-input min-w-0 flex-1"
-                >
-                  <option value="">{t("shell.modelUnset")}</option>
-                  {availableModelOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.providerName} / {option.displayName}
-                    </option>
-                  ))}
-                </select>
+                <div ref={defaultModelDropdownRef} className="relative min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setDefaultModelDropdownOpen((prev) => !prev)}
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {defaultModelDraft
+                        ? getModelDisplayName(defaultModelDraft, providerModelsById, t("shell.modelUnset"))
+                        : t("shell.modelUnset")}
+                    </span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-miro-text-secondary">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                  {defaultModelDropdownOpen && (
+                    <div
+                      role="listbox"
+                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                    >
+                      <button
+                        role="option"
+                        type="button"
+                        aria-selected={!defaultModelDraft}
+                        onClick={() => { setDefaultModelDraft(""); setDefaultModelDropdownOpen(false); }}
+                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                          !defaultModelDraft
+                            ? "bg-miro-blue-light/65 text-miro-blue"
+                            : "text-miro-text hover:bg-miro-surface-high"
+                        }`}
+                      >
+                        <span className="truncate">{t("shell.modelUnset")}</span>
+                        {!defaultModelDraft && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        )}
+                      </button>
+                      {availableModelOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          role="option"
+                          type="button"
+                          aria-selected={defaultModelDraft === option.id}
+                          onClick={() => { setDefaultModelDraft(option.id); setDefaultModelDropdownOpen(false); }}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                            defaultModelDraft === option.id
+                              ? "bg-miro-blue-light/65 text-miro-blue"
+                              : "text-miro-text hover:bg-miro-surface-high"
+                          }`}
+                        >
+                          <span className="truncate">
+                            {option.providerName} / {option.displayName}
+                          </span>
+                          {defaultModelDraft === option.id && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                              <path d="M20 6L9 17l-5-5" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => void handleSaveDefaultModel()}
@@ -240,18 +312,70 @@ export function AppSettingsView() {
                 </p>
               </div>
               <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                <select
-                  value={helperModelDraft}
-                  onChange={(event) => setHelperModelDraft(event.target.value)}
-                  className="app-input min-w-0 flex-1"
-                >
-                  <option value="">{t("settings.helperModelPlaceholder")}</option>
-                  {availableModelOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.providerName} / {option.displayName}
-                    </option>
-                  ))}
-                </select>
+                <div ref={helperModelDropdownRef} className="relative min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setHelperModelDropdownOpen((prev) => !prev)}
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {helperModelDraft
+                        ? getModelDisplayName(helperModelDraft, providerModelsById, t("shell.modelUnset"))
+                        : t("settings.helperModelPlaceholder")}
+                    </span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-miro-text-secondary">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                  {helperModelDropdownOpen && (
+                    <div
+                      role="listbox"
+                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                    >
+                      <button
+                        role="option"
+                        type="button"
+                        aria-selected={!helperModelDraft}
+                        onClick={() => { setHelperModelDraft(""); setHelperModelDropdownOpen(false); }}
+                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                          !helperModelDraft
+                            ? "bg-miro-blue-light/65 text-miro-blue"
+                            : "text-miro-text hover:bg-miro-surface-high"
+                        }`}
+                      >
+                        <span className="truncate">{t("settings.helperModelPlaceholder")}</span>
+                        {!helperModelDraft && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        )}
+                      </button>
+                      {availableModelOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          role="option"
+                          type="button"
+                          aria-selected={helperModelDraft === option.id}
+                          onClick={() => { setHelperModelDraft(option.id); setHelperModelDropdownOpen(false); }}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                            helperModelDraft === option.id
+                              ? "bg-miro-blue-light/65 text-miro-blue"
+                              : "text-miro-text hover:bg-miro-surface-high"
+                          }`}
+                        >
+                          <span className="truncate">
+                            {option.providerName} / {option.displayName}
+                          </span>
+                          {helperModelDraft === option.id && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                              <path d="M20 6L9 17l-5-5" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => void handleSaveHelperModel()}
