@@ -6,11 +6,11 @@
  * McpServersSection, and SkillsSection. These are global settings (use global
  * Tauri commands, not per-provider) and are displayed in AppSettingsView.
  */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as tauriCmd from "../../services/tauriCommands";
-import { useSettingsToast, SettingsToastContext } from "./AppSettingsView";
+import { useSettingsToast } from "./AppSettingsView";
 import { IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
 

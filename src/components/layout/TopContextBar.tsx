@@ -211,7 +211,7 @@ export function TopContextBar() {
               {modelDropdownOpen && (
                 <div
                   role="listbox"
-                  className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[420px] rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                  className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[420px] max-h-64 overflow-y-auto rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
                 >
                   {!selectedModelId && (
                     <button

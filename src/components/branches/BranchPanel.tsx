@@ -81,6 +81,10 @@ export function BranchPanel() {
     document.body.appendChild(el);
     tooltipContainerRef.current = el;
     return () => {
+      if (tooltipTimeout.current) {
+        clearTimeout(tooltipTimeout.current);
+        tooltipTimeout.current = null;
+      }
       if (tooltipContainerRef.current && tooltipContainerRef.current.parentNode) {
         tooltipContainerRef.current.parentNode.removeChild(tooltipContainerRef.current);
       }

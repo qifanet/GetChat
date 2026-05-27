@@ -704,7 +704,6 @@ export const useAppStore = create<AppStore>()(
                 const summary: ConversationSummary = {
                   ...(s.summariesById[conversationId] ?? snapshot.summary),
                   ...snapshot.summary,
-                  updatedAt: openedAt,
                   lastOpenedAt: openedAt,
                 };
 

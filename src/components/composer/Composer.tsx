@@ -209,7 +209,7 @@ export function Composer() {
       element.style.height = "auto";
       const newHeight = Math.min(element.scrollHeight, 180);
       element.style.height = `${newHeight}px`;
-      setScrollable(element.scrollHeight > MAX_CONTENT_HEIGHT);
+      setScrollable(element.scrollHeight > element.clientHeight);
 
       // Slash command detection: starts with "/" and no newline before the slash
       if (value.startsWith("/")) {

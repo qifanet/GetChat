@@ -5,7 +5,7 @@
  * Contains default model, helper model, system prompt, language,
  * close behavior, shell path, and keyboard shortcuts.
  */
-import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -57,8 +57,6 @@ function getShortcutModifierLabel(): string {
   return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
 }
 
-const TOAST_AUTO_DISMISS_MS = 2000;
-
 /** Toast context for settings feedback. */
 export const SettingsToastContext = createContext<(message: string, tone?: "success" | "error") => void>(() => {});
 
@@ -89,9 +87,10 @@ export function AppSettingsView() {
   const setHelperModel = useAppStore(_sel_setHelperModel);
   const setSystemPrompt = useAppStore(_sel_setSystemPrompt);
 
-  const availableModelOptions = useState(
-    () => listAvailableModelOptions(providersById, providerOrder, providerModelsById)
-  )[0];
+  const availableModelOptions = useMemo(
+    () => listAvailableModelOptions(providersById, providerOrder, providerModelsById),
+    [providersById, providerOrder, providerModelsById]
+  );
 
   const [defaultModelDraft, setDefaultModelDraft] = useState(appDefaultModelId ?? "");
   const [helperModelDraft, setHelperModelDraft] = useState(appHelperModelId ?? "");
