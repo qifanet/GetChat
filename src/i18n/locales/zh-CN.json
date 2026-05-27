@@ -254,6 +254,10 @@
   "settings": {
     "title": "Provider 设置",
     "subtitle": "统一管理 AI 服务、默认模型和连接状态。",
+    "providerTab": "Provider",
+    "appTab": "应用设置",
+    "appSettingsTitle": "应用设置",
+    "appSettingsSubtitle": "配置默认模型、系统提示词、语言和行为规范。",
     "backToWorkspace": "返回工作区",
     "providerCount": "Provider",
     "addProvider": "新增 Provider",
@@ -341,6 +345,7 @@
     "shortcutSidebar": "切换侧边栏",
     "shortcutPanel": "切换右侧面板",
     "shortcutSearch": "全文搜索",
+    "shortcutsHelp": "查看和管理所有快捷键",
     "toolSettingsTitle": "工具设置",
     "toolSettingsHelp": "配置 AI 助手的工具调用限制和审批行为。",
     "maxIterations": "最大工具调用轮次",

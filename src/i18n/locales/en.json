@@ -254,6 +254,10 @@
   "settings": {
     "title": "Provider settings",
     "subtitle": "Manage AI services, the default model, and connection status from one place.",
+    "providerTab": "Providers",
+    "appTab": "App Settings",
+    "appSettingsTitle": "Application settings",
+    "appSettingsSubtitle": "Configure default models, system prompts, language, and behavior.",
     "backToWorkspace": "Back to workspace",
     "providerCount": "Providers",
     "addProvider": "Add provider",
@@ -341,6 +345,7 @@
     "shortcutSidebar": "Toggle sidebar",
     "shortcutPanel": "Toggle right panel",
     "shortcutSearch": "Full-text search",
+    "shortcutsHelp": "View and manage all keyboard shortcuts",
     "toolSettingsTitle": "Tool Settings",
     "toolSettingsHelp": "Configure tool calling limits and approval behavior for the AI assistant.",
     "maxIterations": "Max tool call rounds",

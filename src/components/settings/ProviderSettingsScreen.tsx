@@ -7,10 +7,8 @@
  * maintain providers, manage multiple model profiles under each provider, and
  * set the application-level fallback model without leaving the workspace.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
 import {
   createModelProfileId,
   getModelDisplayName,
@@ -23,46 +21,17 @@ import { fetchOllamaModels, type OllamaModelInfo } from "../../services/tauriCom
 import type { ProviderConfig, ProviderSaveInput, ProviderType } from "../../types/settings";
 import { IconChevronLeft, IconSettings, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
+import { AppSettingsView, SettingsToastContext } from "./AppSettingsView";
 const _sel_providers = (s: import("../../stores/appStore.types").AppStore) => s.providers;
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_providerOrder = (s: import("../../stores/appStore.types").AppStore) => s.providerOrder;
+const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
+const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
+const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
 const _sel_defaultModelId = (s: import("../../stores/appStore.types").AppStore) => s.defaultModelId;
 const _sel_helperModelId = (s: import("../../stores/appStore.types").AppStore) => s.helperModelId;
 const _sel_systemPrompt = (s: import("../../stores/appStore.types").AppStore) => s.systemPrompt;
-const _sel_saveProvider = (s: import("../../stores/appStore.types").AppStore) => s.saveProvider;
-const _sel_removeProvider = (s: import("../../stores/appStore.types").AppStore) => s.removeProvider;
-const _sel_setDefaultModel = (s: import("../../stores/appStore.types").AppStore) => s.setDefaultModel;
-const _sel_setHelperModel = (s: import("../../stores/appStore.types").AppStore) => s.setHelperModel;
-const _sel_setSystemPrompt = (s: import("../../stores/appStore.types").AppStore) => s.setSystemPrompt;
-const _sel_loadSettings = (s: import("../../stores/appStore.types").AppStore) => s.loadSettings;
 
-const SHORTCUT_ITEMS = [
-  { key: "newChat", labelKey: "settings.shortcutNewChat", display: "⌘ N" },
-  { key: "send", labelKey: "settings.shortcutSend", display: "⌘ Enter" },
-  { key: "stop", labelKey: "settings.shortcutStop", display: "Esc" },
-  { key: "settings", labelKey: "settings.shortcutSettings", display: "⌘ ," },
-  { key: "sidebar", labelKey: "settings.shortcutSidebar", display: "⌘ B" },
-  { key: "panel", labelKey: "settings.shortcutPanel", display: "⌘ ." },
-  { key: "search", labelKey: "settings.shortcutSearch", display: "⌘ K" },
-] as const;
-function hasUserAgentData(
-  nav: Navigator
-): nav is Navigator & { userAgentData: { platform?: string } } {
-  return "userAgentData" in nav;
-}
-
-function getNavigatorPlatform(): string {
-  if (typeof navigator === "undefined") return "";
-  if (hasUserAgentData(navigator)) {
-    return navigator.userAgentData.platform ?? navigator.platform ?? "";
-  }
-  return navigator.platform ?? "";
-}
-
-function getShortcutModifierLabel(): string {
-  const platform = getNavigatorPlatform();
-  return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘" : "Ctrl";
-}
 type EditableProviderId = string | "new";
 /** Draft state for a single provider model row inside the form. */
 interface ProviderModelFormState {
@@ -95,12 +64,6 @@ interface SettingsToastState {
   message: string;
 }
 
-const SettingsToastContext = createContext<(message: string, tone?: "success" | "error") => void>(() => {});
-
-function useSettingsToast() {
-  return useContext(SettingsToastContext);
-}
-
 const TOAST_AUTO_DISMISS_MS = 2000;
 /** Create a new model draft with a stable system-owned model profile ID. */
 function createDraftModel(
@@ -118,28 +81,6 @@ function createDraftModel(
 const CONTEXT_WINDOW_MIN_KB = 1;
 const CONTEXT_WINDOW_MAX_KB = 2048;
 
-const BUILTIN_TOOL_I18N_KEYS: Record<string, { nameKey: string; descriptionKey: string }> = {
-  calculator: {
-    nameKey: "settings.builtinToolCalculatorName",
-    descriptionKey: "settings.builtinToolCalculatorDescription",
-  },
-  file: {
-    nameKey: "settings.builtinToolFileName",
-    descriptionKey: "settings.builtinToolFileDescription",
-  },
-  todo: {
-    nameKey: "settings.builtinTodoName",
-    descriptionKey: "settings.builtinTodoDescription",
-  },
-  terminal: {
-    nameKey: "settings.builtinToolTerminalName",
-    descriptionKey: "settings.builtinToolTerminalDescription",
-  },
-  web_search: {
-    nameKey: "settings.builtinToolWebSearchName",
-    descriptionKey: "settings.builtinToolWebSearchDescription",
-  },
-};
 
 function getProviderTypeLabel(
   t: ReturnType<typeof useTranslation>["t"],
@@ -314,32 +255,25 @@ function resolveDraftModelDisplayName(
 interface ProviderSettingsScreenProps {
   onClose: () => void;
 }
+
+/** Available tabs within the settings page. */
+type SettingsTab = "providers" | "app";
+
 /** Render the provider settings workspace with multi-model configuration support. */
 export function ProviderSettingsScreen({
   onClose,
 }: ProviderSettingsScreenProps) {
   const { t, i18n } = useTranslation();
-  const shortcutModifierLabel = useMemo(() => getShortcutModifierLabel(), []);
-  const shortcutItems = useMemo(
-    () =>
-      SHORTCUT_ITEMS.map((item) => ({
-        ...item,
-        display: item.display.replace("⌘", shortcutModifierLabel),
-      })),
-    [shortcutModifierLabel]
-  );
+  const [activeTab, setActiveTab] = useState<SettingsTab>("providers");
   const providersById = useAppStore(_sel_providers);
   const providerModelsById = useAppStore(_sel_providerModels);
   const providerOrder = useAppStore(_sel_providerOrder);
+  const saveProvider = useAppStore(_sel_saveProvider);
+  const removeProvider = useAppStore(_sel_removeProvider);
+  const loadSettings = useAppStore(_sel_loadSettings);
   const appDefaultModelId = useAppStore(_sel_defaultModelId);
   const appHelperModelId = useAppStore(_sel_helperModelId);
   const appSystemPrompt = useAppStore(_sel_systemPrompt);
-  const saveProvider = useAppStore(_sel_saveProvider);
-  const removeProvider = useAppStore(_sel_removeProvider);
-  const setDefaultModel = useAppStore(_sel_setDefaultModel);
-  const setHelperModel = useAppStore(_sel_setHelperModel);
-  const setSystemPrompt = useAppStore(_sel_setSystemPrompt);
-  const loadSettings = useAppStore(_sel_loadSettings);
   const orderedProviders = useMemo(
     () =>
       providerOrder
@@ -359,14 +293,34 @@ export function ProviderSettingsScreen({
       ? buildFormFromProvider(providersById[providerOrder[0]], providerModelsById)
       : buildEmptyProviderForm()
   );
-  const [defaultModelDraft, setDefaultModelDraft] = useState(
-    appDefaultModelId ?? ""
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<SettingsFeedbackState | null>(null);
+
+  // Dropdown state for provider type
+  const [providerTypeDropdownOpen, setProviderTypeDropdownOpen] = useState(false);
+  const providerTypeDropdownRef = useRef<HTMLDivElement>(null);
+
+  const providerTypeOptions: { value: ProviderType; label: string }[] = [
+    { value: "OPENAI_COMPATIBLE", label: t("settings.providerTypeOpenAI") },
+    { value: "DEEPSEEK", label: t("settings.providerTypeDeepSeek") },
+    { value: "OPENROUTER", label: t("settings.providerTypeOpenRouter") },
+    { value: "GROQ", label: t("settings.providerTypeGroq") },
+    { value: "OLLAMA", label: t("settings.providerTypeOllama") },
+  ];
+
+  // External click handler to close provider type dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (providerTypeDropdownOpen && providerTypeDropdownRef.current && !providerTypeDropdownRef.current.contains(event.target as Node)) {
+        setProviderTypeDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [providerTypeDropdownOpen]);
   const selectedSavedProvider =
     selectedProviderId !== "new" ? providersById[selectedProviderId] ?? null : null;
   const isProviderDraftDirty = useMemo(
@@ -402,9 +356,6 @@ export function ProviderSettingsScreen({
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
-  useEffect(() => {
-    setDefaultModelDraft(appDefaultModelId ?? "");
-  }, [appDefaultModelId]);
   useEffect(() => {
     if (
       selectedProviderId !== "new" &&
@@ -660,102 +611,6 @@ export function ProviderSettingsScreen({
       setIsSubmitting(false);
     }
   }
-  /** Persist the application-wide default model choice. */
-  async function handleSaveDefaultModel(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await setDefaultModel(defaultModelDraft.trim() || null);
-      setFeedback({
-        tone: "success",
-        message: t("settings.defaultModelSaved"),
-      });
-    } catch (modelError) {
-      setError(
-        modelError instanceof Error
-          ? modelError.message
-          : t("settings.defaultModelSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  const [helperModelDraft, setHelperModelDraft] = useState(
-    appHelperModelId ?? ""
-  );
-  const [systemPromptDraft, setSystemPromptDraft] = useState(appSystemPrompt);
-  const systemPromptCharCount = Array.from(systemPromptDraft).length;
-
-  useEffect(() => {
-    setHelperModelDraft(appHelperModelId ?? "");
-  }, [appHelperModelId]);
-  useEffect(() => {
-    setSystemPromptDraft(appSystemPrompt);
-  }, [appSystemPrompt]);
-
-  async function handleSaveHelperModel(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await setHelperModel(helperModelDraft.trim() || null);
-      setFeedback({
-        tone: "success",
-        message: t("settings.helperModelSaved"),
-      });
-    } catch (modelError) {
-      setError(
-        modelError instanceof Error
-          ? modelError.message
-          : t("settings.helperModelSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-  /** Persist the application-level prompt prefix used for future model requests. */
-  async function handleSaveSystemPrompt(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const savedPrompt = await setSystemPrompt(systemPromptDraft);
-      setSystemPromptDraft(savedPrompt);
-      setFeedback({
-        tone: "success",
-        message: t("settings.systemPromptSaved"),
-      });
-    } catch (promptError) {
-      setError(
-        promptError instanceof Error
-          ? promptError.message
-          : t("settings.systemPromptSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  /** Reset by saving an empty prompt; backend normalizes it to the release default. */
-  async function handleResetSystemPrompt(): Promise<void> {
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const savedPrompt = await setSystemPrompt("");
-      setSystemPromptDraft(savedPrompt);
-      setFeedback({
-        tone: "success",
-        message: t("settings.systemPromptResetDone"),
-      });
-    } catch (promptError) {
-      setError(
-        promptError instanceof Error
-          ? promptError.message
-          : t("settings.systemPromptSaveFailed")
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
   /** Probe the current saved provider through the backend connection test command. */
   async function handleTestConnection(): Promise<void> {
     if (selectedProviderId === "new" || isProviderDraftDirty) {
@@ -813,10 +668,10 @@ export function ProviderSettingsScreen({
 
   return (
     <SettingsToastContext.Provider value={showToast}>
-      <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-4">
         {toast.visible && (
           <div
-            className={`absolute left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
+            className={`fixed left-1/2 top-4 z-[9999] -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
               toast.tone === "success"
                 ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
                 : "border border-red-200 bg-red-50 text-red-700"
@@ -827,8 +682,8 @@ export function ProviderSettingsScreen({
             {toast.message}
           </div>
         )}
-        <section className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-transparent xl:flex-row">
-          <aside className="app-panel flex min-w-0 w-full shrink-0 flex-col rounded-shell bg-white/95 xl:w-[330px]">
+        <section className="flex h-full min-w-0 flex-1 gap-4 overflow-auto bg-transparent">
+          <aside className="app-panel flex min-w-0 shrink-0 flex-col rounded-shell bg-white/95 w-[330px]">
             <div className="border-b border-miro-border/10 px-5 py-5">
               <button
                 type="button"
@@ -836,126 +691,258 @@ export function ProviderSettingsScreen({
                 className="app-secondary-button mb-4 justify-start gap-2 px-3 py-2 text-sm"
               >
                 <IconChevronLeft size={14} />
-            {t("settings.backToWorkspace")}
-          </button>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-miro-blue-light text-miro-blue shadow-ring">
-              <IconSettings size={18} />
-            </span>
-            <div className="min-w-0">
-              <p className="app-section-label mb-1">{t("common.settings")}</p>
-              <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
-                {t("settings.title")}
-              </h2>
-              <p className="text-xs leading-5 text-miro-text-secondary">
-                {t("settings.subtitle")}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2 px-5 py-4">
-          <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
-            <p className="app-section-label mb-1">{t("settings.providerCount")}</p>
-            <p className="text-lg font-semibold text-miro-text">{orderedProviders.length}</p>
-          </div>
-          <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
-            <p className="app-section-label mb-1">{t("settings.enabled")}</p>
-            <p className="text-lg font-semibold text-miro-text">{enabledProviderCount}</p>
-          </div>
-          <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
-            <p className="app-section-label mb-1">{t("settings.modelCount")}</p>
-            <p className="text-lg font-semibold text-miro-text">{configuredModelCount}</p>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-          <button
-            type="button"
-            onClick={() => startCreatingProvider()}
-            className="mb-4 flex w-full items-center justify-center rounded-[20px] border border-dashed border-miro-blue/35 bg-miro-blue-light/55 px-3 py-3 font-display text-sm font-semibold text-miro-blue transition-colors hover:border-miro-blue hover:bg-miro-blue-light"
-          >
-            {t("settings.addProvider")}
-          </button>
-          <div className="space-y-2">
-            {orderedProviders.map((provider) => {
-              const isSelected = selectedProviderId === provider.id;
-              const isAppDefault = Boolean(
-                appDefaultModelId && provider.modelIds.includes(appDefaultModelId)
-              );
-              const providerDefaultModelName = getModelDisplayName(
-                provider.defaultModelId,
-                providerModelsById,
-                t("shell.modelUnset")
-              );
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedProviderId(provider.id);
-                    setError(null);
-                  }}
-                  className={`w-full rounded-[22px] px-4 py-4 text-left transition-colors ${
-                    isSelected
-                      ? "bg-miro-blue-light/70 shadow-ring"
-                      : "bg-white/84 hover:bg-white"
-                  }`}
-                >
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-miro-text">
-                        {provider.name}
-                      </div>
-                      <div className="mt-1 text-xs text-miro-text-secondary">
-                        {getProviderTypeLabel(t, provider.type)}
-                      </div>
-                    </div>
-                    <span
-                      className={`app-status-pill shrink-0 ${
-                        provider.hasApiKey
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
-                      }`}
-                    >
-                      {provider.hasApiKey
-                        ? t("settings.apiKeyReady")
-                        : t("settings.apiKeyMissing")}
-                    </span>
-                  </div>
-                  <div className="mt-2 line-clamp-1 text-xs text-miro-text-secondary">
-                    {provider.baseUrl}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-miro-text-secondary">
-                    <span>{provider.enabled ? t("settings.enabled") : t("settings.disabled")}</span>
-                    <span>{t("settings.modelCountShort", { count: provider.modelIds.length })}</span>
-                    <span className="inline-block max-w-full truncate align-bottom">
-                      {providerDefaultModelName}
-                    </span>
-                    {isAppDefault ? (
-                      <span className="text-miro-blue">{t("settings.appDefaultBadge")}</span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <AboutSection />
-      </aside>
-      <div className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-4 min-[1800px]:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 space-y-4">
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
-                  <p className="app-section-label mb-2">{t("settings.defaultModelTitle")}</p>
-                  <p className="line-clamp-2 text-sm font-semibold text-miro-text">
-                    {getModelDisplayName(
-                      appDefaultModelId,
-                      providerModelsById,
-                      t("shell.modelUnset")
-                    )}
+                {t("settings.backToWorkspace")}
+              </button>
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-miro-blue-light text-miro-blue shadow-ring mt-1">
+                  {activeTab === "providers" ? <IconSettings size={18} /> : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                      <line x1="8" y1="21" x2="16" y2="21"></line>
+                      <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
+                    {activeTab === "providers" ? t("settings.title") : t("settings.appSettingsTitle")}
+                  </h2>
+                  <p className="text-xs text-miro-text-secondary" style={{ height: '40px', lineHeight: '20px' }}>
+                    {activeTab === "providers" ? t("settings.subtitle") : t("settings.appSettingsSubtitle")}
                   </p>
                 </div>
+              </div>
+            </div>
+
+            {/* Tab navigation */}
+            <div className="flex gap-1.5 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setActiveTab("providers")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "providers"
+                    ? "bg-miro-blue-light text-miro-blue shadow-ring"
+                    : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
+                }`}
+              >
+                {t("settings.providerTab")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("app")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "app"
+                    ? "bg-miro-blue-light text-miro-blue shadow-ring"
+                    : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
+                }`}
+              >
+                {t("settings.appTab")}
+              </button>
+            </div>
+
+            {/* Category-specific list */}
+            {activeTab === "providers" ? (
+              <>
+                <div className="grid grid-cols-3 gap-2 px-5 py-4">
+                  <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
+                    <p className="app-section-label mb-1">{t("settings.providerCount")}</p>
+                    <p className="text-lg font-semibold text-miro-text">{orderedProviders.length}</p>
+                  </div>
+                  <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
+                    <p className="app-section-label mb-1">{t("settings.enabled")}</p>
+                    <p className="text-lg font-semibold text-miro-text">{enabledProviderCount}</p>
+                  </div>
+                  <div className="min-w-0 rounded-panel bg-miro-surface-low px-3 py-3">
+                    <p className="app-section-label mb-1">{t("settings.modelCount")}</p>
+                    <p className="text-lg font-semibold text-miro-text">{configuredModelCount}</p>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => startCreatingProvider()}
+                    className="mb-4 flex w-full items-center justify-center rounded-[20px] border border-dashed border-miro-blue/35 bg-miro-blue-light/55 px-3 py-3 font-display text-sm font-semibold text-miro-blue transition-colors hover:border-miro-blue hover:bg-miro-blue-light"
+                  >
+                    {t("settings.addProvider")}
+                  </button>
+                  <div className="space-y-2">
+                    {orderedProviders.map((provider) => {
+                      const isSelected = selectedProviderId === provider.id;
+                      const providerDefaultModelName = getModelDisplayName(
+                        provider.defaultModelId,
+                        providerModelsById,
+                        t("shell.modelUnset")
+                      );
+                      return (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedProviderId(provider.id);
+                            setError(null);
+                          }}
+                          className={`w-full rounded-[22px] px-4 py-4 text-left transition-colors ${
+                            isSelected
+                              ? "bg-miro-blue-light/70 shadow-ring"
+                              : "bg-white/84 hover:bg-white"
+                          }`}
+                        >
+                          <div className="flex min-w-0 items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-miro-text">
+                                {provider.name}
+                              </div>
+                              <div className="mt-1 text-xs text-miro-text-secondary">
+                                {getProviderTypeLabel(t, provider.type)}
+                              </div>
+                            </div>
+                            <span
+                              className={`app-status-pill shrink-0 ${
+                                provider.hasApiKey
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-amber-200 bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {provider.hasApiKey
+                                ? t("settings.apiKeyReady")
+                                : t("settings.apiKeyMissing")}
+                            </span>
+                          </div>
+                          <div className="mt-2 line-clamp-1 text-xs text-miro-text-secondary">
+                            {provider.baseUrl}
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-miro-text-secondary">
+                            <span>{provider.enabled ? t("settings.enabled") : t("settings.disabled")}</span>
+                            <span>{t("settings.modelCountShort", { count: provider.modelIds.length })}</span>
+                            <span className="inline-block max-w-full truncate align-bottom">
+                              {providerDefaultModelName}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 overflow-y-auto px-4 pb-4">
+                <div className="space-y-1.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-default-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.defaultModelTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">
+                      {getModelDisplayName(appDefaultModelId, providerModelsById, t("shell.modelUnset"))}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-helper-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.helperModelTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">
+                      {appHelperModelId
+                        ? getModelDisplayName(appHelperModelId, providerModelsById, t("shell.modelUnset"))
+                        : t("settings.helperModelNotConfigured")}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-system-prompt")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.systemPromptTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary line-clamp-2">
+                      {appSystemPrompt || t("settings.systemPromptPlaceholder")}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-tool-settings")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.toolSettingsTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.toolSettingsHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-security-policy")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.securityPolicyTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.securityPolicyHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-builtin-tools")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.builtinToolsTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.builtinToolsHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-mcp-servers")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.mcpServersTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.mcpServersHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-skills")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.skillsTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.skillsHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-language")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.languageTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{i18n.language}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-close-behavior")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.closeBehaviorTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.closeBehaviorHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shell-path")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.shellPathTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shellPathHelp")}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shortcuts")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                  >
+                    <div className="text-xs font-semibold text-miro-text">{t("settings.shortcutsTitle")}</div>
+                    <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shortcutsHelp")}</div>
+                  </button>
+                </div>
+              </div>
+            )}
+            <AboutSection />
+      </aside>
+      <div className="min-w-0 flex-1 overflow-auto">
+        {activeTab === "app" ? (
+          <AppSettingsView />
+        ) : (
+        <div className="w-full space-y-4 pt-2 pr-4">
+          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
                   <p className="app-section-label mb-2">{t("settings.currentObject")}</p>
                   <p className="line-clamp-2 text-sm font-semibold text-miro-text">
@@ -971,167 +958,79 @@ export function ProviderSettingsScreen({
               </div>
             </section>
             <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
-                <div className="min-w-0">
+              <div className="mb-6 flex items-start justify-between gap-3">
+                <div>
                   <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.defaultModelTitle")}
+                    {selectedProviderId === "new"
+                      ? t("settings.createProviderTitle")
+                      : t("settings.editProviderTitle")}
                   </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.defaultModelHelp")}
+                  <p className="text-sm leading-6 text-miro-text-secondary">
+                    {t("settings.providerFormHelp")}
                   </p>
                 </div>
-                <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                  <select
-                    value={defaultModelDraft}
-                    onChange={(event) => setDefaultModelDraft(event.target.value)}
-                    className="app-input min-w-0 flex-1"
-                  >
-                    <option value="">{t("shell.modelUnset")}</option>
-                    {availableModelOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.providerName} / {option.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveDefaultModel()}
-                    disabled={isSubmitting}
-                    className="app-primary-button"
-                  >
-                    {t("settings.saveDefaultModel")}
-                  </button>
-                </div>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="flex min-w-0 flex-col gap-4 min-[1800px]:flex-row min-[1800px]:items-end min-[1800px]:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.helperModelTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.helperModelHelp")}
-                  </p>
-                </div>
-                <div className="flex min-w-0 w-full max-w-xl flex-col gap-3 sm:flex-row">
-                  <select
-                    value={helperModelDraft}
-                    onChange={(event) => setHelperModelDraft(event.target.value)}
-                    className="app-input min-w-0 flex-1"
-                  >
-                    <option value="">{t("settings.helperModelPlaceholder")}</option>
-                    {availableModelOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.providerName} / {option.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveHelperModel()}
-                    disabled={isSubmitting}
-                    className="app-primary-button"
-                  >
-                    {t("common.save")}
-                  </button>
-                </div>
-              </div>
-              {!appHelperModelId && (
-                <p className="mt-3 text-xs text-amber-600">
-                  {t("settings.helperModelNotConfigured")}
-                </p>
-              )}
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="mb-4 flex min-w-0 flex-col gap-3 min-[1800px]:flex-row min-[1800px]:items-start min-[1800px]:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                    {t("settings.systemPromptTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.systemPromptHelp")}
-                  </p>
-                </div>
-                <p className="shrink-0 rounded-full bg-miro-surface-low px-3 py-1 text-xs font-medium text-miro-text-secondary">
-                  {t("settings.systemPromptCharCount", {
-                    count: systemPromptCharCount,
-                  })}
-                </p>
-              </div>
-              <textarea
-                value={systemPromptDraft}
-                onChange={(event) => setSystemPromptDraft(event.target.value)}
-                placeholder={t("settings.systemPromptPlaceholder")}
-                rows={12}
-                className="app-input min-h-[220px] w-full min-w-0 resize-y font-mono text-xs leading-5"
-              />
-              <div className="mt-3 rounded-panel bg-miro-surface-low px-4 py-3 text-xs leading-5 text-miro-text-secondary">
-                <p className="font-semibold text-miro-text">
-                  {t("settings.systemPromptPreviewTitle")}
-                </p>
-                <p className="mt-1">{t("settings.systemPromptPreview")}</p>
-              </div>
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => void handleResetSystemPrompt()}
-                  disabled={isSubmitting}
-                  className="app-secondary-button"
-                >
-                  {t("settings.systemPromptReset")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveSystemPrompt()}
-                  disabled={isSubmitting}
-                  className="app-primary-button"
-                >
-                  {t("common.save")}
-                </button>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
-              <div className="mb-6 flex flex-col gap-2">
-                <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
-                  {selectedProviderId === "new"
-                    ? t("settings.createProviderTitle")
-                    : t("settings.editProviderTitle")}
-                </h3>
-                <p className="text-sm leading-6 text-miro-text-secondary">
-                  {t("settings.providerFormHelp")}
-                </p>
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-panel bg-miro-surface-low px-4 py-3 text-sm text-miro-text shadow-ring">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(event) => patchForm("enabled", event.target.checked)}
+                    className="rounded border-miro-border text-miro-blue focus:ring-miro-blue/30"
+                  />
+                  <span>{t("settings.enabledProvider")}</span>
+                </label>
               </div>
               <form className="space-y-5" onSubmit={(event) => void handleSaveProvider(event)}>
                 <div className="grid gap-5 md:grid-cols-2">
-                  <label className="space-y-2">
+                  <div className="space-y-2">
                     <span className="text-sm font-medium text-miro-text">
                       {t("settings.providerType")}
                     </span>
-                    <select
-                      value={form.type}
-                      onChange={(event) =>
-                        applyProviderType(event.target.value as ProviderType)
-                      }
-                      className="app-input"
-                    >
-                      <option value="OPENAI_COMPATIBLE">
-                        {t("settings.providerTypeOpenAI")}
-                      </option>
-                      <option value="DEEPSEEK">
-                        {t("settings.providerTypeDeepSeek")}
-                      </option>
-                      <option value="OPENROUTER">
-                        {t("settings.providerTypeOpenRouter")}
-                      </option>
-                      <option value="GROQ">
-                        {t("settings.providerTypeGroq")}
-                      </option>
-                      <option value="OLLAMA">
-                        {t("settings.providerTypeOllama")}
-                      </option>
-                    </select>
-                  </label>
+                    <div ref={providerTypeDropdownRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setProviderTypeDropdownOpen((prev) => !prev)}
+                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                      >
+                        <span className="flex-1">
+                          {getProviderTypeLabel(t, form.type as ProviderType)}
+                        </span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-miro-text-secondary">
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                      </button>
+                      {providerTypeDropdownOpen && (
+                        <div
+                          role="listbox"
+                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                        >
+                          {providerTypeOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              role="option"
+                              type="button"
+                              aria-selected={form.type === option.value}
+                              onClick={() => {
+                                applyProviderType(option.value);
+                                setProviderTypeDropdownOpen(false);
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                                form.type === option.value
+                                  ? "bg-miro-blue-light/65 text-miro-blue"
+                                  : "text-miro-text hover:bg-miro-surface-high"
+                              }`}
+                            >
+                              <span className="flex-1">{option.label}</span>
+                              {form.type === option.value && (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto">
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-miro-text">
                       {t("settings.providerName")}
@@ -1154,15 +1053,6 @@ export function ProviderSettingsScreen({
                     className="app-input"
                     required
                   />
-                </label>
-                <label className="inline-flex items-center gap-3 rounded-panel bg-miro-surface-low px-4 py-3 text-sm text-miro-text shadow-ring">
-                  <input
-                    type="checkbox"
-                    checked={form.enabled}
-                    onChange={(event) => patchForm("enabled", event.target.checked)}
-                    className="rounded border-miro-border text-miro-blue focus:ring-miro-blue/30"
-                  />
-                  <span>{t("settings.enabledProvider")}</span>
                 </label>
                 {form.type !== "OLLAMA" && (
                 <label className="space-y-2">
@@ -1202,7 +1092,7 @@ export function ProviderSettingsScreen({
                     <button
                       type="button"
                       onClick={handleAddModel}
-                      className="app-secondary-button px-4 py-2 text-sm"
+                      className="app-secondary-button shrink-0 whitespace-nowrap px-4 py-2 text-sm"
                     >
                       + {t("settings.addModel")}
                     </button>
@@ -1236,12 +1126,12 @@ export function ProviderSettingsScreen({
                                 {t("settings.modelRoutingHelp")}
                               </p>
                             </div>
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-2">
                               {!isProviderDefault ? (
                                 <button
                                   type="button"
                                   onClick={() => patchForm("defaultModelId", model.id)}
-                                  className="app-secondary-button px-3 py-2 text-xs"
+                                  className="app-secondary-button shrink-0 whitespace-nowrap px-3 py-2 text-xs"
                                 >
                                   {t("settings.setAsProviderDefault")}
                                 </button>
@@ -1250,7 +1140,7 @@ export function ProviderSettingsScreen({
                                 type="button"
                                 onClick={() => handleRemoveModel(model.id)}
                                 disabled={form.models.length <= 1}
-                                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-red-200 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-red-200 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
                                 title={t("settings.deleteProvider")}
                               >
                                 <IconTrash size={14} />
@@ -1385,122 +1275,8 @@ export function ProviderSettingsScreen({
                 </div>
               </form>
             </section>
-          </div>
-          <aside className="min-w-0 space-y-4">
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <p className="app-section-label mb-3">{t("settings.currentSummary")}</p>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerCount")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {selectedProviderSummaryName}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerType")}</span>
-                  <span className="font-semibold text-miro-text">
-                    {getProviderTypeLabel(t, form.type)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.connectionState")}</span>
-                  <span className="font-semibold text-miro-text">{selectedConnectionState}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.modelCount")}</span>
-                  <span className="font-semibold text-miro-text">{form.models.length}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.providerDefaultModel")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {draftDefaultModelName}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-miro-text-secondary">{t("settings.baseUrl")}</span>
-                  <span className="max-w-[170px] truncate font-semibold text-miro-text">
-                    {form.baseUrl || "--"}
-                  </span>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {form.models.map((model) => (
-                  <span
-                    key={model.id}
-                    className={`rounded-full px-3 py-1 text-xs ${
-                      form.defaultModelId === model.id
-                        ? "bg-miro-blue-light text-miro-blue"
-                        : "bg-miro-surface-low text-miro-text-secondary"
-                    }`}
-                  >
-                    {model.displayName.trim() || model.requestName.trim() || model.id}
-                  </span>
-                ))}
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-                    {t("settings.languageTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-miro-text-secondary">
-                    {t("settings.languageHelp")}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  {(Object.entries(SUPPORTED_LOCALES) as [SupportedLocale, string][]).map(
-                    ([localeKey, localeLabel]) => (
-                      <button
-                        key={localeKey}
-                        type="button"
-                        onClick={() => i18n.changeLanguage(localeKey)}
-                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                          i18n.language === localeKey
-                            ? "bg-miro-blue-light text-miro-blue shadow-ring"
-                            : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
-                        }`}
-                      >
-                        {localeLabel}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-              <p className="app-section-label mb-3">{t("settings.configurationAdvice")}</p>
-              <div className="space-y-3 text-sm leading-6 text-miro-text-secondary">
-                <p>{t("settings.adviceModels")}</p>
-                <p>{t("settings.adviceDefaultModel")}</p>
-                <p>{t("settings.adviceConnection")}</p>
-              </div>
-            </section>
-            <section className="app-panel rounded-shell bg-white/95 p-5">
-              <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-                {t("settings.shortcutsTitle")}
-              </h3>
-              <div className="mt-3 space-y-2">
-                {shortcutItems.map((item) => (
-                  <div key={item.key} className="flex min-w-0 items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate text-miro-text-secondary">
-                      {t(item.labelKey)}
-                    </span>
-                    <kbd className="shrink-0 rounded-md border border-miro-border/30 bg-miro-surface-low px-2 py-0.5 font-mono text-xs text-miro-text">
-                      {item.display}
-                    </kbd>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <ToolSettingsSection />
-            <SecurityPolicySection />
-            <BuiltinToolsSection />
-            <AppSettingsSection />
-            <McpServersSection />
-            <SkillsSection />
-          </aside>
         </div>
+        )}
       </div>
     </section>
       </div>
@@ -1508,1403 +1284,6 @@ export function ProviderSettingsScreen({
   );
 }
 
-/** Tool calling settings section: max iterations, consecutive failures, approval timeout. */
-function ToolSettingsSection() {
-  const { t } = useTranslation();
-  const showToast = useSettingsToast();
-  const [settings, setSettings] = useState<tauriCmd.ToolSettingsDto | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    tauriCmd.getToolSettings().then(setSettings).catch(() => {});
-  }, []);
-
-  if (!settings) return null;
-
-  async function handleSave(patch: Partial<tauriCmd.ToolSettingsDto>) {
-    setSaving(true);
-    try {
-      const updated = await tauriCmd.updateToolSettings(patch);
-      setSettings(updated);
-      showToast(t("common.saved"));
-    } catch (err) {
-      console.error("[tool-settings] failed to save", err);
-      showToast(t("settings.providerSaveFailed"), "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.toolSettingsTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.toolSettingsHelp")}
-      </p>
-      <div className="mt-4 space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.maxIterations")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={settings.max_iterations}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 100) {
-                  setSettings({ ...settings, max_iterations: v });
-                }
-              }}
-              onBlur={() => void handleSave({ max_iterations: settings.max_iterations })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.maxIterationsHelp")}
-            </span>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.maxConsecutiveFailures")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={settings.max_consecutive_failures}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 20) {
-                  setSettings({ ...settings, max_consecutive_failures: v });
-                }
-              }}
-              onBlur={() => void handleSave({ max_consecutive_failures: settings.max_consecutive_failures })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.maxConsecutiveFailuresHelp")}
-            </span>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.approvalTimeout")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={10}
-              max={600}
-              value={settings.approval_timeout_secs}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 600) {
-                  setSettings({ ...settings, approval_timeout_secs: v });
-                }
-              }}
-              onBlur={() => void handleSave({ approval_timeout_secs: settings.approval_timeout_secs })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.approvalTimeoutHelp")}
-            </span>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-miro-text">
-            {t("settings.toolExecutionTimeout")}
-          </label>
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <input
-              type="number"
-              min={10}
-              max={600}
-              value={settings.tool_execution_timeout_secs}
-              className="w-24 rounded-md border border-miro-border/30 bg-white px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 600) {
-                  setSettings({ ...settings, tool_execution_timeout_secs: v });
-                }
-              }}
-              onBlur={() => void handleSave({ tool_execution_timeout_secs: settings.tool_execution_timeout_secs })}
-            />
-            <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
-              {t("settings.toolExecutionTimeoutHelp")}
-            </span>
-          </div>
-        </div>
-        {saving && (
-          <p className="text-xs text-miro-text-secondary">{t("common.saving")}</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function SecurityPolicySection() {
-  const { t } = useTranslation();
-  const showToast = useSettingsToast();
-  const [policy, setPolicy] = useState<tauriCmd.SecurityPolicyDto | null>(null);
-
-  useEffect(() => {
-    tauriCmd.getSecurityPolicy().then(setPolicy).catch(() => {});
-  }, []);
-
-  if (!policy) return null;
-
-  const levels: { value: tauriCmd.SecurityPolicyDto["level"]; labelKey: string; descKey: string }[] = [
-    { value: "permissive", labelKey: "settings.securityPermissive", descKey: "settings.securityPermissiveDesc" },
-    { value: "standard", labelKey: "settings.securityStandard", descKey: "settings.securityStandardDesc" },
-    { value: "strict", labelKey: "settings.securityStrict", descKey: "settings.securityStrictDesc" },
-  ];
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.securityPolicyTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.securityPolicyHelp")}
-      </p>
-      <div className="mt-4 space-y-3">
-        {levels.map((lv) => (
-          <label
-            key={lv.value}
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-              policy.level === lv.value
-                ? "border-miro-blue bg-blue-50/60"
-                : "border-miro-border/20 hover:border-miro-border/40"
-            }`}
-          >
-            <input
-              type="radio"
-              name="securityLevel"
-              value={lv.value}
-              checked={policy.level === lv.value}
-              className="mt-0.5"
-              onChange={async () => {
-                try {
-                  const updated = await tauriCmd.updateSecurityPolicy({ level: lv.value });
-                  setPolicy(updated);
-                  showToast(t("common.saved"));
-                } catch (err) {
-                  console.error("[security-policy] failed to update", err);
-                  showToast(t("settings.providerSaveFailed"), "error");
-                }
-              }}
-            />
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-miro-text">
-                {t(lv.labelKey)}
-              </div>
-              <div className="text-xs text-miro-text-secondary">
-                {t(lv.descKey)}
-              </div>
-            </div>
-          </label>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function BuiltinToolsSection() {
-  const { t } = useTranslation();
-  const showToast = useSettingsToast();
-  const [tools, setTools] = useState<tauriCmd.ToolStateDto[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    tauriCmd.getBuiltinToolStates()
-      .then(setTools)
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, []);
-
-  async function handleToggle(name: string, enabled: boolean) {
-    try {
-      await tauriCmd.setBuiltinToolEnabled(name, enabled);
-      setTools((prev) =>
-        prev.map((t) => (t.name === name ? { ...t, enabled } : t))
-      );
-      showToast(t("common.saved"));
-    } catch (err) {
-      console.error("[builtin-tools] failed to toggle", err);
-      showToast(t("settings.providerSaveFailed"), "error");
-    }
-  }
-
-  if (!loaded) return null;
-  if (tools.length === 0) return null;
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.builtinToolsTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.builtinToolsHelp")}
-      </p>
-      <div className="mt-4 space-y-2">
-        {tools.map((tool) => {
-          const label = BUILTIN_TOOL_I18N_KEYS[tool.name];
-          const displayName = label
-            ? t(label.nameKey, { defaultValue: tool.name })
-            : tool.name;
-          const displayDescription = label
-            ? t(label.descriptionKey, { defaultValue: tool.description })
-            : tool.description;
-          return (
-            <div
-              key={tool.name}
-              className="flex min-w-0 items-center justify-between rounded-lg border border-miro-border/20 px-3 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-miro-text">{displayName}</p>
-                <p className="truncate text-xs text-miro-text-secondary">
-                  {displayDescription}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={tool.enabled}
-                onClick={() => void handleToggle(tool.name, !tool.enabled)}
-                className={`relative ml-3 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                  tool.enabled ? "bg-miro-blue" : "bg-miro-border/40"
-                }`}
-              >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${
-                    tool.enabled ? "translate-x-4" : "translate-x-0.5"
-                  }`}
-                />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function AppSettingsSection() {
-  const { t } = useTranslation();
-  const showToast = useSettingsToast();
-  const [closeBehavior, setCloseBehaviorLocal] = useState<"exit" | "tray">("exit");
-  const [shellPath, setShellPathLocal] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const closeBehaviorDirtyRef = useRef(false);
-  const shellPathDirtyRef = useRef(false);
-
-  useEffect(() => {
-    let active = true;
-    const loadInitialSettings = async () => {
-      const [closeResult, shellResult] = await Promise.allSettled([
-        tauriCmd.getCloseBehavior(),
-        tauriCmd.getShellPath(),
-      ]);
-      if (!active) return;
-      if (closeResult.status === "fulfilled" && !closeBehaviorDirtyRef.current) {
-        setCloseBehaviorLocal(closeResult.value);
-      }
-      if (shellResult.status === "fulfilled" && !shellPathDirtyRef.current) {
-        setShellPathLocal(shellResult.value);
-      }
-      setLoaded(true);
-    };
-    void loadInitialSettings();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const handleCloseBehaviorChange = async (behavior: "exit" | "tray") => {
-    closeBehaviorDirtyRef.current = true;
-    setCloseBehaviorLocal(behavior);
-    try {
-      await tauriCmd.setCloseBehavior(behavior);
-      showToast(t("common.saved"));
-    } catch { /* ignore */ }
-  };
-
-  const handleShellPathSave = async () => {
-    setSaving(true);
-    try {
-      await tauriCmd.setShellPath(shellPath.trim());
-      showToast(t("common.saved"));
-    } catch {
-      showToast(t("settings.providerSaveFailed"), "error");
-    }
-    setSaving(false);
-  };
-
-  const handleBrowseShell = async () => {
-    try {
-      const selected = await openDialog({
-        multiple: false,
-        directory: false,
-        title: t("settings.shellPathTitle"),
-      });
-      if (selected && typeof selected === "string") {
-        shellPathDirtyRef.current = true;
-        setShellPathLocal(selected);
-      }
-    } catch { /* cancelled */ }
-  };
-
-  if (!loaded) return null;
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.closeBehaviorTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.closeBehaviorHelp")}
-      </p>
-      <div className="mt-3 flex gap-3">
-        <button
-          type="button"
-          onClick={() => handleCloseBehaviorChange("exit")}
-          className={`flex-1 rounded-lg border-2 p-3 text-left transition-all ${
-            closeBehavior === "exit"
-              ? "border-emerald-400 bg-emerald-50"
-              : "border-gray-200 bg-white hover:border-gray-300"
-          }`}
-        >
-          <div className="text-sm font-medium text-miro-text">
-            {t("settings.closeBehaviorExit")}
-          </div>
-          <div className="mt-0.5 text-xs text-miro-text-secondary">
-            {t("settings.closeBehaviorExitDesc")}
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => handleCloseBehaviorChange("tray")}
-          className={`flex-1 rounded-lg border-2 p-3 text-left transition-all ${
-            closeBehavior === "tray"
-              ? "border-emerald-400 bg-emerald-50"
-              : "border-gray-200 bg-white hover:border-gray-300"
-          }`}
-        >
-          <div className="text-sm font-medium text-miro-text">
-            {t("settings.closeBehaviorTray")}
-          </div>
-          <div className="mt-0.5 text-xs text-miro-text-secondary">
-            {t("settings.closeBehaviorTrayDesc")}
-          </div>
-        </button>
-      </div>
-
-      <h3 className="mt-6 font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-        {t("settings.shellPathTitle")}
-      </h3>
-      <p className="mt-1 text-xs text-miro-text-secondary">
-        {t("settings.shellPathHelp")}
-      </p>
-      <div className="mt-3 flex gap-2">
-        <input
-          type="text"
-          value={shellPath}
-          onChange={(e) => {
-            shellPathDirtyRef.current = true;
-            setShellPathLocal(e.target.value);
-          }}
-          placeholder={t("settings.shellPathPlaceholder")}
-          className="app-input flex-1 rounded-lg px-3 py-2 text-sm"
-        />
-        <button
-          type="button"
-          onClick={handleBrowseShell}
-          className="app-secondary-button rounded-lg px-3 py-2 text-xs whitespace-nowrap"
-        >
-          {t("common.browse", "Browse")}
-        </button>
-        <button
-          type="button"
-          onClick={handleShellPathSave}
-          disabled={saving}
-          className="app-primary-button rounded-lg px-3 py-2 text-xs whitespace-nowrap"
-        >
-          {saving ? t("common.saving") : t("common.save")}
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function McpServersSection() {
-  const { t } = useTranslation();
-  const showToast = useSettingsToast();
-  const [servers, setServers] = useState<tauriCmd.McpServerStateDto[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [editingMcpServerName, setEditingMcpServerName] = useState<string | null>(null);
-  const [jsonInput, setJsonInput] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
-  const [pendingServerNames, setPendingServerNames] = useState<Set<string>>(
-    () => new Set()
-  );
-
-  function setServerPending(name: string, pending: boolean) {
-    setPendingServerNames((prev) => {
-      const next = new Set(prev);
-      if (pending) {
-        next.add(name);
-      } else {
-        next.delete(name);
-      }
-      return next;
-    });
-  }
-
-  async function loadServers() {
-    try {
-      const nextServers = await tauriCmd.listMcpServers();
-      setServers(nextServers);
-      setLoadError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setLoadError(message);
-      console.error("[mcp] failed to load servers", err);
-    } finally {
-      setLoaded(true);
-    }
-  }
-
-  async function handleToggleEnabled(name: string, enabled: boolean) {
-    setServerPending(name, true);
-    setServerErrors((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
-    try {
-      await tauriCmd.setMcpServerEnabled(name, enabled);
-      await loadServers();
-      showToast(t("common.saved"));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setServerErrors((prev) => ({ ...prev, [name]: message }));
-      await loadServers();
-      showToast(message, "error");
-    } finally {
-      setServerPending(name, false);
-    }
-  }
-
-  useEffect(() => {
-    void loadServers();
-  }, []);
-
-  function normalizeMcpTransport(value: unknown): "stdio" | "streamable_http" | "sse" {
-    const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
-    if (!raw || raw === "stdio") return "stdio";
-    if (raw === "http" || raw === "streamable-http" || raw === "streamable_http") {
-      return "streamable_http";
-    }
-    if (raw === "sse" || raw === "legacy-sse" || raw === "legacy_sse") {
-      return "sse";
-    }
-    return "stdio";
-  }
-
-  function readStringMap(value: unknown): Record<string, string> | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return undefined;
-    }
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        String(item),
-      ])
-    );
-  }
-
-  function readMcpServerConfig(
-    name: string,
-    value: unknown
-  ): { ok: true; config: tauriCmd.McpServerConfig } | { ok: false; error: string } {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return { ok: false, error: t("settings.mcpErrorServerMustBeObject", { name }) };
-    }
-
-    const serverObj = value as Record<string, unknown>;
-    const hasCommand = typeof serverObj.command === "string" && serverObj.command.trim().length > 0;
-    const hasUrl = typeof serverObj.url === "string" && serverObj.url.trim().length > 0;
-    const transport = normalizeMcpTransport(
-      serverObj.transport ?? (hasUrl && !hasCommand ? "streamable_http" : "stdio")
-    );
-
-    if (transport === "stdio" && !hasCommand) {
-      return { ok: false, error: t("settings.mcpErrorCommandRequired", { name }) };
-    }
-    if ((transport === "streamable_http" || transport === "sse") && !hasUrl) {
-      return { ok: false, error: t("settings.mcpErrorUrlRequired", { name }) };
-    }
-
-    return {
-      ok: true,
-      config: {
-        transport,
-        command: hasCommand ? String(serverObj.command).trim() : "",
-        args: Array.isArray(serverObj.args) ? serverObj.args.map(String) : [],
-        env: readStringMap(serverObj.env),
-        url: hasUrl ? String(serverObj.url).trim() : "",
-        headers: readStringMap(serverObj.headers),
-      },
-    };
-  }
-
-  /** Parse MCP JSON from common client shapes and transport-aware HTTP configs. */
-  function parseAndValidate(json: string):
-    | { ok: true; servers: Array<{ name: string; config: tauriCmd.McpServerConfig }> }
-    | { ok: false; error: string } {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(json);
-    } catch (e) {
-      return { ok: false, error: t("settings.mcpErrorJsonParse", { message: (e as SyntaxError).message }) };
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return { ok: false, error: t("settings.mcpErrorJsonMustBeObject") };
-    }
-    const obj = parsed as Record<string, unknown>;
-
-    const wrappedServers = obj.mcpServers ?? obj.servers;
-    if (typeof wrappedServers === "object" && wrappedServers !== null && !Array.isArray(wrappedServers)) {
-      const serversMap = wrappedServers as Record<string, unknown>;
-      const results: Array<{ name: string; config: tauriCmd.McpServerConfig }> = [];
-      for (const [name, value] of Object.entries(serversMap)) {
-        const configResult = readMcpServerConfig(name, value);
-        if (!configResult.ok) return configResult;
-        results.push({
-          name: name.trim(),
-          config: configResult.config,
-        });
-      }
-      if (results.length === 0) {
-        return { ok: false, error: t("settings.mcpErrorServerMapEmpty") };
-      }
-      return { ok: true, servers: results };
-    }
-
-    if (typeof obj.name === "string" && obj.name.trim()) {
-      const configResult = readMcpServerConfig(obj.name.trim(), obj);
-      if (!configResult.ok) return configResult;
-      return { ok: true, servers: [{ name: obj.name.trim(), config: configResult.config }] };
-    }
-
-    const entries = Object.entries(obj);
-    const hasServerLikeEntries = entries.some(
-      ([, v]) =>
-        typeof v === "object" &&
-        v !== null &&
-        !Array.isArray(v) &&
-        ("command" in (v as Record<string, unknown>) || "url" in (v as Record<string, unknown>))
-    );
-    if (hasServerLikeEntries) {
-      const results: Array<{ name: string; config: tauriCmd.McpServerConfig }> = [];
-      for (const [name, value] of entries) {
-        if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
-        const configResult = readMcpServerConfig(name, value);
-        if (!configResult.ok) return configResult;
-        results.push({
-          name: name.trim(),
-          config: configResult.config,
-        });
-      }
-      if (results.length === 0) {
-        return { ok: false, error: t("settings.mcpErrorNoValidServers") };
-      }
-      return { ok: true, servers: results };
-    }
-
-    return { ok: false, error: t("settings.mcpErrorExpectedShape") };
-  }
-
-  async function handleAdd(e: FormEvent) {
-    e.preventDefault();
-    setAddError(null);
-
-    const result = parseAndValidate(jsonInput.trim());
-    if (!result.ok) {
-      setAddError(result.error);
-      return;
-    }
-    if (editingMcpServerName) {
-      const [target] = result.servers;
-      if (result.servers.length !== 1 || target?.name !== editingMcpServerName) {
-        setAddError(t("settings.mcpEditNameLocked"));
-        return;
-      }
-    }
-
-    setAdding(true);
-    try {
-      // Add servers one by one; stop on first failure
-      for (const { name, config } of result.servers) {
-        await tauriCmd.addMcpServer({ name, config });
-      }
-      setJsonInput("");
-      setEditingMcpServerName(null);
-      setShowForm(false);
-      await loadServers();
-      showToast(t("common.saved"));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAddError(msg);
-      showToast(msg, "error");
-    } finally {
-      setAdding(false);
-    }
-  }
-
-  function handleEditMcpServer(server: tauriCmd.McpServerStateDto) {
-    setEditingMcpServerName(server.name);
-    setAddError(null);
-    setJsonInput(
-      JSON.stringify(
-        {
-          name: server.name,
-          transport: server.transport,
-          command: server.command || undefined,
-          args: server.args,
-          env: server.env,
-          url: server.url || undefined,
-          headers: server.headers,
-        },
-        null,
-        2
-      )
-    );
-    setShowForm(true);
-  }
-
-  async function handleRemove(name: string) {
-    setServerPending(name, true);
-    setServerErrors((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
-    try {
-      await tauriCmd.removeMcpServer(name);
-      await loadServers();
-      showToast(t("common.saved"));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setServerErrors((prev) => ({ ...prev, [name]: message }));
-      showToast(message, "error");
-      console.error("[mcp] failed to remove server", err);
-    } finally {
-      setServerPending(name, false);
-    }
-  }
-
-  if (!loaded) return null;
-
-  const exampleJson = JSON.stringify(
-    {
-      mcpServers: {
-        filesystem: {
-          command: "npx",
-          args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
-        },
-        exa: {
-          url: "https://mcp.exa.ai/mcp",
-          headers: {
-            "x-api-key": "YOUR_KEY",
-          },
-        },
-      },
-    },
-    null,
-    2
-  );
-
-  function getStatusPillClassName(status: string): string {
-    if (status === "running") {
-      return "bg-emerald-50 text-emerald-700";
-    }
-    if (status === "disabled") {
-      return "bg-miro-bg text-miro-text-secondary";
-    }
-    if (status === "starting") {
-      return "bg-amber-50 text-amber-700";
-    }
-    return "bg-red-50 text-red-600";
-  }
-
-  function getMcpStatusLabel(status: string): string {
-    if (status === "running") return t("settings.mcpStatusRunning");
-    if (status === "disabled") return t("settings.mcpStatusDisabled");
-    if (status === "starting") return t("settings.mcpStatusStarting");
-    if (status === "stopped") return t("settings.mcpStatusStopped");
-    if (status.startsWith("error:")) {
-      return t("settings.mcpStatusError", {
-        message: status.replace(/^error:\s*/, ""),
-      });
-    }
-    return status;
-  }
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-            {t("settings.mcpServersTitle")}
-          </h3>
-          <p className="mt-1 text-xs text-miro-text-secondary">
-            {t("settings.mcpServersHelp")}
-          </p>
-        </div>
-        {!showForm && (
-          <button
-            type="button"
-            onClick={() => {
-              setEditingMcpServerName(null);
-              setJsonInput("");
-              setAddError(null);
-              setShowForm(true);
-            }}
-            className="app-secondary-button rounded-lg px-3 py-1.5 text-xs"
-          >
-            + {t("settings.mcpAddServer")}
-          </button>
-        )}
-      </div>
-
-      {showForm && (
-        <form onSubmit={(e) => void handleAdd(e)} className="mt-4 space-y-3">
-          <div>
-            <label className="text-xs font-medium text-miro-text">
-              {t("settings.mcpJsonConfig")} *
-            </label>
-            <textarea
-              className="app-input mt-1 w-full font-mono text-xs"
-              rows={8}
-              value={jsonInput}
-              onChange={(e) => setJsonInput(e.target.value)}
-              placeholder={exampleJson}
-              spellCheck={false}
-            />
-          </div>
-          {addError && (
-            <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-              {addError}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={adding}
-              className="app-primary-button rounded-lg px-4 py-1.5 text-xs"
-            >
-              {adding
-                ? t("settings.mcpValidating")
-                : editingMcpServerName
-                  ? t("settings.mcpSaveServer")
-                  : t("settings.mcpAddConfirm")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(false);
-                setAddError(null);
-                setEditingMcpServerName(null);
-              }}
-              className="app-secondary-button rounded-lg px-4 py-1.5 text-xs"
-            >
-              {t("settings.mcpCancel")}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {loadError && (
-        <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-          {loadError}
-        </p>
-      )}
-
-      {servers.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {servers.map((server) => {
-            const isPending = pendingServerNames.has(server.name);
-            const serverError = serverErrors[server.name];
-            const pendingLabel = server.enabled
-              ? t("settings.mcpDisabling")
-              : t("settings.mcpValidating");
-            const transportLabel = server.transport === "streamable_http" ? "HTTP" : server.transport.toUpperCase();
-            const connectionLabel = server.transport === "streamable_http" || server.transport === "sse"
-              ? server.url
-              : `${server.command} ${server.args.join(" ")}`.trim();
-            return (
-            <div
-              key={server.name}
-              className="min-w-0 rounded-lg border border-miro-border/20 px-3 py-2"
-            >
-              <div className="flex min-w-0 items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <p className="min-w-0 max-w-full truncate text-sm font-medium text-miro-text">
-                      {server.name}
-                    </p>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        getStatusPillClassName(server.status)
-                      }`}
-                    >
-                      {isPending ? pendingLabel : getMcpStatusLabel(server.status)}
-                    </span>
-                    <span className="rounded-full bg-miro-bg px-2 py-0.5 text-[10px] font-medium text-miro-text-secondary">
-                      {transportLabel}
-                    </span>
-                    {server.tools.length > 0 && (
-                      <span className="text-[10px] text-miro-text-secondary">
-                        {t("settings.mcpToolsCount", { count: server.tools.length })}
-                      </span>
-                    )}
-                  </div>
-                  <p className="truncate text-xs text-miro-text-secondary">
-                    {connectionLabel}
-                  </p>
-                  {server.tools.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {server.tools.map((tool) => (
-                        <span
-                          key={tool.name}
-                          className="rounded bg-miro-bg px-1.5 py-0.5 text-[10px] text-miro-text-secondary"
-                          title={tool.description}
-                        >
-                          {tool.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="ml-2 flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => handleEditMcpServer(server)}
-                    className={`rounded-md px-2 py-1 text-xs font-medium text-miro-text-secondary transition-colors hover:bg-miro-bg hover:text-miro-text ${
-                      isPending ? "cursor-wait opacity-50" : ""
-                    }`}
-                  >
-                    {t("settings.mcpEditServer")}
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={server.enabled}
-                    aria-busy={isPending || undefined}
-                    disabled={isPending}
-                    onClick={() => void handleToggleEnabled(server.name, !server.enabled)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                      server.enabled ? "bg-miro-blue" : "bg-miro-border/40"
-                    } ${
-                      isPending ? "cursor-wait opacity-60" : "cursor-pointer"
-                    }`}
-                    title={server.enabled ? t("settings.mcpDisableServer") : t("settings.mcpEnableServer")}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-                        server.enabled ? "translate-x-4" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => void handleRemove(server.name)}
-                    className={`rounded-md p-1.5 text-miro-text-secondary/50 transition-colors hover:bg-red-50 hover:text-red-600 ${
-                      isPending ? "cursor-wait opacity-50" : ""
-                    }`}
-                    title={t("settings.mcpRemoveServer")}
-                  >
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              </div>
-              {serverError && (
-                <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-                  {serverError}
-                </p>
-              )}
-            </div>
-            );
-          })}
-        </div>
-      )}
-
-      {servers.length === 0 && !showForm && (
-        <p className="mt-3 text-xs text-miro-text-secondary/60">
-          {t("settings.mcpNoServers")}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function SkillsSection() {
-  const { t } = useTranslation();
-  const [skills, setSkills] = useState<tauriCmd.SkillDto[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [editingSkill, setEditingSkill] = useState<tauriCmd.SkillDto | null>(null);
-  const [showForm, setShowForm] = useState(false);
-
-  // Form state
-  const [formName, setFormName] = useState("");
-  const [formDisplayName, setFormDisplayName] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formTriggerType, setFormTriggerType] = useState("SLASH");
-  const [formTemplate, setFormTemplate] = useState("");
-  const [formVariables, setFormVariables] = useState("");
-  const [formBoundTools, setFormBoundTools] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const [skillsDir, setSkillsDir] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-
-  function loadSkills() {
-    tauriCmd
-      .listSkills()
-      .then(setSkills)
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-    tauriCmd.getSkillsDirectory().then(setSkillsDir).catch(() => {});
-  }
-
-  useEffect(() => {
-    loadSkills();
-  }, []);
-
-  function resetForm() {
-    setFormName("");
-    setFormDisplayName("");
-    setFormDescription("");
-    setFormTriggerType("SLASH");
-    setFormTemplate("");
-    setFormVariables("");
-    setFormBoundTools("");
-    setFormError(null);
-    setImportError(null);
-    setEditingSkill(null);
-    setShowForm(false);
-  }
-
-  function startEdit(skill: tauriCmd.SkillDto) {
-    setEditingSkill(skill);
-    setFormName(skill.name);
-    setFormDisplayName(skill.displayName);
-    setFormDescription(skill.description);
-    setFormTriggerType(skill.triggerType);
-    setFormTemplate(skill.promptTemplate);
-    setFormVariables(skill.variablesJson || "[]");
-    setFormBoundTools(skill.boundToolsJson || "[]");
-    setFormError(null);
-    setShowForm(true);
-  }
-
-  function startCreate() {
-    resetForm();
-    setShowForm(true);
-  }
-
-  async function handleImportSkill() {
-    setImporting(true);
-    setImportError(null);
-    try {
-      const selected = await openDialog({ directory: true, multiple: false });
-      if (typeof selected === "string" && selected) {
-        await tauriCmd.importSkill(selected);
-        setImportError(null);
-        loadSkills();
-      }
-    } catch (err) {
-      console.warn("Import skill failed:", err);
-      setImportError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function handleSave(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-
-    const trimmedName = formName.trim();
-    if (!trimmedName) {
-      setFormError(t("settings.skillNameRequired"));
-      return;
-    }
-    if (!formTemplate.trim()) {
-      setFormError(t("settings.skillTemplateRequired"));
-      return;
-    }
-
-    // Validate JSON fields
-    if (formVariables.trim()) {
-      try {
-        JSON.parse(formVariables);
-      } catch {
-        setFormError(t("settings.skillVariablesJsonParseError"));
-        return;
-      }
-    }
-    if (formBoundTools.trim()) {
-      try {
-        JSON.parse(formBoundTools);
-      } catch {
-        setFormError(t("settings.skillBoundToolsJsonParseError"));
-        return;
-      }
-    }
-
-    setSaving(true);
-    try {
-      const input: tauriCmd.CreateSkillInput = {
-        name: trimmedName,
-        displayName: formDisplayName.trim(),
-        description: formDescription.trim(),
-        triggerType: formTriggerType,
-        promptTemplate: formTemplate,
-        variablesJson: formVariables.trim() || "[]",
-        boundToolsJson: formBoundTools.trim() || "[]",
-      };
-      if (editingSkill) {
-        await tauriCmd.updateSkill(input);
-      } else {
-        await tauriCmd.createSkill(input);
-      }
-      resetForm();
-      loadSkills();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    if (!(await confirmDialog({ message: t("settings.skillConfirmDelete") }))) return;
-    try {
-      await tauriCmd.deleteSkill(id);
-      loadSkills();
-    } catch (err) {
-      console.error("[skills] failed to delete", err);
-    }
-  }
-
-  async function handleToggle(skill: tauriCmd.SkillDto) {
-    try {
-      await tauriCmd.setSkillEnabled(skill.id, !skill.enabled);
-      loadSkills();
-    } catch (err) {
-      console.error("[skills] failed to toggle", err);
-    }
-  }
-
-  if (!loaded) return null;
-
-  const triggerBadge = (type: string) => {
-    switch (type) {
-      case "ALWAYS":
-        return (
-          <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-            {t("settings.skillTriggerAlwaysDesc")}
-          </span>
-        );
-      case "SLASH":
-        return (
-          <span className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700">
-            {t("settings.skillTriggerSlashDesc")}
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-600">
-            {t("settings.skillTriggerManualDesc")}
-          </span>
-        );
-    }
-  };
-
-  return (
-    <section className="app-panel min-w-0 rounded-shell bg-white/95 p-5">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
-            {t("settings.skillsTitle")}
-          </h3>
-          <p className="mt-1 text-xs text-miro-text-secondary">
-            {t("settings.skillsHelp")}
-          </p>
-          {skillsDir && (
-            <p className="mt-1 text-[10px] text-miro-text-secondary/60 font-mono truncate">
-              {skillsDir}
-            </p>
-          )}
-          <p className="mt-1 text-[10px] text-miro-text-secondary/70">
-            {t("settings.skillImportHelp")}
-          </p>
-        </div>
-        {!showForm && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleImportSkill()}
-              disabled={importing}
-              className="app-secondary-button rounded-lg px-3 py-1.5 text-xs"
-            >
-              {importing ? t("settings.skillImporting") : t("settings.skillImport")}
-            </button>
-            <button
-              type="button"
-              onClick={startCreate}
-              className="app-secondary-button rounded-lg px-3 py-1.5 text-xs"
-            >
-              + {t("settings.skillAdd")}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {importError && !showForm && (
-        <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-          {importError}
-        </p>
-      )}
-
-      {showForm && (
-        <form onSubmit={(e) => void handleSave(e)} className="mt-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-miro-text">
-                {t("settings.skillName")} *
-              </label>
-              <input
-                type="text"
-                className="app-input mt-1 w-full text-xs"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder={t("settings.skillNamePlaceholder")}
-                disabled={!!editingSkill}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-miro-text">
-                {t("settings.skillDisplayName")}
-              </label>
-              <input
-                type="text"
-                className="app-input mt-1 w-full text-xs"
-                value={formDisplayName}
-                onChange={(e) => setFormDisplayName(e.target.value)}
-                placeholder={t("settings.skillDisplayNamePlaceholder")}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-miro-text">
-              {t("settings.skillDescription")}
-            </label>
-            <input
-              type="text"
-              className="app-input mt-1 w-full text-xs"
-              value={formDescription}
-              onChange={(e) => setFormDescription(e.target.value)}
-              placeholder={t("settings.skillDescriptionPlaceholder")}
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-miro-text">
-              {t("settings.skillTriggerType")}
-            </label>
-            <div className="mt-1 flex flex-wrap gap-3">
-              {(["ALWAYS", "SLASH", "MANUAL"] as const).map((type) => (
-                <label
-                  key={type}
-                  className="flex cursor-pointer items-center gap-1.5 text-xs"
-                >
-                  <input
-                    type="radio"
-                    name="triggerType"
-                    value={type}
-                    checked={formTriggerType === type}
-                    onChange={() => setFormTriggerType(type)}
-                    className="accent-miro-blue"
-                  />
-                  {t(`settings.skillTrigger${type.charAt(0) + type.slice(1).toLowerCase()}`)}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-miro-text">
-              {t("settings.skillPromptTemplate")} *
-            </label>
-            <p className="mb-1 text-[10px] text-miro-text-secondary">
-              {t("settings.skillPromptTemplateHelp")}
-            </p>
-            <textarea
-              className="app-input w-full font-mono text-xs"
-              rows={6}
-              value={formTemplate}
-              onChange={(e) => setFormTemplate(e.target.value)}
-              placeholder="You are a {{role}} expert. Help me with {{topic}}."
-              spellCheck={false}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-miro-text">
-                {t("settings.skillVariables")}
-              </label>
-              <input
-                type="text"
-                className="app-input mt-1 w-full font-mono text-xs"
-                value={formVariables}
-                onChange={(e) => setFormVariables(e.target.value)}
-                placeholder={t("settings.skillVariablesPlaceholder")}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-miro-text">
-                {t("settings.skillBoundTools")}
-              </label>
-              <input
-                type="text"
-                className="app-input mt-1 w-full font-mono text-xs"
-                value={formBoundTools}
-                onChange={(e) => setFormBoundTools(e.target.value)}
-                placeholder={t("settings.skillBoundToolsPlaceholder")}
-              />
-            </div>
-          </div>
-
-          {formError && (
-            <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-              {formError}
-            </p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="app-primary-button rounded-lg px-4 py-1.5 text-xs"
-            >
-              {saving
-                ? t("common.saving")
-                : editingSkill
-                  ? t("settings.skillSave")
-                  : t("settings.skillAdd")}
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="app-secondary-button rounded-lg px-4 py-1.5 text-xs"
-            >
-              {t("settings.skillCancel")}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {skills.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {skills.map((skill) => (
-            <div
-              key={skill.id}
-              className={`min-w-0 rounded-lg border px-3 py-2 ${
-                skill.enabled
-                  ? "border-miro-border/20"
-                  : "border-miro-border/10 bg-gray-50/50 opacity-60"
-              }`}
-            >
-              <div className="flex min-w-0 items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <p className="min-w-0 max-w-full truncate text-sm font-medium text-miro-text">
-                      {skill.displayName || skill.name}
-                    </p>
-                    {triggerBadge(skill.triggerType)}
-                    {skill.description && (
-                      <span className="max-w-[200px] truncate text-[10px] text-miro-text-secondary">
-                        {skill.description}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 truncate font-mono text-[10px] text-miro-text-secondary/70">
-                    /{skill.name}
-                  </p>
-                </div>
-                <div className="ml-2 flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleToggle(skill)}
-                    className={`rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
-                      skill.enabled
-                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                    }`}
-                  >
-                    {skill.enabled ? t("settings.skillDisable") : t("settings.skillEnable")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => startEdit(skill)}
-                    className="rounded-md p-1.5 text-miro-text-secondary/50 transition-colors hover:bg-blue-50 hover:text-blue-600"
-                    title={t("settings.skillEdit")}
-                  >
-                    <IconSettings size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(skill.id)}
-                    className="rounded-md p-1.5 text-miro-text-secondary/50 transition-colors hover:bg-red-50 hover:text-red-600"
-                    title={t("settings.skillDelete")}
-                  >
-                    <IconTrash size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {skills.length === 0 && !showForm && (
-        <p className="mt-3 text-xs text-miro-text-secondary/60">
-          {t("settings.skillsEmpty")}
-        </p>
-      )}
-    </section>
-  );
-}
 
 function AboutSection() {
   const { t } = useTranslation();

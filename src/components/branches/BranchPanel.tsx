@@ -7,7 +7,8 @@
  * Double-click a branch node to navigate to it.
  * Hover shows a tooltip with the branch's head message preview.
  */
-import { useState, useCallback, useRef, Fragment } from "react";
+import { useState, useCallback, useRef, Fragment, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import {
@@ -51,8 +52,8 @@ const _sel_activeConversationId =
 interface TooltipState {
   visible: boolean;
   text: string;
-  x: number;
   y: number;
+  right: number;
 }
 
 export function BranchPanel() {
@@ -66,11 +67,29 @@ export function BranchPanel() {
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
     text: "",
-    x: 0,
     y: 0,
+    right: 0,
   });
   const tooltipTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const tooltipContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Create a portal mount container on mount, clean up on unmount
+  useEffect(() => {
+    const el = document.createElement("div");
+    el.className = "branch-tooltip-portal";
+    document.body.appendChild(el);
+    tooltipContainerRef.current = el;
+    return () => {
+      if (tooltipTimeout.current) {
+        clearTimeout(tooltipTimeout.current);
+        tooltipTimeout.current = null;
+      }
+      if (tooltipContainerRef.current && tooltipContainerRef.current.parentNode) {
+        tooltipContainerRef.current.parentNode.removeChild(tooltipContainerRef.current);
+      }
+    };
+  }, []);
 
   const handleToggleSelect = useCallback((branchId: BranchId) => {
     setSelectedForCompare((prev) => {
@@ -99,10 +118,11 @@ export function BranchPanel() {
   const showTooltip = useCallback(
     (text: string, e: React.MouseEvent) => {
       if (tooltipTimeout.current) clearTimeout(tooltipTimeout.current);
-      const rect = panelRef.current?.getBoundingClientRect();
-      const x = rect ? e.clientX - rect.left + 12 : e.clientX;
-      const y = rect ? e.clientY - rect.top - 8 : e.clientY;
-      setTooltip({ visible: true, text, x, y });
+      const branchEl = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const panelRect = panelRef.current?.getBoundingClientRect();
+      // Use the panel's left edge as the tooltip's right boundary
+      const panelLeft = panelRect?.left ?? branchEl.left;
+      setTooltip({ visible: true, text, y: branchEl.top, right: panelLeft });
     },
     [],
   );
@@ -118,14 +138,14 @@ export function BranchPanel() {
 
   return (
     <div className="flex h-full flex-col" ref={panelRef}>
-      {/* Tooltip */}
-      {tooltip.visible && (
+      {tooltipContainerRef.current && tooltip.visible && createPortal(
         <div
-          className="pointer-events-none absolute z-50 max-w-[260px] rounded-lg bg-miro-text px-3 py-2 text-[11px] leading-relaxed text-white shadow-lg"
-          style={{ left: tooltip.x, top: tooltip.y }}
+          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded-xl border border-miro-border/40 bg-white/95 px-4 py-2.5 text-[12px] leading-relaxed text-miro-text shadow-ring backdrop-blur-sm"
+          style={{ right: `calc(100vw - ${tooltip.right}px)`, top: `${tooltip.y}px` }}
         >
           {tooltip.text}
-        </div>
+        </div>,
+        tooltipContainerRef.current
       )}
 
       {/* Header */}

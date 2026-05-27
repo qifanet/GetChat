@@ -105,6 +105,8 @@ export function ConversationGlobalView({ onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const transformRef = useRef({ x: 0, y: 0, zoom: 1 });
+  transformRef.current = { x: pan.x, y: pan.y, zoom };
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
@@ -126,7 +128,7 @@ export function ConversationGlobalView({ onClose }: Props) {
 
   // Compute SVG bounds
   const bounds = useMemo(() => {
-    if (layouts.length === 0) return { w: 800, h: 600 };
+    if (layouts.length === 0) return { w: 800, h: 600, contentW: 800, contentH: 600, cx: 400, cy: 300 };
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const l of layouts) {
       minX = Math.min(minX, l.x);
@@ -134,11 +136,16 @@ export function ConversationGlobalView({ onClose }: Props) {
       maxX = Math.max(maxX, l.x + NODE_W);
       maxY = Math.max(maxY, l.y + NODE_H);
     }
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
     return {
-      w: maxX - minX + 200,
-      h: maxY - minY + 200,
-      offX: -minX + 100,
-      offY: -minY + 100,
+      w: contentW + 200,
+      h: contentH + 200,
+      contentW,
+      contentH,
+      // Tree center in raw layout coords (SVG doesn't shift nodes, just adds empty padding)
+      cx: minX + contentW / 2,
+      cy: minY + contentH / 2,
     };
   }, [layouts]);
 
@@ -148,8 +155,23 @@ export function ConversationGlobalView({ onClose }: Props) {
     if (!el) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const t = transformRef.current;
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom((z) => Math.max(0.15, Math.min(3, z * delta)));
+      const newZoom = Math.max(0.15, Math.min(3, t.zoom * delta));
+      const ratio = newZoom / t.zoom;
+
+      const newTransform = {
+        x: mouseX - (mouseX - t.x) * ratio,
+        y: mouseY - (mouseY - t.y) * ratio,
+        zoom: newZoom,
+      };
+      transformRef.current = newTransform;
+      setPan({ x: newTransform.x, y: newTransform.y });
+      setZoom(newZoom);
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
@@ -160,11 +182,14 @@ export function ConversationGlobalView({ onClose }: Props) {
     if (containerRef.current) {
       const cw = containerRef.current.clientWidth;
       const ch = containerRef.current.clientHeight;
-      setPan({
-        x: cw / 2 - bounds.w / 2,
-        y: 40,
-      });
-      setZoom(Math.min(1, (cw - 40) / bounds.w));
+      const z = Math.min(1, (cw - 40) / bounds.contentW);
+      const newPan = {
+        x: cw / 2 - bounds.cx * z,
+        y: ch / 2 - bounds.cy * z,
+      };
+      transformRef.current = { x: newPan.x, y: newPan.y, zoom: z };
+      setPan(newPan);
+      setZoom(z);
     }
   }, [bounds]);
 
@@ -253,14 +278,16 @@ export function ConversationGlobalView({ onClose }: Props) {
     if (!containerRef.current) return;
     const cw = containerRef.current.clientWidth;
     const ch = containerRef.current.clientHeight;
-    const scaleX = (cw - 40) / bounds.w;
-    const scaleY = (ch - 120) / bounds.h;
+    const scaleX = (cw - 40) / bounds.contentW;
+    const scaleY = (ch - 120) / bounds.contentH;
     const z = Math.min(scaleX, scaleY, 1);
+    const newPan = {
+      x: cw / 2 - bounds.cx * z,
+      y: ch / 2 - bounds.cy * z,
+    };
+    transformRef.current = { x: newPan.x, y: newPan.y, zoom: z };
+    setPan(newPan);
     setZoom(z);
-    setPan({
-      x: (cw - bounds.w * z) / 2,
-      y: (ch - 80 - bounds.h * z) / 2 + 40,
-    });
   }, [bounds]);
 
   // Management mode: click node to toggle branch selection

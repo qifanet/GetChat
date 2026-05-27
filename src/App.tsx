@@ -33,7 +33,6 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconChevronUp,
-  IconExport,
   IconSettings,
 } from "./components/common/Icon";
 import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsScreen";
@@ -67,9 +66,8 @@ const selectSetLeftSidebarCollapsed = (s: import("./stores/appStore.types").AppS
 const selectSetRightPanelCollapsed = (s: import("./stores/appStore.types").AppStore) => s.setRightPanelCollapsed;
 const selectCreateConversation = (s: import("./stores/appStore.types").AppStore) => s.createConversation;
 const selectOpenConversation = (s: import("./stores/appStore.types").AppStore) => s.openConversation;
-const selectOpenExportDialog = (s: import("./stores/appStore.types").AppStore) => s.openExportDialog;
-const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
 const selectSummariesById = (s: import("./stores/appStore.types").AppStore) => s.summariesById;
+const selectSummaryOrder = (s: import("./stores/appStore.types").AppStore) => s.summaryOrder;
 const selectActiveConversationId = (s: import("./stores/appStore.types").AppStore) => s.workspace.activeConversationId;
 const selectFileExplorerOpen = (s: import("./stores/appStore.types").AppStore) => s.ui.fileExplorerOpen;
 const selectPreviewFilePath = (s: import("./stores/appStore.types").AppStore) => s.ui.previewFilePath;
@@ -195,7 +193,6 @@ function ShellHeader({
   const { t } = useTranslation();
   const workspaceMode = useAppStore(selectWorkspaceMode);
   const activeSnapshot = useAppStore(selectActiveSnapshot);
-  const openExportDialog = useAppStore(selectOpenExportDialog);
   const compareActive = activePage === "WORKSPACE" && workspaceMode === "COMPARE";
   const conversationTitle = getConversationDisplayTitle(
     activeSnapshot?.summary.title,
@@ -266,19 +263,9 @@ function ShellHeader({
             : t("shell.providersMissing")}
         </span>
         {defaultModelName !== t("shell.modelUnset") ? (
-          <span className="app-status-pill hidden xl:inline-flex">
+          <span className="app-status-pill inline-flex">
             {defaultModelName}
           </span>
-        ) : null}
-        {activePage === "WORKSPACE" && activeSnapshot ? (
-          <button
-            type="button"
-            onClick={openExportDialog}
-            className="app-secondary-button gap-2 px-3 py-2 text-xs"
-          >
-            <IconExport size={12} />
-            <span className="hidden sm:inline">{t("common.export")}</span>
-          </button>
         ) : null}
       </div>
     </header>
@@ -295,7 +282,7 @@ function WorkspaceEmptyState({
 }: WorkspaceEmptyStateProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-full items-center justify-center px-4 py-8">
+    <div className="flex h-full justify-center px-4 py-8 pt-40">
       <div className="w-full max-w-5xl">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mx-auto mb-8 flex justify-center">
@@ -660,7 +647,7 @@ function WorkspaceCenter({
 
   if (workspaceMode === "COMPARE") {
     return (
-      <main className="app-panel h-full min-w-0 overflow-hidden rounded-shell bg-white/90">
+      <main className="h-full min-w-0 overflow-hidden rounded-shell bg-white">
         <CompareWorkspace />
       </main>
     );
@@ -701,15 +688,20 @@ function WorkspaceCenter({
     </main>
   );
 }
-/** Fixed edge strip used to reopen a collapsed desktop sidebar. */
+/** Fixed edge strip used to reopen or collapse a desktop sidebar. */
 function SidebarEdgeStrip({
   side,
   onExpand,
+  panelWidth,
+  isCollapsed,
 }: {
   side: "left" | "right";
   onExpand: () => void;
+  panelWidth?: number;
+  isCollapsed?: boolean;
 }) {
   const { t } = useTranslation();
+  const buttonOffset = panelWidth !== undefined ? panelWidth - 18 : 8;
   return (
     <button
       type="button"
@@ -719,14 +711,25 @@ function SidebarEdgeStrip({
           ? t("common.toggleLeftSidebar")
           : t("common.toggleRightSidebar")
       }
-      className={`fixed top-[88px] z-20 flex h-16 w-10 items-center justify-center rounded-full bg-white/88 shadow-float transition-colors hover:bg-white ${
-        side === "left" ? "left-3" : "right-3"
-      }`}
+      className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-white/88 shadow-float opacity-0 transition-all duration-200 hover:opacity-100 hover:bg-white`}
+      style={
+        side === "left"
+          ? { left: buttonOffset }
+          : { right: buttonOffset }
+      }
     >
       {side === "left" ? (
-        <IconChevronRight size={14} className="text-miro-text-secondary" />
+        isCollapsed ? (
+          <IconChevronRight size={14} className="text-miro-text-secondary" />
+        ) : (
+          <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        )
       ) : (
-        <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        isCollapsed ? (
+          <IconChevronLeft size={14} className="text-miro-text-secondary" />
+        ) : (
+          <IconChevronRight size={14} className="text-miro-text-secondary" />
+        )
       )}
     </button>
   );
@@ -862,13 +865,15 @@ export function App() {
             ? `fixed inset-y-0 left-0 z-40 w-[min(320px,calc(100vw-28px))] transition-transform duration-200 ${
                 leftSidebarCollapsed ? "-translate-x-full" : "translate-x-0"
               }`
-            : "fixed inset-y-0 left-0 z-10 overflow-hidden transition-[width] duration-200"
+            : `fixed inset-y-0 left-0 z-10 overflow-hidden transition-transform duration-200 ${
+                leftSidebarCollapsed ? "-translate-x-full" : "translate-x-0"
+              }`
         }
         style={
           isCompactShell
             ? undefined
             : {
-                width: leftSidebarCollapsed ? 0 : DESKTOP_LEFT_SIDEBAR_WIDTH_PX,
+                width: DESKTOP_LEFT_SIDEBAR_WIDTH_PX,
               }
         }
       >
@@ -879,12 +884,14 @@ export function App() {
           onOpenSettings={handleOpenSettings}
         />
       </div>
-      {!isCompactShell && leftSidebarCollapsed ? (
+      {!isCompactShell && (
         <SidebarEdgeStrip
           side="left"
-          onExpand={() => setLeftSidebarCollapsed(false)}
+          onExpand={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+          panelWidth={leftSidebarCollapsed ? undefined : DESKTOP_LEFT_SIDEBAR_WIDTH_PX}
+          isCollapsed={leftSidebarCollapsed}
         />
-      ) : null}
+      )}
       {showRightRail ? (
         <div
           className={
@@ -892,13 +899,15 @@ export function App() {
               ? `fixed inset-y-16 right-3 z-40 w-[min(340px,calc(100vw-24px))] transition-transform duration-200 ${
                   rightPanelCollapsed ? "translate-x-[calc(100%+20px)]" : "translate-x-0"
                 }`
-              : "fixed inset-y-16 right-0 z-10 overflow-hidden transition-[width] duration-200"
+              : `fixed inset-y-16 right-0 z-10 overflow-hidden transition-transform duration-200 ${
+                  rightPanelCollapsed ? "translate-x-full" : "translate-x-0"
+                }`
           }
           style={
             isCompactShell
               ? undefined
               : {
-                  width: rightPanelCollapsed ? 0 : DESKTOP_RIGHT_RAIL_WIDTH_PX,
+                  width: DESKTOP_RIGHT_RAIL_WIDTH_PX,
                 }
           }
         >
@@ -915,20 +924,22 @@ export function App() {
           </aside>
         </div>
       ) : null}
-      {!isCompactShell && showRightRail && rightPanelCollapsed ? (
+      {!isCompactShell && showRightRail && (
         <SidebarEdgeStrip
           side="right"
-          onExpand={() => setRightPanelCollapsed(false)}
+          onExpand={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+          panelWidth={rightPanelCollapsed ? undefined : DESKTOP_RIGHT_RAIL_WIDTH_PX}
+          isCollapsed={rightPanelCollapsed}
         />
-      ) : null}
+      )}
       <div
         className="h-full pt-16"
         style={{
-          paddingLeft: isCompactShell ? 0 : desktopLeftInset,
-          paddingRight: isCompactShell ? 0 : desktopRightInset,
+          paddingLeft: isCompactShell ? 0 : (isSettingsPage ? 0 : desktopLeftInset),
+          paddingRight: isCompactShell ? 0 : (isSettingsPage ? 0 : desktopRightInset),
         }}
       >
-        <div className="h-full overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4">
+        <div className={`h-full overflow-hidden ${isSettingsPage ? "pr-1 pl-4 pb-4 pt-3" : "px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4"}`}>
           {isSettingsPage ? (
             <ProviderSettingsScreen onClose={handleOpenWorkspace} />
           ) : (

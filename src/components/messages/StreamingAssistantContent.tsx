@@ -35,7 +35,7 @@ export function StreamingAssistantContent({
   return (
     <div
       ref={containerRef}
-      className="streaming-surface streaming-caret whitespace-pre-wrap break-words font-mono text-sm"
+      className="streaming-surface streaming-caret"
       data-request-id={requestId}
       aria-live="polite"
       aria-label={t("message.generating")}
