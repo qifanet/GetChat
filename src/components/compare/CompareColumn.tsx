@@ -33,7 +33,7 @@ export function CompareColumn({
   const displayBranchName = getBranchDisplayName(branchName, t);
 
   return (
-    <div className="app-soft-panel flex min-h-0 min-w-0 flex-1 flex-col rounded-shell bg-white/96">
+    <div className="app-soft-panel flex min-h-0 min-w-0 flex-1 flex-col rounded-shell bg-miro-card/96">
       <div className="flex items-center gap-2 border-b border-miro-border/10 px-4 py-4">
         <span className="truncate font-display text-base font-semibold tracking-[-0.03em] text-miro-text">
           {displayBranchName}
@@ -79,7 +79,7 @@ function CompareMessageItem({ message }: { message: MessageNode }) {
       className={`rounded-[24px] px-4 py-4 shadow-ring ${
         isUser
           ? "bg-miro-blue-light text-miro-text"
-          : "bg-white text-miro-text"
+          : "bg-miro-card text-miro-text"
       }`}
     >
       <div className="mb-2 flex items-center gap-1.5">

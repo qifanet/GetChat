@@ -195,6 +195,8 @@ export interface UiSlice {
   setPreviewFilePath: (path: string | null) => void;
   openExportDialog: () => void;
   closeExportDialog: () => void;
+  openImportDialog: () => void;
+  closeImportDialog: () => void;
   openBranchRenameDialog: () => void;
   closeBranchRenameDialog: () => void;
 }

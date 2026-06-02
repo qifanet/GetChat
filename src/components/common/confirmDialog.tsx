@@ -82,14 +82,14 @@ export function ConfirmDialogPortal() {
     <div className="fixed inset-0 z-[10000] flex items-center justify-center">
       <button
         type="button"
-        className="fixed inset-0 bg-slate-950/30 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-miro-scrim backdrop-blur-[2px]"
         onClick={handleCancel}
         aria-label={cancelLabel}
       />
       <div
         role="alertdialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-sm rounded-shell bg-white px-7 py-7 shadow-panel"
+        className="relative z-10 w-full max-w-sm rounded-shell bg-miro-card px-7 py-7 shadow-panel"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
@@ -121,7 +121,7 @@ export function ConfirmDialogPortal() {
             onClick={handleConfirm}
             className={
               opts.destructive
-                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800"
+                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-miro-red px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-miro-red active:bg-miro-red"
                 : "app-primary-button px-4 py-2 text-sm"
             }
           >

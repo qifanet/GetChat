@@ -28,6 +28,7 @@ import * as tauriCmd from "../../services/tauriCommands";
 import {
   IconColumns,
   IconExport,
+  IconImport,
   IconChevronLeft,
   IconChevronRight,
   IconFolderOpen,
@@ -165,7 +166,7 @@ export function TopContextBar() {
     }
   }
   return (
-    <header className="border-b border-miro-border/10 bg-white/90 px-3 py-2.5 sm:px-4">
+    <header className="border-b border-miro-border/10 bg-miro-card/90 px-3 py-2.5 sm:px-4">
       <div className="flex flex-wrap items-start justify-between gap-2.5">
         <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <button
@@ -195,7 +196,7 @@ export function TopContextBar() {
               <button
                 type="button"
                 onClick={() => setModelDropdownOpen((prev) => !prev)}
-                className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-2.5 py-1.5 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-2.5 py-1.5 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-none focus:ring-0"
                 title={currentBranch?.preferredModelId ? currentModelLabel : undefined}
               >
                 <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary 2xl:inline">
@@ -211,7 +212,7 @@ export function TopContextBar() {
               {modelDropdownOpen && (
                 <div
                   role="listbox"
-                  className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[420px] max-h-64 overflow-y-auto rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                  className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[420px] max-h-64 overflow-y-auto rounded-xl border border-miro-border/40 bg-miro-card/95 p-1.5 shadow-ring"
                 >
                   {!selectedModelId && (
                     <button
@@ -285,6 +286,14 @@ export function TopContextBar() {
               <button
                 type="button"
                 className="app-secondary-button gap-1.5 px-3 py-2 text-xs"
+                onClick={() => useAppStore.getState().openImportDialog()}
+              >
+                <IconImport size={12} />
+                <span className="hidden sm:inline">{t("import.title")}</span>
+              </button>
+              <button
+                type="button"
+                className="app-secondary-button gap-1.5 px-3 py-2 text-xs"
                 onClick={() => useAppStore.getState().openExportDialog()}
               >
                 <IconExport size={12} />
@@ -296,7 +305,7 @@ export function TopContextBar() {
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                className={`app-secondary-button gap-1.5 px-3 py-2 text-xs ${summary.workspacePath ? "border-emerald-200 bg-emerald-50/60 text-emerald-700" : ""}`}
+                className={`app-secondary-button gap-1.5 px-3 py-2 text-xs ${summary.workspacePath ? "border-miro-green-light bg-miro-green-light/60 text-miro-green" : ""}`}
                 onClick={() => void handleSetWorkspace()}
                 title={summary.workspacePath ? t("workspaceDir.pathTooltip", { path: summary.workspacePath }) : t("workspaceDir.setWorkspace")}
               >
@@ -310,7 +319,7 @@ export function TopContextBar() {
               {summary.workspacePath ? (
                 <button
                   type="button"
-                  className="app-icon-button h-7 w-7 text-xs text-miro-text-secondary hover:text-red-500"
+                  className="app-icon-button h-7 w-7 text-xs text-miro-text-secondary hover:text-miro-red"
                   onClick={() => void handleClearWorkspace()}
                   title={t("workspaceDir.clearWorkspace")}
                 >

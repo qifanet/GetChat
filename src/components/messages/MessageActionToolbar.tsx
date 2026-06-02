@@ -14,6 +14,7 @@
 
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 // ============================================================================
 // Toolbar Container
@@ -114,6 +115,7 @@ interface MessageActionMoreMenuProps {
  * Closes on outside click or Escape.
  */
 export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -164,7 +166,7 @@ export function MessageActionMoreMenu({ items }: MessageActionMoreMenuProps) {
         type="button"
         onClick={handleToggle}
         className="relative flex h-7 w-7 items-center justify-center rounded-md text-miro-text-secondary transition-colors hover:bg-miro-border/15 hover:text-miro-text"
-        title="More"
+        title={t("common.more")}
       >
         <svg
           width={16}
@@ -236,7 +238,7 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
   const menu = (
     <div
       ref={menuRef}
-      className="fixed z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-white py-1 shadow-lg"
+      className="fixed z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-miro-card py-1 shadow-lg"
       style={{ left: coords.left, bottom: coords.bottom }}
       role="menu"
     >

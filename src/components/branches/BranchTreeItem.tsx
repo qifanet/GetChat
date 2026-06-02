@@ -82,8 +82,8 @@ export function BranchTreeItem({
   const bgClass = isCurrent
     ? "bg-miro-blue-light/45"
     : isOnMainline
-      ? "bg-white/60"
-      : "bg-white/40 hover:bg-white/70";
+      ? "bg-miro-card/60"
+      : "bg-miro-card/40 hover:bg-miro-card/70";
   return (
     <div
       className={`group flex items-center gap-1.5 rounded-xl px-2 py-1.5 transition-colors cursor-pointer ${bgClass}`}

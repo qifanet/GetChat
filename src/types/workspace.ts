@@ -128,6 +128,7 @@ export interface UiState {
   rightPanelCollapsed: boolean;
   rightPanelTab: RightPanelTab;
   exportDialogOpen: boolean;
+  importDialogOpen: boolean;
   branchRenameDialogOpen: boolean;
   /** Set by search navigation; MessageList scrolls to this message then clears it. */
   scrollToMessageId: string | null;

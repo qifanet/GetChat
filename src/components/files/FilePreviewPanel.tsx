@@ -206,7 +206,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
 
   return (
     <div
-      className="flex h-full flex-col overflow-hidden bg-white"
+      className="flex h-full flex-col overflow-hidden bg-miro-card"
       onKeyDown={handleKeyDown}
       ref={(el) => {
         if (el) el.focus();
@@ -226,7 +226,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
         )}
         {preview && !preview.isBinary && (
           <span className="shrink-0 text-[10px] text-miro-text-secondary">
-            {preview.totalLines} lines · {formatFileSize(preview.fileSize)}
+            {t("fileExplorer.lineCount", { count: preview.totalLines })} · {formatFileSize(preview.fileSize)}
           </span>
         )}
         {preview?.isBinary && (
@@ -349,7 +349,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
         {preview && !preview.isBinary && !loading && !error && (
           <>
             {preview.truncated && (
-              <div className="border-b border-amber-200 bg-amber-50/60 px-4 py-1.5 text-[11px] text-amber-700">
+              <div className="border-b border-miro-amber-light bg-miro-amber-light/60 px-4 py-1.5 text-[11px] text-miro-amber">
                 {t("fileExplorer.truncated", {
                   lines: preview.totalLines,
                   maxLines: 2000,

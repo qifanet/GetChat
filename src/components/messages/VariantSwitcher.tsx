@@ -128,7 +128,7 @@ export function VariantSwitcher({ userMessageId }: VariantSwitcherProps) {
   const canDeleteCurrent = !branchHeads.has(currentAssistantId);
   return (
     <div className="app-message-card flex justify-start">
-      <div className="flex items-center gap-2 rounded-full border border-miro-border/40 bg-white/88 px-3 py-1.5 shadow-ring">
+      <div className="flex items-center gap-2 rounded-full border border-miro-border/40 bg-miro-card/88 px-3 py-1.5 shadow-ring">
         <button
           type="button"
           onClick={() => handleSwitch(-1)}

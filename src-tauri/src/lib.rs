@@ -194,9 +194,11 @@ pub fn run() {
 
                 // Load MCP servers in background — do not block app startup.
                 let mcp_pool = pool;
+                let mcp_app_handle = app_handle.clone();
                 tokio::spawn(async move {
                     let key_store = crate::state::SystemKeyStore::new();
-                    crate::commands::streaming::reload_mcp_servers_from_db(
+                    crate::commands::streaming::reload_mcp_servers_from_file(
+                        &mcp_app_handle,
                         &mcp_pool,
                         &key_store,
                         &mcp_manager,
@@ -310,6 +312,7 @@ pub fn run() {
             commands::conversations::generate_branch_diff_summary,
             commands::conversations::set_conversation_workspace,
             commands::conversations::read_todo_items,
+            commands::conversations::import_conversations,
             // Branches (5+2)
             commands::branches::create_branch,
             commands::branches::rename_branch,
@@ -339,26 +342,20 @@ pub fn run() {
             commands::streaming::update_tool_settings,
             commands::streaming::get_security_policy,
             commands::streaming::update_security_policy,
-            // MCP Server management (4)
+            // MCP Server management (4 + 2 file-based)
             commands::streaming::list_mcp_servers,
             commands::streaming::add_mcp_server,
             commands::streaming::remove_mcp_server,
             commands::streaming::get_mcp_tool_definitions,
             commands::streaming::set_mcp_server_enabled,
+            commands::streaming::get_mcp_config_json,
+            commands::streaming::save_mcp_config_json,
             commands::streaming::get_context_status,
             commands::streaming::compress_context,
-            // Skills management (8)
-            commands::streaming::list_skills,
-            commands::streaming::create_skill,
-            commands::streaming::update_skill,
-            commands::streaming::delete_skill,
-            commands::streaming::set_skill_enabled,
+            // Skills & Slash Commands (3)
             commands::streaming::list_slash_items,
-            commands::streaming::execute_skill,
             commands::streaming::execute_mcp_prompt,
             commands::streaming::get_skills_directory,
-            commands::streaming::import_skill,
-            commands::streaming::refresh_skills_from_disk,
             // Settings (4)
             commands::settings::list_providers,
             commands::settings::get_system_prompt,
@@ -371,6 +368,7 @@ pub fn run() {
             commands::settings::set_close_behavior,
             commands::settings::get_shell_path,
             commands::settings::set_shell_path,
+            commands::settings::detect_shell_path,
             // Debug (1)
             commands::debug::check_db_invariants,
             // Filesystem (2)

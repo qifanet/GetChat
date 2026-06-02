@@ -22,15 +22,15 @@ use crate::state::AppState;
 // ============================================================================
 
 const TITLE_SYSTEM_PROMPT: &str = concat!(
-    "根据对话内容生成简短标题。\n",
-    "要求：\n",
-    "- 不超过20字\n",
-    "- 中文概括主题\n",
-    "- 只输出标题，无任何其他内容"
+    "Based on the user's messages below, generate a concise conversation title.\n",
+    "Requirements:\n",
+    "- Maximum 20 characters\n",
+    "- Use the same language as the user's messages\n",
+    "- Output ONLY the title, nothing else"
 );
 
-const TITLE_MAX_USER_CHARS: usize = 500;
-const TITLE_MAX_ASSISTANT_CHARS: usize = 300;
+const TITLE_MAX_USER_MESSAGES: usize = 3;
+const TITLE_MAX_USER_CHARS: usize = 300;
 
 /** Result of a title generation attempt. */
 #[derive(Debug, Serialize, Deserialize)]
@@ -124,7 +124,7 @@ pub async fn generate_conversation_title(
         }
     };
 
-    // 4. Collect first user + assistant messages for the prompt
+    // 4. Collect first user messages for the prompt (only USER role, no assistant)
     let messages = collect_title_prompt_messages(&state.db, conversation_id).await?;
 
     tracing::info!(
@@ -175,9 +175,24 @@ pub async fn generate_conversation_title(
     .await
     {
         Ok(t) => t,
-        Err(e) => {
-            tracing::warn!(error = %e.message, "generate_conversation_title: helper model call failed");
-            return Ok(Some(TitleGenerationResult::skipped(&format!("API_ERROR: {}", e.message))));
+        Err(first_err) => {
+            tracing::warn!(error = %first_err.message, "generate_conversation_title: first attempt failed, retrying in 500ms");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            match call_helper_model(
+                provider_type,
+                &provider_row.base_url,
+                api_key.as_deref(),
+                &model_row.request_name,
+                &messages,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(retry_err) => {
+                    tracing::warn!(error = %retry_err.message, "generate_conversation_title: retry also failed");
+                    return Ok(Some(TitleGenerationResult::skipped(&format!("API_ERROR_RETRY: {}", retry_err.message))));
+                }
+            }
         }
     };
 
@@ -220,29 +235,27 @@ async fn collect_title_prompt_messages(
     pool: &sqlx::SqlitePool,
     conversation_id: &str,
 ) -> Result<Vec<TitlePromptMessage>, AppError> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, role, content_text FROM messages \
-         WHERE conversation_id = ? AND status = 'COMPLETED' \
-         ORDER BY created_at ASC LIMIT 4",
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, content_text FROM messages \
+         WHERE conversation_id = ? AND role = 'USER' AND status = 'COMPLETED' \
+         ORDER BY created_at ASC LIMIT ?",
     )
     .bind(conversation_id)
+    .bind(TITLE_MAX_USER_MESSAGES as i64)
     .fetch_all(pool)
     .await
     .map_err(AppError::from)?;
 
-    let mut messages = Vec::new();
-    for (_id, role, content) in &rows {
-        let max_chars = match role.as_str() {
-            "USER" => TITLE_MAX_USER_CHARS,
-            "ASSISTANT" => TITLE_MAX_ASSISTANT_CHARS,
-            _ => continue,
-        };
-        let truncated: String = content.chars().take(max_chars).collect();
-        messages.push(TitlePromptMessage {
-            role: role.to_lowercase(),
-            content: truncated,
-        });
-    }
+    let messages: Vec<TitlePromptMessage> = rows
+        .into_iter()
+        .map(|(_id, content)| {
+            let truncated: String = content.chars().take(TITLE_MAX_USER_CHARS).collect();
+            TitlePromptMessage {
+                role: "user".to_string(),
+                content: truncated,
+            }
+        })
+        .collect();
 
     Ok(messages)
 }
@@ -368,19 +381,20 @@ async fn call_openai_compatible(
     );
 
     // max_tokens must be generous enough for models with built-in reasoning
-    // (e.g. DeepSeek V4 Flash uses reasoning_content + content; if max_tokens
-    // is too small, the reasoning chain consumes all tokens and content is empty).
-    // 1024 tokens allows structured summary output even when reasoning model
-    // uses ~700 tokens for its internal thinking chain.
+    // (e.g. GLM-5, DeepSeek V4 Flash use reasoning_content + content; if
+    // max_tokens is too small, the reasoning chain consumes all tokens and
+    // content is empty). 4096 tokens provides ample room for both the
+    // internal reasoning chain and the structured summary output.
+    let max_tokens: u32 = 4096;
     let mut request = reqwest::Client::new()
         .post(&url)
         .json(&json!({
             "model": model_name,
             "messages": messages,
             "stream": false,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
         }))
-        .timeout(std::time::Duration::from_secs(60));
+        .timeout(std::time::Duration::from_secs(90));
 
     if let Some(key) = api_key {
         request = request.bearer_auth(key);
@@ -413,30 +427,45 @@ async fn call_openai_compatible(
         .await
         .map_err(|e| AppError::invalid_argument(format!("API response parse failed: {e}")))?;
 
-    // Some models (e.g. DeepSeek V4 Flash) return reasoning_content (thinking chain)
-    // alongside content. We only use content — reasoning_content is the model's internal
-    // thought process, not the answer.
-    let content = json["choices"][0]["message"]["content"]
+    let mut content = json["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
-        .trim();
+        .trim()
+        .to_string();
 
     if content.is_empty() {
-        // Log the full response structure for diagnostics
-        let has_reasoning = json["choices"][0]["message"]["reasoning_content"]
+        // Some reasoning models (e.g. GLM-5) may consume all tokens on the
+        // reasoning chain and produce empty content.  When reasoning_content
+        // is present, use it as a fallback so the caller still gets a usable
+        // result instead of triggering an unnecessary retry.
+        let reasoning = json["choices"][0]["message"]["reasoning_content"]
             .as_str()
-            .map_or(false, |s| !s.trim().is_empty());
-        tracing::warn!(
-            content_empty = true,
-            has_reasoning_content = has_reasoning,
-            response_preview = %serde_json::to_string(&json).unwrap_or_default().chars().take(300).collect::<String>(),
-            "call_openai_compatible: content is empty in API response"
-        );
+            .unwrap_or("")
+            .trim();
+        if !reasoning.is_empty() {
+            let finish_reason = json["choices"][0]["finish_reason"]
+                .as_str()
+                .unwrap_or("");
+            tracing::warn!(
+                has_reasoning = true,
+                finish_reason = %finish_reason,
+                reasoning_chars = reasoning.len(),
+                "call_openai_compatible: content empty, using reasoning_content as fallback"
+            );
+            content = reasoning.to_string();
+        } else {
+            tracing::warn!(
+                content_empty = true,
+                has_reasoning_content = false,
+                response_preview = %serde_json::to_string(&json).unwrap_or_default().chars().take(300).collect::<String>(),
+                "call_openai_compatible: content is empty in API response"
+            );
+        }
     }
 
-    tracing::info!(content = %content, "call_openai_compatible: extracted title");
+    tracing::info!(content_len = content.len(), "call_openai_compatible: extracted content");
 
-    Ok(content.to_string())
+    Ok(content)
 }
 
 fn truncate_title(title: &str) -> String {
@@ -473,6 +502,26 @@ pub async fn generate_branch_diff_summary(
     left_branch_id: &str,
     right_branch_id: &str,
 ) -> Result<Option<DiffSummaryResult>, AppError> {
+    // 0. Check cache first
+    let cached = sqlx::query_as::<_, (String,)>(
+        "SELECT summary_text FROM branch_diff_summaries \
+         WHERE conversation_id = ? AND branch_a_id = ? AND branch_b_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(left_branch_id)
+    .bind(right_branch_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(AppError::from)?;
+
+    if let Some((text,)) = cached {
+        tracing::info!(
+            conv_id = %conversation_id,
+            "generate_branch_diff_summary: cache hit"
+        );
+        return Ok(Some(DiffSummaryResult { summary: text }));
+    }
+
     // 1. Resolve helper model
     let helper_model_id = app_kv::get(&state.db, "helper_model_id")
         .await
@@ -555,6 +604,31 @@ pub async fn generate_branch_diff_summary(
     if summary.is_empty() {
         return Ok(None);
     }
+
+    // Persist to cache (INSERT OR REPLACE)
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let cache_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT OR REPLACE INTO branch_diff_summaries (id, conversation_id, branch_a_id, branch_b_id, summary_text, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .bind(&cache_id)
+    .bind(conversation_id)
+    .bind(left_branch_id)
+    .bind(right_branch_id)
+    .bind(&summary)
+    .bind(now_secs)
+    .execute(&state.db)
+    .await
+    .map_err(AppError::from)?;
+
+    tracing::info!(
+        conv_id = %conversation_id,
+        "generate_branch_diff_summary: cached"
+    );
 
     Ok(Some(DiffSummaryResult { summary }))
 }
@@ -654,25 +728,6 @@ fn compression_input_char_budget(context_window_kb: i32) -> usize {
     context_tokens
         .saturating_mul(2)
         .clamp(COMPRESS_MIN_INPUT_CHARS, COMPRESS_MAX_INPUT_CHARS)
-}
-
-fn should_retry_compression_error(error: &AppError) -> bool {
-    let mut text = error.message.to_ascii_lowercase();
-    if let Some(details) = &error.details {
-        text.push_str(&details.to_ascii_lowercase());
-    }
-    [
-        "context",
-        "token",
-        "length",
-        "too large",
-        "maximum",
-        "payload",
-        "400",
-        "413",
-    ]
-    .iter()
-    .any(|needle| text.contains(needle))
 }
 
 fn role_label(role: &str) -> &str {
@@ -789,6 +844,8 @@ pub async fn compress_context(
         up_to_message_id: up_to_id.clone(),
         max_tokens_budget: None,
         branch_id: Some(branch_id.to_string()),
+        skills_dir: None,
+        activated_skill: None,
     };
 
     let latest_context = compressed_contexts::find_latest_by_branch(
@@ -982,15 +1039,56 @@ pub async fn compress_context(
     {
         Ok(summary) if !summary.trim().is_empty() => summary,
         Ok(_) => {
+            // Empty summary — single retry
             tracing::warn!(
-                "compress_context: helper returned empty summary with structured template"
+                "compress_context: helper returned empty summary, retrying once"
             );
-            return Err(AppError::invalid_argument(
-                "Compression helper returned an empty summary",
-            ));
+            match call_helper_model(
+                provider_type,
+                &provider_row.base_url,
+                api_key.as_deref(),
+                &model_row.request_name,
+                &compress_messages,
+            )
+            .await
+            {
+                Ok(retry_summary) if !retry_summary.trim().is_empty() => retry_summary,
+                Ok(_) => {
+                    tracing::warn!("compress_context: retry also returned empty");
+                    return Err(AppError::invalid_argument(
+                        "Compression helper returned an empty summary after retry",
+                    ));
+                }
+                Err(retry_err) => {
+                    tracing::warn!(error = %retry_err, "compress_context: retry failed");
+                    return Err(retry_err);
+                }
+            }
         }
         Err(error) => {
-            return Err(error);
+            // First attempt failed — single retry
+            tracing::warn!(error = %error, "compress_context: first attempt failed, retrying once");
+            match call_helper_model(
+                provider_type,
+                &provider_row.base_url,
+                api_key.as_deref(),
+                &model_row.request_name,
+                &compress_messages,
+            )
+            .await
+            {
+                Ok(retry_summary) if !retry_summary.trim().is_empty() => retry_summary,
+                Ok(_) => {
+                    tracing::warn!("compress_context: retry returned empty summary");
+                    return Err(AppError::invalid_argument(
+                        "Compression helper returned an empty summary after retry",
+                    ));
+                }
+                Err(retry_err) => {
+                    tracing::warn!(error = %retry_err, "compress_context: retry also failed");
+                    return Err(retry_err);
+                }
+            }
         }
     };
 

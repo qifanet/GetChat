@@ -219,7 +219,9 @@ async function preparePromptForSend(params: {
  * @throws SendPlanError if state is invalid or in compare mode
  * @throws Error if required fields (draft, model) are missing
  */
-export async function sendMessageAction(): Promise<void> {
+export async function sendMessageAction(options?: {
+  activatedSkill?: string;
+}): Promise<void> {
   const state = useAppStore.getState();
   if (state.composer.isSending || isSendSubmitLocked()) {
     console.warn("[composer] duplicate send ignored: a send is already in progress");
@@ -326,6 +328,7 @@ export async function sendMessageAction(): Promise<void> {
       rendererMode: "DOM_TEXT",
       tools: tools.length > 0 ? tools : undefined,
       toolChoice: tools.length > 0 ? "auto" : undefined,
+      activatedSkill: options?.activatedSkill,
     });
     assistantStreamStarted = true;
     return;
@@ -444,6 +447,7 @@ export async function sendMessageAction(): Promise<void> {
     rendererMode: "DOM_TEXT",
     tools: tools.length > 0 ? tools : undefined,
     toolChoice: tools.length > 0 ? "auto" : undefined,
+    activatedSkill: options?.activatedSkill,
   });
   assistantStreamStarted = true;
   } catch (error) {

@@ -70,7 +70,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
       <div className="max-w-[min(760px,82%)]">
         <div className="mb-2 flex items-center justify-end gap-2">
           {message.editedFromMessageId ? (
-            <span className="app-status-pill border-miro-border/20 bg-white/80 text-miro-text-secondary">
+            <span className="app-status-pill border-miro-border/20 bg-miro-card/80 text-miro-text-secondary">
               {t("message.edited")}
             </span>
           ) : null}

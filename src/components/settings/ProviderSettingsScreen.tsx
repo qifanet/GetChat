@@ -105,23 +105,20 @@ function normalizeContextWindowKb(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return 64;
   }
-  return Math.max(
-    CONTEXT_WINDOW_MIN_KB,
-    Math.min(CONTEXT_WINDOW_MAX_KB, Math.round(value))
-  );
+  return Math.round(value);
 }
 
-/** Parse a text input so focused rows cannot be changed by mouse-wheel steps. */
+/** Parse a text input for context window KB — only digits allowed during editing. */
 function parseContextWindowKbInput(value: string): number | null {
-  const normalized = value.trim().replace(/[kK]\b/g, "");
-  if (normalized.length === 0) {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length === 0) {
     return null;
   }
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed)) {
+  const parsed = parseInt(digits, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     return null;
   }
-  return normalizeContextWindowKb(parsed);
+  return parsed;
 }
 /** Return sensible provider presets so new forms start from usable defaults. */
 function getProviderPreset(type: ProviderType): Pick<
@@ -302,6 +299,7 @@ export function ProviderSettingsScreen({
   // Dropdown state for provider type
   const [providerTypeDropdownOpen, setProviderTypeDropdownOpen] = useState(false);
   const providerTypeDropdownRef = useRef<HTMLDivElement>(null);
+  const [contextWindowTextMap, setContextWindowTextMap] = useState<Record<string, string>>({});
 
   const providerTypeOptions: { value: ProviderType; label: string }[] = [
     { value: "OPENAI_COMPATIBLE", label: t("settings.providerTypeOpenAI") },
@@ -334,9 +332,9 @@ export function ProviderSettingsScreen({
   );
   const feedbackClassName =
     feedback?.tone === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      ? "border-miro-green-light bg-miro-green-light text-miro-green"
       : feedback?.tone === "error"
-        ? "border-red-200 bg-red-50 text-red-700"
+        ? "border-miro-red-light bg-miro-red-light text-miro-red"
         : "border-miro-border bg-miro-bg text-miro-text-secondary";
   const selectedConnectionState =
     selectedProviderId === "new"
@@ -673,8 +671,8 @@ export function ProviderSettingsScreen({
           <div
             className={`fixed left-1/2 top-4 z-[9999] -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg ${
               toast.tone === "success"
-                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border border-red-200 bg-red-50 text-red-700"
+                ? "border border-miro-green-light bg-miro-green-light text-miro-green"
+                : "border border-miro-red-light bg-miro-red-light text-miro-red"
             }`}
             style={{ animation: "settings-toast-in 0.25s ease-out" }}
           >
@@ -683,7 +681,7 @@ export function ProviderSettingsScreen({
           </div>
         )}
         <section className="flex h-full min-w-0 flex-1 gap-4 overflow-auto bg-transparent">
-          <aside className="app-panel flex min-w-0 shrink-0 flex-col rounded-shell bg-white/95 w-[330px]">
+          <aside className="app-panel flex min-w-0 shrink-0 flex-col rounded-shell bg-miro-card/95 w-[330px]">
             <div className="border-b border-miro-border/10 px-5 py-5">
               <button
                 type="button"
@@ -784,7 +782,7 @@ export function ProviderSettingsScreen({
                           className={`w-full rounded-[22px] px-4 py-4 text-left transition-colors ${
                             isSelected
                               ? "bg-miro-blue-light/70 shadow-ring"
-                              : "bg-white/84 hover:bg-white"
+                              : "bg-miro-card/84 hover:bg-miro-card"
                           }`}
                         >
                           <div className="flex min-w-0 items-start justify-between gap-3">
@@ -799,8 +797,8 @@ export function ProviderSettingsScreen({
                             <span
                               className={`app-status-pill shrink-0 ${
                                 provider.hasApiKey
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-amber-200 bg-amber-50 text-amber-700"
+                                  ? "border-miro-green-light bg-miro-green-light text-miro-green"
+                                  : "border-miro-amber-light bg-miro-amber-light text-miro-amber"
                               }`}
                             >
                               {provider.hasApiKey
@@ -830,7 +828,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-default-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.defaultModelTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">
@@ -840,7 +838,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-helper-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.helperModelTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">
@@ -852,7 +850,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-system-prompt")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.systemPromptTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary line-clamp-2">
@@ -862,7 +860,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-tool-settings")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.toolSettingsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.toolSettingsHelp")}</div>
@@ -870,7 +868,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-security-policy")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.securityPolicyTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.securityPolicyHelp")}</div>
@@ -878,7 +876,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-builtin-tools")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.builtinToolsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.builtinToolsHelp")}</div>
@@ -886,7 +884,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-mcp-servers")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.mcpServersTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.mcpServersHelp")}</div>
@@ -894,7 +892,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-skills")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.skillsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.skillsHelp")}</div>
@@ -902,7 +900,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-language")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.languageTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{i18n.language}</div>
@@ -910,7 +908,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-close-behavior")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.closeBehaviorTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.closeBehaviorHelp")}</div>
@@ -918,7 +916,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shell-path")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.shellPathTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shellPathHelp")}</div>
@@ -926,7 +924,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shortcuts")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-white/84 px-3 py-3 text-left hover:bg-white"
+                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.shortcutsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shortcutsHelp")}</div>
@@ -941,7 +939,7 @@ export function ProviderSettingsScreen({
           <AppSettingsView />
         ) : (
         <div className="w-full space-y-4 pt-2 pr-4">
-          <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+          <section className="app-panel min-w-0 rounded-shell bg-miro-card/95 p-6">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0 rounded-panel bg-miro-surface-low px-4 py-4">
                   <p className="app-section-label mb-2">{t("settings.currentObject")}</p>
@@ -957,7 +955,7 @@ export function ProviderSettingsScreen({
                 </div>
               </div>
             </section>
-            <section className="app-panel min-w-0 rounded-shell bg-white/95 p-6">
+            <section className="app-panel min-w-0 rounded-shell bg-miro-card/95 p-6">
               <div className="mb-6 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-display text-xl font-semibold tracking-[-0.03em] text-miro-text">
@@ -989,7 +987,7 @@ export function ProviderSettingsScreen({
                       <button
                         type="button"
                         onClick={() => setProviderTypeDropdownOpen((prev) => !prev)}
-                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-white/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-white/95 focus:outline-none focus:ring-0"
+                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-none focus:ring-0"
                       >
                         <span className="flex-1">
                           {getProviderTypeLabel(t, form.type as ProviderType)}
@@ -1001,7 +999,7 @@ export function ProviderSettingsScreen({
                       {providerTypeDropdownOpen && (
                         <div
                           role="listbox"
-                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/40 bg-white/95 p-1.5 shadow-ring"
+                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/40 bg-miro-card/95 p-1.5 shadow-ring"
                         >
                           {providerTypeOptions.map((option) => (
                             <button
@@ -1099,7 +1097,7 @@ export function ProviderSettingsScreen({
                   </div>
                   <div className="mt-5 space-y-4">
                     {form.models.length === 0 ? (
-                      <div className="rounded-panel border border-dashed border-miro-border bg-white/70 px-4 py-5 text-sm text-miro-text-secondary">
+                      <div className="rounded-panel border border-dashed border-miro-border bg-miro-card/70 px-4 py-5 text-sm text-miro-text-secondary">
                         {t("settings.noModels")}
                       </div>
                     ) : null}
@@ -1108,7 +1106,7 @@ export function ProviderSettingsScreen({
                       return (
                         <article
                           key={model.id}
-                          className="min-w-0 rounded-[24px] border border-miro-border/70 bg-white/90 p-4 shadow-[0_8px_24px_rgba(28,28,30,0.04)]"
+                          className="min-w-0 rounded-[24px] border border-miro-border/70 bg-miro-card/90 p-4 shadow-panel"
                         >
                           <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                             <div className="min-w-0">
@@ -1140,7 +1138,7 @@ export function ProviderSettingsScreen({
                                 type="button"
                                 onClick={() => handleRemoveModel(model.id)}
                                 disabled={form.models.length <= 1}
-                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-red-200 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-miro-red-light text-miro-red transition-colors hover:bg-miro-red-light disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
                                 title={t("settings.deleteProvider")}
                               >
                                 <IconTrash size={14} />
@@ -1184,16 +1182,30 @@ export function ProviderSettingsScreen({
                                 type="text"
                                 inputMode="numeric"
                                 pattern="[0-9]*"
-                                value={String(model.contextWindowKb)}
+                                value={contextWindowTextMap[model.id] ?? String(model.contextWindowKb)}
                                 onChange={(event) => {
-                                  const nextValue = parseContextWindowKbInput(event.target.value);
-                                  if (nextValue !== null) {
-                                    patchModel(model.id, { contextWindowKb: nextValue });
+                                  const raw = event.target.value.replace(/[^0-9]/g, "");
+                                  setContextWindowTextMap((prev) => ({ ...prev, [model.id]: raw }));
+                                  if (raw.length > 0) {
+                                    const num = parseInt(raw, 10);
+                                    if (num > 0) {
+                                      patchModel(model.id, { contextWindowKb: num });
+                                    }
                                   }
+                                }}
+                                onBlur={() => {
+                                  const raw = contextWindowTextMap[model.id] ?? String(model.contextWindowKb);
+                                  const num = parseInt(raw, 10);
+                                  const normalized = normalizeContextWindowKb(num);
+                                  patchModel(model.id, { contextWindowKb: normalized });
+                                  setContextWindowTextMap((prev) => {
+                                    const next = { ...prev };
+                                    delete next[model.id];
+                                    return next;
+                                  });
                                 }}
                                 placeholder={t("settings.modelContextWindowPlaceholder")}
                                 className="app-input"
-                                required
                               />
                               <span className="block text-xs leading-5 text-miro-text-secondary">
                                 {t("settings.modelContextWindowHelp")}
@@ -1221,7 +1233,7 @@ export function ProviderSettingsScreen({
                     : t("settings.connectionHelp")}
                 </div>
                 {error ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div className="rounded-2xl border border-miro-red-light bg-miro-red-light px-4 py-3 text-sm text-miro-red">
                     {error}
                   </div>
                 ) : null}
@@ -1267,7 +1279,7 @@ export function ProviderSettingsScreen({
                       type="button"
                       onClick={() => void handleDeleteProvider()}
                       disabled={isSubmitting || isTestingConnection}
-                      className="rounded-xl border border-red-200 px-4 py-2.5 font-display text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
+                      className="rounded-xl border border-miro-red-light px-4 py-2.5 font-display text-sm font-semibold text-miro-red transition-colors hover:bg-miro-red-light disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
                     >
                       {t("settings.deleteProvider")}
                     </button>
@@ -1310,7 +1322,7 @@ function AboutSection() {
           href="https://github.com/qifanet/GetChat/releases"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1.5 block rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-100"
+          className="mt-1.5 block rounded-md bg-miro-amber-light px-2 py-1 text-[11px] font-medium text-miro-amber transition-colors hover:bg-miro-amber-light"
         >
           {t("settings.updateAvailable", { version: updateInfo.latestVersion })}
         </a>

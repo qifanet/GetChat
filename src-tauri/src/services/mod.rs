@@ -11,13 +11,16 @@
 
 pub mod helper_ai_service;
 pub mod importance_scorer;
+pub mod import_service;
 pub mod invariant_service;
 pub mod mcp_client;
+pub mod mcp_config_file;
 pub mod model_stream_service;
 pub mod message_repair_service;
 pub mod provider_profiles;
 pub mod prompt_service;
 pub mod snapshot_service;
+pub mod skill_fs;
 pub mod system_prompt_service;
 pub mod token_estimator;
 pub mod tool_executor;

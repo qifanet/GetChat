@@ -139,19 +139,19 @@ export function Composer() {
     submitInFlightRef.current = true;
 
     try {
-      // If an active slash item is pending, render its template and prepend to draft.
+      // If an active slash item is pending, handle it before sending.
+      let activatedSkill: string | undefined;
       if (activeSlashItem) {
         try {
           const { item, argsJson } = activeSlashItem;
-          let rendered: string;
           if (item.itemType === "mcp_prompt" && item.serverName) {
-            rendered = await tauriCmd.executeMcpPrompt(item.serverName, item.name, argsJson);
+            const rendered = await tauriCmd.executeMcpPrompt(item.serverName, item.name, argsJson);
+            const userText = draft.trim();
+            const fullText = userText ? `${rendered}\n\n${userText}` : rendered;
+            setDraft(fullText);
           } else {
-            rendered = await tauriCmd.executeSkill(item.name, argsJson);
+            activatedSkill = item.name;
           }
-          const userText = draft.trim();
-          const fullText = userText ? `${rendered}\n\n${userText}` : rendered;
-          setDraft(fullText);
           setActiveSlashItem(null);
         } catch (err) {
           console.error("[composer] slash render failed:", err);
@@ -162,7 +162,7 @@ export function Composer() {
       }
 
       try {
-        await sendMessageAction();
+        await sendMessageAction(activatedSkill ? { activatedSkill } : undefined);
       } catch (error) {
         console.error("[composer] send failed:", error);
       }
@@ -380,9 +380,9 @@ export function Composer() {
     return null;
   }
   return (
-    <div className="shrink-0 border-t border-miro-border/10 bg-white/88 px-3 py-3 sm:px-4">
+    <div className="shrink-0 border-t border-miro-border/10 bg-miro-card/88 px-3 py-3 sm:px-4">
       <div className="mx-auto max-w-5xl">
-        <div className="app-panel relative rounded-[24px] bg-white/96 px-3 py-3 sm:px-4 sm:py-3.5">
+        <div className="app-panel relative rounded-[24px] bg-miro-card/96 px-3 py-3 sm:px-4 sm:py-3.5">
           <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-miro-border/10 pb-2">
             <span className="app-status-pill px-2.5 py-1 text-[10px]">
               {hasEnabledProvider
@@ -398,8 +398,8 @@ export function Composer() {
               const usedTokens = finiteNumber(liveStatus?.usedTokens ?? contextStatus.usedTokens);
               const pct = finiteNumber(liveStatus?.percentage ?? contextStatus.percentage);
               const rawPct = finiteNumber(contextStatus.rawPercentage ?? pct);
-              const barColor = pct > 85 ? "bg-red-400" : pct > 60 ? "bg-amber-400" : "bg-emerald-400";
-              const textColor = pct > 85 ? "text-red-600" : pct > 60 ? "text-amber-600" : "text-emerald-600";
+              const barColor = pct > 85 ? "bg-miro-coral" : pct > 60 ? "bg-miro-amber" : "bg-miro-green";
+              const textColor = pct > 85 ? "text-miro-red" : pct > 60 ? "text-miro-amber" : "text-miro-green";
               const usedK = (usedTokens / 1000).toFixed(1);
               const rawUsedK = (finiteNumber(contextStatus.rawUsedTokens ?? contextStatus.usedTokens) / 1000).toFixed(1);
               const totalK = (totalTokens / 1000).toFixed(0);
@@ -411,7 +411,6 @@ export function Composer() {
                 assistantTokens: 0,
                 toolTokens: 0,
                 compressedContextTokens: 0,
-                skillPromptTokens: 0,
               };
               const breakdown = contextStatus.breakdown ?? fallbackBreakdown;
               const formatK = (tokens: number) => `${(finiteNumber(tokens) / 1000).toFixed(1)}K`;
@@ -428,7 +427,6 @@ export function Composer() {
                 `  ${t("composer.contextAssistant")}: ${formatK(breakdown.assistantTokens)}`,
                 `  ${t("composer.contextToolResults")}: ${formatK(breakdown.toolTokens)}`,
                 `${t("composer.contextCompressed")}: ${formatK(breakdown.compressedContextTokens)}`,
-                `${t("composer.contextSkills")}: ${formatK(breakdown.skillPromptTokens)}`,
                 t("composer.contextEstimateHint"),
               ].join("\n");
               return (
@@ -444,7 +442,7 @@ export function Composer() {
                     />
                   </span>
                   {Math.round(pct)}%
-                  <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 hidden min-w-56 whitespace-pre rounded-xl border border-miro-border/20 bg-white px-3 py-2 text-left text-[10px] leading-5 text-miro-text shadow-lg group-focus:block group-focus-within:block">
+                  <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 hidden min-w-56 whitespace-pre rounded-xl border border-miro-border/20 bg-miro-card px-3 py-2 text-left text-[10px] leading-5 text-miro-text shadow-lg group-focus:block group-focus-within:block">
                     {contextTooltip}
                   </span>
                   {rawPct > 60 && (
@@ -474,14 +472,14 @@ export function Composer() {
           </div>
           {activeSlashItem && (
             <div className="mb-2 flex items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+              <span className="inline-flex items-center gap-1 rounded-full border border-miro-green-light bg-miro-green-light px-2.5 py-1 text-[11px] font-medium text-miro-green">
                 <span className="font-mono">/{activeSlashItem.item.name}</span>
-                <span className="text-emerald-500">— {activeSlashItem.item.displayName}</span>
+                <span className="text-miro-green">— {activeSlashItem.item.displayName}</span>
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSlashItem(null)}
-                className="flex h-5 w-5 items-center justify-center rounded-full text-emerald-400 transition-colors hover:bg-emerald-100 hover:text-emerald-600"
+                className="flex h-5 w-5 items-center justify-center rounded-full text-miro-green transition-colors hover:bg-miro-green-light hover:text-miro-green"
                 title={t("common.cancel")}
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round">
@@ -491,7 +489,7 @@ export function Composer() {
             </div>
           )}
           <div className="flex items-end gap-2.5">
-            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-white shadow-ring composer-input-box">
+            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-miro-card shadow-ring composer-input-box">
               <div className="w-[calc(100%-6px)]">
               <textarea
                 ref={textareaRef}
@@ -577,7 +575,7 @@ export function Composer() {
                 {menuOpen && canSend ? (
                   <div
                     role="listbox"
-                    className="absolute bottom-full right-0 mb-2 w-52 rounded-[16px] border border-miro-border/30 bg-white p-1.5 shadow-panel"
+                    className="absolute bottom-full right-0 mb-2 w-52 rounded-[16px] border border-miro-border/30 bg-miro-card p-1.5 shadow-panel"
                   >
                     <button
                       role="option"
@@ -667,7 +665,7 @@ export function Composer() {
 
           {/* Slash command popup */}
           {showSlashMenu && slashItems.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-[16px] border border-miro-border/30 bg-white p-1.5 shadow-panel">
+            <div className="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-[16px] border border-miro-border/30 bg-miro-card p-1.5 shadow-panel">
               {slashItems
                 .filter(
                   (item) =>
@@ -688,7 +686,7 @@ export function Composer() {
                       {item.description || item.displayName}
                     </span>
                     {item.itemType === "mcp_prompt" && (
-                      <span className="shrink-0 rounded bg-purple-50 px-1.5 py-0.5 text-[9px] font-medium text-purple-600">
+                      <span className="shrink-0 rounded bg-miro-pink-light px-1.5 py-0.5 text-[9px] font-medium text-miro-violet">
                         MCP
                       </span>
                     )}
@@ -714,10 +712,10 @@ export function Composer() {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <button
             type="button"
-            className="fixed inset-0 bg-slate-950/30 backdrop-blur-[2px]"
+            className="fixed inset-0 bg-miro-scrim backdrop-blur-[2px]"
             onClick={() => setParamDialog(null)}
           />
-          <div className="relative z-10 w-full max-w-md rounded-shell bg-white px-7 py-7 shadow-panel">
+          <div className="relative z-10 w-full max-w-md rounded-shell bg-miro-card px-7 py-7 shadow-panel">
             <h2 className="mb-4 font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
               /{paramDialog.item.name}
             </h2>

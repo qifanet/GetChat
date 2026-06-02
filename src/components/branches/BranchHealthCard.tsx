@@ -85,7 +85,7 @@ export function BranchHealthCard() {
           <IconColumns size={12} />
           {t("branch.goToCompare")}
         </button>
-        <span className="app-status-pill border-white/80 bg-white/80 text-miro-text-secondary">
+        <span className="app-status-pill border-white/80 bg-miro-card/80 text-miro-text-secondary">
           {t("branch.archiveLowValue")}
         </span>
       </div>

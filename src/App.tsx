@@ -37,6 +37,7 @@ import {
 } from "./components/common/Icon";
 import { ProviderSettingsScreen } from "./components/settings/ProviderSettingsScreen";
 import { ExportDialog } from "./components/export/ExportDialog";
+import { ImportDialog } from "./components/import/ImportDialog";
 import { BranchRenameDialog } from "./components/branches/BranchRenameDialog";
 import { ConfirmDialogPortal } from "./components/common/confirmDialog";
 import { UpdateNotification } from "./components/common/UpdateNotification";
@@ -118,11 +119,11 @@ function BootScreen() {
   const { t } = useTranslation();
   return (
     <div className="app-shell flex h-full items-center justify-center px-6 py-8">
-      <div className="app-panel w-full max-w-xl rounded-shell bg-white/96 px-10 py-12 text-center">
+      <div className="app-panel w-full max-w-xl rounded-shell bg-miro-card/96 px-10 py-12 text-center">
         <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
           <BrandLogo
             size={40}
-            iconWrapperClassName="h-16 w-16 rounded-[24px] bg-white shadow-panel"
+            iconWrapperClassName="h-16 w-16 rounded-[24px] bg-miro-card shadow-panel"
           />
           <div className="space-y-3">
             <span className="app-section-label">GetChat</span>
@@ -146,7 +147,7 @@ function BootError({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="app-shell flex h-full items-center justify-center px-6 py-8">
-      <div className="app-panel w-full max-w-xl rounded-shell bg-white/96 px-10 py-12 text-center">
+      <div className="app-panel w-full max-w-xl rounded-shell bg-miro-card/96 px-10 py-12 text-center">
         <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-miro-red-light text-2xl font-black text-miro-red">
             !
@@ -176,7 +177,7 @@ function SidebarBackdrop({ onClose }: SidebarBackdropProps) {
       type="button"
       aria-label="Close sidebar"
       onClick={onClose}
-      className="fixed inset-0 z-30 bg-slate-950/18 backdrop-blur-[2px]"
+      className="fixed inset-0 z-30 bg-miro-scrim backdrop-blur-[2px]"
     />
   );
 }
@@ -209,7 +210,7 @@ function ShellHeader({
           size={28}
           subtitle={t("shell.productTagline")}
           className="min-w-0"
-          iconWrapperClassName="h-10 w-10 rounded-2xl bg-white/76 shadow-ring"
+          iconWrapperClassName="h-10 w-10 rounded-2xl bg-miro-card/76 shadow-ring"
           iconClassName="h-7 w-7"
           titleClassName="text-base sm:text-lg"
           subtitleClassName="hidden lg:block"
@@ -255,7 +256,7 @@ function ShellHeader({
           className={`app-status-pill hidden sm:inline-flex ${
             hasConfiguredProviders
               ? "border-miro-green/15 bg-miro-green-light/55 text-miro-green"
-              : "border-miro-border/20 bg-white/80 text-miro-text-secondary"
+              : "border-miro-border/20 bg-miro-card/80 text-miro-text-secondary"
           }`}
         >
           {hasConfiguredProviders
@@ -288,7 +289,7 @@ function WorkspaceEmptyState({
           <div className="mx-auto mb-8 flex justify-center">
             <BrandLogo
               size={56}
-              iconWrapperClassName="h-24 w-24 rounded-[28px] bg-white shadow-panel"
+              iconWrapperClassName="h-24 w-24 rounded-[28px] bg-miro-card shadow-panel"
             />
           </div>
           <p className="app-section-label mb-4">
@@ -324,7 +325,7 @@ function WorkspaceEmptyState({
           </div>
         </div>
         <div className="mx-auto mt-10 grid max-w-4xl gap-4 md:grid-cols-3">
-          <div className="app-panel rounded-panel bg-white/96 px-5 py-5">
+          <div className="app-panel rounded-panel bg-miro-card/96 px-5 py-5">
             <div className="app-section-label mb-2">
               {t("workspace.localFirstTitle")}
             </div>
@@ -332,7 +333,7 @@ function WorkspaceEmptyState({
               {t("workspace.localFirstBody")}
             </p>
           </div>
-          <div className="app-panel rounded-panel bg-white/96 px-5 py-5">
+          <div className="app-panel rounded-panel bg-miro-card/96 px-5 py-5">
             <div className="app-section-label mb-2">
               {t("workspace.providerShortcutTitle")}
             </div>
@@ -340,7 +341,7 @@ function WorkspaceEmptyState({
               {t("workspace.providerShortcutBody")}
             </p>
           </div>
-          <div className="app-panel rounded-panel bg-white/96 px-5 py-5">
+          <div className="app-panel rounded-panel bg-miro-card/96 px-5 py-5">
             <div className="app-section-label mb-2">
               {t("workspace.cleanLayoutTitle")}
             </div>
@@ -444,7 +445,7 @@ function ConversationSidebar({
             size={32}
             subtitle={t("shell.productTagline")}
             className="min-w-0"
-            iconWrapperClassName="h-11 w-11 rounded-2xl bg-white shadow-[0_18px_28px_-24px_rgba(55,85,195,1)]"
+            iconWrapperClassName="h-11 w-11 rounded-2xl bg-miro-card shadow-panel"
             iconClassName="h-8 w-8"
             subtitleClassName="text-[11px] tracking-[0.18em]"
           />
@@ -473,7 +474,7 @@ function ConversationSidebar({
       </div>
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         {summaryOrder.length === 0 ? (
-          <div className="rounded-panel bg-white/72 px-5 py-6 shadow-ring">
+          <div className="rounded-panel bg-miro-card/72 px-5 py-6 shadow-ring">
             <p className="mb-2 text-sm font-semibold text-miro-text">
               {t("conversation.noConversations")}
             </p>
@@ -509,7 +510,7 @@ function ConversationSidebar({
           <ArchivedSection />
       </div>
       <div className="mt-auto space-y-3 px-4 pb-5">
-        <div className="rounded-panel bg-white/80 px-4 py-4 shadow-ring">
+        <div className="rounded-panel bg-miro-card/80 px-4 py-4 shadow-ring">
           <div className="app-section-label mb-3">{t("shell.workspaceHealth")}</div>
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between text-miro-text-secondary">
@@ -543,10 +544,10 @@ function ConversationSidebar({
           className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition-colors ${
             activePage === "SETTINGS"
               ? "app-sidebar-item app-sidebar-item-active"
-              : "app-sidebar-item bg-white/72 shadow-ring"
+              : "app-sidebar-item bg-miro-card/72 shadow-ring"
           }`}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-miro-blue shadow-ring">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-miro-card text-miro-blue shadow-ring">
             <IconSettings size={14} />
           </span>
           <div className="min-w-0">
@@ -579,7 +580,7 @@ function WorkspaceOverviewRail({
       <div>
         <p className="app-section-label mb-5">{t("shell.workspaceCapabilities")}</p>
         <div className="space-y-4">
-          <div className="rounded-panel bg-white/88 px-4 py-4 shadow-ring">
+          <div className="rounded-panel bg-miro-card/88 px-4 py-4 shadow-ring">
             <div className="text-sm font-semibold text-miro-text">
               {t("workspace.providerShortcutTitle")}
             </div>
@@ -587,7 +588,7 @@ function WorkspaceOverviewRail({
               {t("workspace.providerShortcutBody")}
             </p>
           </div>
-          <div className="rounded-panel bg-white/88 px-4 py-4 shadow-ring">
+          <div className="rounded-panel bg-miro-card/88 px-4 py-4 shadow-ring">
             <div className="text-sm font-semibold text-miro-text">
               {t("branch.panelTitle")}
             </div>
@@ -595,7 +596,7 @@ function WorkspaceOverviewRail({
               {t("shell.branchOverview")}
             </p>
           </div>
-          <div className="rounded-panel bg-white/88 px-4 py-4 shadow-ring">
+          <div className="rounded-panel bg-miro-card/88 px-4 py-4 shadow-ring">
             <div className="text-sm font-semibold text-miro-text">
               {t("common.compare")}
             </div>
@@ -605,7 +606,7 @@ function WorkspaceOverviewRail({
           </div>
         </div>
       </div>
-      <div className="mt-8 rounded-panel bg-white/88 px-4 py-4 shadow-ring">
+      <div className="mt-8 rounded-panel bg-miro-card/88 px-4 py-4 shadow-ring">
         <p className="app-section-label mb-3">{t("shell.workspaceHealth")}</p>
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between">
@@ -647,14 +648,14 @@ function WorkspaceCenter({
 
   if (workspaceMode === "COMPARE") {
     return (
-      <main className="h-full min-w-0 overflow-hidden rounded-shell bg-white">
+      <main className="h-full min-w-0 overflow-hidden rounded-shell bg-miro-card">
         <CompareWorkspace />
       </main>
     );
   }
 
   return (
-    <main className="app-panel flex h-full min-w-0 overflow-hidden rounded-shell bg-white/92">
+    <main className="app-panel flex h-full min-w-0 overflow-hidden rounded-shell bg-miro-card/92">
       <div className="flex flex-1 flex-col min-w-0">
         <TopContextBar />
         <WorkspaceBannerRegion />
@@ -711,7 +712,7 @@ function SidebarEdgeStrip({
           ? t("common.toggleLeftSidebar")
           : t("common.toggleRightSidebar")
       }
-      className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-white/88 shadow-float opacity-0 transition-all duration-200 hover:opacity-100 hover:bg-white`}
+      className={`fixed top-[88px] z-20 flex h-14 w-5 items-center justify-center rounded-full bg-miro-card/88 shadow-float opacity-0 transition-all duration-200 hover:opacity-100 hover:bg-miro-card`}
       style={
         side === "left"
           ? { left: buttonOffset }
@@ -952,6 +953,7 @@ export function App() {
         </div>
       </div>
       <ExportDialog />
+      <ImportDialog />
       <BranchRenameDialog />
       <ConfirmDialogPortal />
       <UpdateNotification />

@@ -195,6 +195,7 @@ pub async fn list_conversation_summaries(
         .map(|r| ConversationSummaryDto {
             id: r.id,
             title: r.title,
+            title_source: r.title_source,
             created_at: r.created_at * 1000,
             updated_at: r.updated_at * 1000,
             last_opened_at: Some(r.last_opened_at * 1000),
@@ -220,6 +221,7 @@ pub async fn get_conversation_summary(
     Ok(ConversationSummaryDto {
         id: row.id,
         title: row.title,
+        title_source: row.title_source,
         created_at: row.created_at * 1000,
         updated_at: row.updated_at * 1000,
         last_opened_at: Some(row.last_opened_at * 1000),
@@ -346,6 +348,7 @@ pub async fn load_snapshot(
     let summary = ConversationSummaryDto {
         id: conv.id,
         title: conv.title,
+        title_source: conv.title_source,
         created_at: conv.created_at * 1000,
         updated_at: conv.updated_at * 1000,
         last_opened_at: Some(conv.last_opened_at * 1000),
@@ -462,6 +465,7 @@ pub async fn create_conversation(
     Ok(ConversationSummaryDto {
         id: conv_id,
         title: title.to_string(),
+        title_source: "DEFAULT".to_string(),
         created_at: now * 1000,
         updated_at: now * 1000,
         last_opened_at: Some(now * 1000),

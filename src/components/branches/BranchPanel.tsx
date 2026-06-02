@@ -140,7 +140,7 @@ export function BranchPanel() {
     <div className="flex h-full flex-col" ref={panelRef}>
       {tooltipContainerRef.current && tooltip.visible && createPortal(
         <div
-          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded-xl border border-miro-border/40 bg-white/95 px-4 py-2.5 text-[12px] leading-relaxed text-miro-text shadow-ring backdrop-blur-sm"
+          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded-xl border border-miro-border/40 bg-miro-card/95 px-4 py-2.5 text-[12px] leading-relaxed text-miro-text shadow-ring backdrop-blur-sm"
           style={{ right: `calc(100vw - ${tooltip.right}px)`, top: `${tooltip.y}px` }}
         >
           {tooltip.text}
@@ -419,8 +419,8 @@ function BranchRow({
   const bgClass = isCurrent
     ? "bg-miro-blue-light/45"
     : depth === 0
-      ? "bg-white/60"
-      : "bg-white/40 hover:bg-white/70";
+      ? "bg-miro-card/60"
+      : "bg-miro-card/40 hover:bg-miro-card/70";
 
   // Build tree connector indentation (cap visual depth)
   const INDENT_PX = 16;
@@ -477,7 +477,7 @@ function BranchRow({
               className={`absolute top-1/2 h-[7px] w-[7px] -translate-y-1/2 rounded-full border-[1.5px] ${
                 isMainline
                   ? "border-miro-green bg-miro-green-light"
-                  : "border-miro-border/40 bg-white"
+                  : "border-miro-border/40 bg-miro-card"
               }`}
               style={{ left: depth * INDENT_PX - 2 }}
             />

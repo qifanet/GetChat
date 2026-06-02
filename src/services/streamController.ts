@@ -37,7 +37,7 @@ import {
 import { createTextSurface } from "./surfaces/surfaceFactory";
 import type { RequestId, MessageId } from "../types/base";
 import type { ModelStreamEvent } from "./tauriTypes";
-import type { ToolCallInfo } from "../types/conversation";
+import type { MessageNode, ToolCallInfo } from "../types/conversation";
 import type { StreamSessionMeta } from "../types/stream";
 import * as tauriCmd from "./tauriCommands";
 
@@ -179,6 +179,7 @@ export async function startAssistantStream(params: {
   rendererMode?: "PRETEXT" | "DOM_TEXT";
   tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
   toolChoice?: string;
+  activatedSkill?: string;
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
   const existingStream = findActiveAssistantStream();
   if (existingStream) {
@@ -274,6 +275,7 @@ export async function startAssistantStream(params: {
         toolChoice: params.toolChoice,
         conversationId: params.conversationId,
         branchId: params.branchId,
+        activatedSkill: params.activatedSkill,
       },
       (event) => {
         void handleModelStreamEvent(event);
@@ -818,6 +820,7 @@ export async function completeStream(
   // Extract tool calls from runtime session for persistence
   const runtimeToolCalls = runtime.toolCalls.length > 0
     ? runtime.toolCalls.map(tc => ({
+        id: tc.callId,
         callId: tc.callId,
         functionName: tc.functionName,
         argumentsJson: tc.argumentsJson,
@@ -827,31 +830,48 @@ export async function completeStream(
       }))
     : undefined;
 
-  // 1) Write to database
+  // 1) Write to database — wrap in try-catch so DB failure doesn't leave frontend stuck
   const hasContentBlocks = runtime.contentBlocks.some((block) => block.type !== "text");
-  const persistedMessage = await tauriCmd.completeAssistantMessage({
-    messageId: session.targetMessageId,
-    requestId,
-    contentText: finalText,
-    contentBlocks: hasContentBlocks ? runtime.contentBlocks : undefined,
-    usage,
-    reasoningContent,
-    toolCalls: runtimeToolCalls,
-  });
+  let persistedMessage: MessageNode | null = null;
+  try {
+    persistedMessage = await tauriCmd.completeAssistantMessage({
+      messageId: session.targetMessageId,
+      requestId,
+      contentText: finalText,
+      contentBlocks: hasContentBlocks ? runtime.contentBlocks : undefined,
+      usage,
+      reasoningContent,
+      toolCalls: runtimeToolCalls,
+    });
+  } catch (dbError) {
+    console.error(
+      `[stream] completeAssistantMessage DB failed request=${requestId}, ` +
+      `falling back to local-only update`,
+      dbError
+    );
+  }
 
-  // 2) Update appStore with final text (triggers switch to MarkdownRenderer)
-  //    Use the canonical DTO returned by Tauri to avoid frontend/DB drift.
-  useAppStore.getState().patchMessageLocal(session.targetMessageId, {
-    status: persistedMessage.status,
-    updatedAt: persistedMessage.updatedAt,
-    content: persistedMessage.content,
-    generation: persistedMessage.generation,
-    error: persistedMessage.error,
-    toolCalls: persistedMessage.toolCalls,
-  });
+  // 2) Update appStore — use DB DTO when available, otherwise construct a local fallback
+  if (persistedMessage) {
+    useAppStore.getState().patchMessageLocal(session.targetMessageId, {
+      status: persistedMessage.status,
+      updatedAt: persistedMessage.updatedAt,
+      content: persistedMessage.content,
+      generation: persistedMessage.generation,
+      error: persistedMessage.error,
+      toolCalls: persistedMessage.toolCalls,
+    });
+  } else {
+    // DB write failed — still update UI so user sees the streamed content
+    const now = Date.now();
+    useAppStore.getState().patchMessageLocal(session.targetMessageId, {
+      status: "COMPLETED",
+      updatedAt: now,
+      content: { text: finalText, format: "MARKDOWN", blocks: hasContentBlocks ? runtime.contentBlocks : undefined },
+    });
+  }
 
   // 3) Update branch/preview state depending on the session completion mode.
-  // Regenerate always stays a candidate variant; it never patches branch head.
   if (session.completionMode === "VARIANT_PREVIEW") {
     if (session.previewUserMessageId) {
       useAppStore.getState().setVariantPreview({
@@ -863,24 +883,25 @@ export async function completeStream(
   } else {
     useAppStore.getState().patchBranchLocal(session.branchId, {
       headMessageId: session.targetMessageId,
-      updatedAt: persistedMessage.updatedAt,
+      updatedAt: persistedMessage?.updatedAt ?? Date.now(),
     });
   }
 
   // 4) Update stream session status
   useStreamStore.getState().completeSession(requestId);
 
-  // 4) Reset composer state only when no other stream is still active.
+  // 5) Reset composer state only when no other stream is still active.
   syncComposerSendingStateToActiveStreams();
 
-  // 5) Clean up runtime session
+  // 6) Clean up runtime session
   deleteRuntimeSession(requestId);
 
   console.info(
-    `[stream] complete request=${requestId} chars=${finalText.length} chunks=${runtime.chunks.length} duration=${Date.now() - session.startedAt}ms`
+    `[stream] complete request=${requestId} chars=${finalText.length} chunks=${runtime.chunks.length} ` +
+    `duration=${Date.now() - session.startedAt}ms persisted=${persistedMessage !== null}`
   );
 
-  // 6) Trigger auto title generation for conversations without a user-set title
+  // 7) Trigger auto title generation for conversations without a user-set title
   if (session.completionMode === "BRANCH_HEAD") {
     const { workspace, summariesById } = useAppStore.getState();
     const conversationId = workspace?.activeConversationId;
@@ -902,7 +923,7 @@ export async function completeStream(
     }
   }
 
-  // 7) Delayed cleanup of stream store metadata
+  // 8) Delayed cleanup of stream store metadata
   setTimeout(() => {
     useStreamStore.getState().removeSession(requestId);
   }, 1500);
@@ -1033,6 +1054,7 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     : undefined;
   const runtimeToolCalls = runtime?.toolCalls.length
     ? runtime.toolCalls.map((tc) => ({
+        id: tc.callId,
         callId: tc.callId,
         functionName: tc.functionName,
         argumentsJson: tc.argumentsJson,
@@ -1056,32 +1078,53 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     // Timer will be cleaned up by deleteRuntimeSession
   }
 
-  const persistedMessage = await tauriCmd.failAssistantMessage({
-    messageId: session.targetMessageId,
-    requestId,
-    errorCode: "USER_CANCELLED",
-    errorMessage: "Generation cancelled by user",
-    errorRetriable: true,
-    partialContentText: partialText || undefined,
-    partialContentBlocks,
-    toolCalls: runtimeToolCalls,
-  });
+  // Persist failure to DB — wrap in try-catch so DB failure doesn't leave frontend stuck
+  let persistedMessage: MessageNode | null = null;
+  try {
+    persistedMessage = await tauriCmd.failAssistantMessage({
+      messageId: session.targetMessageId,
+      requestId,
+      errorCode: "USER_CANCELLED",
+      errorMessage: "Generation cancelled by user",
+      errorRetriable: true,
+      partialContentText: partialText || undefined,
+      partialContentBlocks,
+      toolCalls: runtimeToolCalls,
+    });
+  } catch (dbError) {
+    console.error(
+      `[stream] failAssistantMessage DB failed request=${requestId}, ` +
+      `falling back to local-only update`,
+      dbError
+    );
+  }
 
-  // Update appStore
-  useAppStore.getState().patchMessageLocal(session.targetMessageId, {
-    status: persistedMessage.status,
-    updatedAt: persistedMessage.updatedAt,
-    content: persistedMessage.content,
-    generation: persistedMessage.generation,
-    error: persistedMessage.error,
-    toolCalls: persistedMessage.toolCalls,
-  });
+  // Update appStore — use DB DTO when available, otherwise construct local fallback
+  if (persistedMessage) {
+    useAppStore.getState().patchMessageLocal(session.targetMessageId, {
+      status: persistedMessage.status,
+      updatedAt: persistedMessage.updatedAt,
+      content: persistedMessage.content,
+      generation: persistedMessage.generation,
+      error: persistedMessage.error,
+      toolCalls: persistedMessage.toolCalls,
+    });
+  } else {
+    const now = Date.now();
+    useAppStore.getState().patchMessageLocal(session.targetMessageId, {
+      status: "FAILED",
+      updatedAt: now,
+      content: partialText ? { text: partialText, format: "MARKDOWN" as const, blocks: partialContentBlocks } : undefined,
+      error: { code: "USER_CANCELLED", message: "Generation cancelled by user", retriable: true },
+      toolCalls: runtimeToolCalls,
+    });
+  }
 
   // Update branch head only for direct branch streams; variant flows remain preview-only.
   if (session.completionMode === "BRANCH_HEAD" || !session.completionMode) {
     useAppStore.getState().patchBranchLocal(session.branchId, {
       headMessageId: session.targetMessageId,
-      updatedAt: persistedMessage.updatedAt,
+      updatedAt: persistedMessage?.updatedAt ?? Date.now(),
     });
   } else if (session.previewUserMessageId) {
     useAppStore.getState().setVariantPreview({

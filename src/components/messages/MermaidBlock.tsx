@@ -86,7 +86,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
 
   if (loading) {
     return (
-      <div className="my-4 flex items-center gap-2 rounded-2xl border border-miro-border/20 bg-[#f6f7fb] px-4 py-6">
+      <div className="my-4 flex items-center gap-2 rounded-2xl border border-miro-border/20 bg-miro-surface-low px-4 py-6">
         <svg className="h-4 w-4 animate-spin text-miro-blue" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -120,7 +120,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
   return (
     <>
       {/* Inline preview — no zoom/pan, just a fullscreen button */}
-      <div className="group/diagram my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
+      <div className="group/diagram my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
         <div className="flex items-center justify-end border-b border-miro-border/10 px-3 py-1.5 opacity-0 transition-opacity group-hover/diagram:opacity-100">
           <button
             onClick={openFullscreen}
@@ -214,7 +214,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col bg-miro-surface-high">
       {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-miro-border/10 bg-white px-4 py-2.5 shadow-sm">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-miro-border/10 bg-miro-card px-4 py-2.5 shadow-sm">
         <span className="text-xs font-medium text-miro-text-secondary">
           {t("markdown.diagramView")}
         </span>
@@ -240,7 +240,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
 
       {/* Canvas */}
       <div
-        className="flex-1 cursor-grab overflow-hidden bg-[#f6f7fb] active:cursor-grabbing"
+        className="flex-1 cursor-grab overflow-hidden bg-miro-surface-low active:cursor-grabbing"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -263,7 +263,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
       </div>
 
       {/* Footer */}
-      <div className="flex-shrink-0 border-t border-miro-border/10 bg-white px-4 py-1.5 text-center">
+      <div className="flex-shrink-0 border-t border-miro-border/10 bg-miro-card px-4 py-1.5 text-center">
         <span className="text-[10px] text-miro-text-tertiary">{t("markdown.diagramHint")}</span>
       </div>
     </div>

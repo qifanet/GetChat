@@ -84,6 +84,7 @@ export type BrowserDebugCommandName =
   | "generate_branch_diff_summary"
   | "set_conversation_workspace"
   | "read_todo_items"
+  | "import_conversations"
   | "approve_tool_action"
   | "get_tool_settings"
   | "update_tool_settings"
@@ -98,24 +99,19 @@ export type BrowserDebugCommandName =
   | "add_mcp_server"
   | "remove_mcp_server"
   | "get_mcp_tool_definitions"
-  | "list_skills"
-  | "create_skill"
-  | "update_skill"
-  | "delete_skill"
-  | "set_skill_enabled"
   | "list_slash_items"
-  | "execute_skill"
   | "execute_mcp_prompt"
   | "set_mcp_server_enabled"
+  | "get_mcp_config_json"
+  | "save_mcp_config_json"
   | "get_context_status"
   | "get_skills_directory"
-  | "import_skill"
-  | "refresh_skills_from_disk"
   | "compress_context"
   | "get_close_behavior"
   | "set_close_behavior"
   | "get_shell_path"
-  | "set_shell_path";
+  | "set_shell_path"
+  | "detect_shell_path";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {
@@ -250,6 +246,7 @@ function createSeedConversation(now: number): BrowserDebugConversationRecord {
     summary: {
       id: conversationId,
       title: "架构方案评审",
+      titleSource: "AI_GENERATED",
       createdAt: now - 32_000,
       updatedAt: now - 20_000,
       lastOpenedAt: now - 20_000,
@@ -1087,6 +1084,7 @@ export async function invokeBrowserDebugCommand<T>(
           summary: {
             id: conversationId,
             title,
+            titleSource: "DEFAULT",
             createdAt: now,
             updatedAt: now,
             lastOpenedAt: now,
@@ -2035,7 +2033,6 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
             assistantTokens: 0,
             toolTokens: 0,
             compressedContextTokens: 0,
-            skillPromptTokens: 0,
           },
         } as T;
       });
@@ -2043,16 +2040,6 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
     case "get_skills_directory":
       return readBrowserDebugCommand((_state): T => {
         return "/mock/skills" as T;
-      });
-
-    case "import_skill":
-      return readBrowserDebugCommand((_state): T => {
-        return { success: true } as T;
-      });
-
-    case "refresh_skills_from_disk":
-      return readBrowserDebugCommand((_state): T => {
-        return { success: true } as T;
       });
 
     case "compress_context":

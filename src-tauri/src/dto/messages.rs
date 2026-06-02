@@ -375,4 +375,12 @@ pub struct BuildPromptMessagesInput {
     /** Optional branch ID for loading compressed context summary */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_id: Option<String>,
+
+    /** Path to the skills root directory for filesystem-based skill discovery */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills_dir: Option<String>,
+
+    /** Skill name activated by user via slash command (Tier 3 hint) */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activated_skill: Option<String>,
 }

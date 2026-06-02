@@ -44,7 +44,7 @@ export const ToolCallChain = memo(function ToolCallChain({ toolCalls }: ToolCall
           })}
         </span>
         {hasPending && (
-          <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+          <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-miro-amber" />
         )}
       </button>
 

@@ -30,6 +30,7 @@ pub struct ConversationRow {
 pub struct ConversationSummaryRow {
     pub id: String,
     pub title: String,
+    pub title_source: String,
     pub mainline_branch_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -65,7 +66,7 @@ where
 {
     sqlx::query_as::<_, ConversationSummaryRow>(
         "SELECT
-            c.id, c.title, c.mainline_branch_id,
+            c.id, c.title, c.title_source, c.mainline_branch_id,
             c.created_at, c.updated_at, c.last_opened_at, c.archived_at,
             c.workspace_path,
             COUNT(DISTINCT CASE WHEN b.status = 'ACTIVE' THEN b.id END) AS active_branch_count,
@@ -92,7 +93,7 @@ where
 {
     sqlx::query_as::<_, ConversationSummaryRow>(
         "SELECT
-            c.id, c.title, c.mainline_branch_id,
+            c.id, c.title, c.title_source, c.mainline_branch_id,
             c.created_at, c.updated_at, c.last_opened_at, c.archived_at,
             c.workspace_path,
             COUNT(DISTINCT CASE WHEN b.status = 'ACTIVE' THEN b.id END) AS active_branch_count,

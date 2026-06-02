@@ -119,7 +119,7 @@ export function OnboardingScreen() {
     <div className="app-shell flex h-full gap-4 p-4">
       <section className="app-panel hidden w-[38%] min-w-[360px] flex-col justify-between rounded-shell bg-gradient-to-br from-miro-coral-light via-white to-miro-orange-light px-10 py-12 lg:flex">
         <div className="space-y-5">
-          <span className="inline-flex rounded-full border border-miro-border bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-miro-amber shadow-ring">
+          <span className="inline-flex rounded-full border border-miro-border bg-miro-card/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-miro-amber shadow-ring">
             {t("onboarding.badge")}
           </span>
           <div className="space-y-3">
@@ -131,7 +131,7 @@ export function OnboardingScreen() {
             </p>
           </div>
         </div>
-        <div className="space-y-3 rounded-panel border border-white/80 bg-white/80 p-5 shadow-ring backdrop-blur">
+        <div className="space-y-3 rounded-panel border border-white/80 bg-miro-card/80 p-5 shadow-ring backdrop-blur">
           <h2 className="font-display text-base font-semibold text-miro-text">
             {t("onboarding.noteTitle")}
           </h2>
@@ -141,7 +141,7 @@ export function OnboardingScreen() {
         </div>
       </section>
       <section className="flex flex-1 items-center justify-center px-6 py-8">
-        <div className="app-panel w-full max-w-xl rounded-shell bg-white/95 p-8 sm:p-10">
+        <div className="app-panel w-full max-w-xl rounded-shell bg-miro-card/95 p-8 sm:p-10">
           <div className="mb-8 space-y-2">
             <p className="app-section-label text-miro-amber lg:hidden">
               {t("onboarding.badge")}
@@ -232,7 +232,7 @@ export function OnboardingScreen() {
               {t("onboarding.connectionNotice")}
             </div>
             {error ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="rounded-2xl border border-miro-red-light bg-miro-red-light px-4 py-3 text-sm text-miro-red">
                 {error}
               </div>
             ) : null}

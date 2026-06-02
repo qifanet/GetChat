@@ -18,7 +18,7 @@ export function CompareWorkspace() {
   if (!data.leftBranch && !data.rightBranch) {
     return (
       <div className="flex h-full items-center justify-center px-6 py-8">
-        <div className="rounded-shell bg-white px-8 py-8 text-center shadow-panel">
+        <div className="rounded-shell bg-miro-card px-8 py-8 text-center shadow-panel">
           <p className="mb-3 text-sm text-miro-text-secondary">
             {t("compare.noComparePath")}
           </p>
@@ -37,7 +37,7 @@ export function CompareWorkspace() {
     const missingSide = data.leftBranch ? t("compare.rightPath") : t("compare.leftPath");
     return (
       <div className="flex h-full items-center justify-center px-6 py-8">
-        <div className="rounded-shell bg-white px-8 py-8 text-center shadow-panel">
+        <div className="rounded-shell bg-miro-card px-8 py-8 text-center shadow-panel">
           <p className="mb-3 text-sm text-miro-text-secondary">
             {t("compare.missingBranch", { side: missingSide })}
           </p>

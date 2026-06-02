@@ -84,14 +84,14 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
   const hasSummary = summaryText !== null;
 
   return (
-    <div className="border-b border-miro-border/10 bg-white/92 px-4 py-3 sm:px-5">
+    <div className="border-b border-miro-border/10 bg-miro-card/92 px-4 py-3 sm:px-5">
       {/* Row 1: Status + Actions */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="app-status-pill shrink-0 border-miro-blue/20 bg-miro-blue-light/70 text-miro-blue">
           {t("compare.readOnly")}
         </span>
 
-        {error ? <span className="shrink-0 text-xs text-red-600">{error}</span> : null}
+        {error ? <span className="shrink-0 text-xs text-miro-red">{error}</span> : null}
 
         <span className="hidden sm:block h-4 w-px shrink-0 bg-miro-border/20" />
 
@@ -139,7 +139,7 @@ export function CompareToolbar({ leftBranch, rightBranch }: CompareToolbarProps)
           <button
             type="button"
             onClick={() => setSummaryCollapsed((prev) => !prev)}
-            className="flex w-full items-center justify-between gap-4 px-4 py-2.5 text-left transition-colors hover:bg-white/35"
+            className="flex w-full items-center justify-between gap-4 px-4 py-2.5 text-left transition-colors hover:bg-miro-card/35"
           >
             <span className="flex items-center gap-2">
               <svg

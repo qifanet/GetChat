@@ -22,7 +22,8 @@ use sqlx::SqlitePool;
 
 use crate::dto::common::ToolCallDto;
 use crate::error::AppError;
-use crate::repositories::{compressed_contexts, messages, skills, tool_calls};
+use crate::repositories::{compressed_contexts, messages, tool_calls};
+use crate::services::skill_fs;
 use crate::services::system_prompt_service;
 use crate::services::token_estimator::estimate_prompt_message_tokens;
 
@@ -126,33 +127,12 @@ fn apply_prompt_budget(
 // Prompt Building
 // ============================================================================
 
-/// Load ALWAYS-triggered skill prompts for system prompt injection.
-async fn load_always_skills_prompt(pool: &SqlitePool) -> String {
-    let rows = match skills::list_enabled_always(pool).await {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::warn!(error = %error, "Failed to load always skills");
-            return String::new();
-        }
-    };
-
-    if rows.is_empty() {
-        return String::new();
-    }
-
-    let mut parts = vec!["[Always-Active Rules]".to_string()];
-    for skill in rows {
-        if skill.prompt_template.trim().is_empty() {
-            continue;
-        }
-        parts.push(format!("--- {} ---\n{}", skill.display_name, skill.prompt_template));
-    }
-
-    if parts.len() == 1 {
-        String::new()
-    } else {
-        parts.join("\n\n")
-    }
+/// Load skill metadata (Tier 1) from filesystem for system prompt injection.
+/// Scans `{app_data}/skills/` for SKILL.md files and builds a compact
+/// `[Available Skills]` block with name + description for model discovery.
+fn load_skill_metadata_prompt(skills_dir: &std::path::Path) -> String {
+    let skills = skill_fs::discover_skills(skills_dir);
+    skill_fs::build_skill_metadata_prompt(&skills)
 }
 
 /**
@@ -257,17 +237,44 @@ pub async fn build_prompt_messages(
         });
     }
 
-    let always_skills_prompt = load_always_skills_prompt(pool).await;
-    if !always_skills_prompt.is_empty() {
-        prefix_messages.push(PromptMessage {
-            source_message_id: None,
-            role: "SYSTEM".to_string(),
-            content: always_skills_prompt,
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        });
+    let skills_prompt = match &input.skills_dir {
+        Some(dir) => load_skill_metadata_prompt(std::path::Path::new(dir)),
+        None => String::new(),
+    };
+    if !skills_prompt.is_empty() {
+        if let Some(last_system) = prefix_messages.last_mut() {
+            last_system.content.push_str("\n\n");
+            last_system.content.push_str(&skills_prompt);
+        } else {
+            prefix_messages.push(PromptMessage {
+                source_message_id: None,
+                role: "SYSTEM".to_string(),
+                content: skills_prompt,
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+    }
+
+    // Tier 3: If user activated a skill via slash command, inject activation hint
+    if let Some(ref skill_name) = input.activated_skill {
+        let hint = skill_fs::build_skill_activation_hint(skill_name);
+        if let Some(last_system) = prefix_messages.last_mut() {
+            last_system.content.push_str("\n\n");
+            last_system.content.push_str(&hint);
+        } else {
+            prefix_messages.push(PromptMessage {
+                source_message_id: None,
+                role: "SYSTEM".to_string(),
+                content: hint,
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
     }
 
     let mut compressed_source_ids: HashSet<String> = HashSet::new();

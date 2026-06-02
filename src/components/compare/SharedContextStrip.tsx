@@ -23,7 +23,7 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
 
   if (messages.length === 0) {
     return (
-      <div className="rounded-panel bg-white/82 px-4 py-3 text-center shadow-ring">
+      <div className="rounded-panel bg-miro-card/82 px-4 py-3 text-center shadow-ring">
         <span className="text-sm leading-6 text-miro-text-secondary">
           {t("compare.noSharedContext")}
         </span>
@@ -35,11 +35,11 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
     <div className="rounded-panel bg-miro-teal-light/35 shadow-ring">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-4 rounded-panel px-4 py-3 text-left transition-colors hover:bg-white/35"
+        className="flex w-full items-center justify-between gap-4 rounded-panel px-4 py-3 text-left transition-colors hover:bg-miro-card/35"
         onClick={() => setExpanded((value) => !value)}
       >
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-miro-teal shadow-ring">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-miro-card text-miro-teal shadow-ring">
             <IconInfoCircle size={14} />
           </span>
           <div className="min-w-0">
@@ -51,7 +51,7 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
             </p>
           </div>
         </div>
-        <span className="app-status-pill border-white/80 bg-white/80 text-miro-text-secondary">
+        <span className="app-status-pill border-white/80 bg-miro-card/80 text-miro-text-secondary">
           {expanded ? t("common.collapse") : t("common.expand")}
           {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
         </span>
@@ -65,8 +65,8 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
                 key={message.id}
                 className={`rounded-2xl px-3 py-3 text-sm shadow-ring ${
                   message.role === "USER"
-                    ? "bg-white text-miro-text"
-                    : "bg-white/90 text-miro-text-secondary"
+                    ? "bg-miro-card text-miro-text"
+                    : "bg-miro-card/90 text-miro-text-secondary"
                 }`}
               >
                 <span className="mr-2 inline-flex rounded-full bg-miro-bg px-2 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.12em] text-miro-text-secondary">

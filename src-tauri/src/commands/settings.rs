@@ -416,6 +416,83 @@ pub async fn set_shell_path(
     Ok(path)
 }
 
+/** Auto-detect the best available shell path on the current system. */
+#[tauri::command]
+pub async fn detect_shell_path() -> Result<Option<String>, AppError> {
+    if cfg!(target_os = "windows") {
+        // Strategy: use `where git` to locate Git, then derive bash.exe from its path.
+        // This avoids `where bash` returning CMD's bundled bash instead of Git Bash.
+        if let Ok(output) = tokio::process::Command::new("where")
+            .arg("git")
+            .output()
+            .await
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let git_path = line.trim();
+                    // e.g. "D:\xxx\Git\bin\git.exe" → "D:\xxx\Git\bin\bash.exe"
+                    if git_path.to_ascii_lowercase().ends_with("git.exe") {
+                        let _bash_path_lower = git_path
+                            .to_ascii_lowercase()
+                            .replace("git.exe", "bash.exe");
+                        let bash_path = format!(
+                            "{}{}",
+                            &git_path[..git_path.len() - "git.exe".len()],
+                            "bash.exe"
+                        );
+                        if tokio::fs::metadata(&bash_path).await.is_ok() {
+                            return Ok(Some(bash_path));
+                        }
+                    }
+                    // Also handle "cmd/git.exe" pattern
+                    if git_path.to_ascii_lowercase().ends_with("cmd\\git.exe") {
+                        let _bin_bash_lower = git_path
+                            .to_ascii_lowercase()
+                            .replace("cmd\\git.exe", "bin\\bash.exe");
+                        let bin_bash = format!(
+                            "{}{}",
+                            &git_path[..git_path.len() - "cmd\\git.exe".len()],
+                            "bin\\bash.exe"
+                        );
+                        if tokio::fs::metadata(&bin_bash).await.is_ok() {
+                            return Ok(Some(bin_bash));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: check well-known paths
+        let fallbacks = [
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+        ];
+        for path in &fallbacks {
+            if tokio::fs::metadata(path).await.is_ok() {
+                return Ok(Some(path.to_string()));
+            }
+        }
+
+        Ok(None)
+    } else {
+        // macOS / Linux
+        let candidates = [
+            "/bin/bash",
+            "/bin/zsh",
+            "/usr/bin/bash",
+            "/usr/bin/zsh",
+            "/bin/sh",
+        ];
+        for candidate in &candidates {
+            if tokio::fs::metadata(candidate).await.is_ok() {
+                return Ok(Some(candidate.to_string()));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /**
  * Save (create or update) a provider configuration.
  *

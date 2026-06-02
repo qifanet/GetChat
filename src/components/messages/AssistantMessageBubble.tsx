@@ -68,21 +68,21 @@ function RetryStatusCard({
   }, [nextRetryInSecs]);
 
   return (
-    <div className="mt-3 rounded-lg border border-amber-300/40 bg-amber-50/80 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+    <div className="mt-3 rounded-lg border border-miro-amber-light/40 bg-miro-amber-light/80 px-4 py-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-miro-amber">
         <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
         {t("message.retrying", { attempt, maxAttempts })}
       </div>
-      <div className="mt-1 text-xs text-amber-600">
+      <div className="mt-1 text-xs text-miro-amber">
         {countdown > 0
           ? t("message.retryCountdown", { seconds: countdown })
           : t("message.retryConnecting")}
       </div>
       {errorSummary && (
-        <div className="mt-1 truncate text-[11px] text-amber-500/80" title={errorSummary}>
+        <div className="mt-1 truncate text-[11px] text-miro-amber/80" title={errorSummary}>
           {errorSummary}
         </div>
       )}
@@ -90,100 +90,7 @@ function RetryStatusCard({
   );
 }
 
-/** Context compressing card — shown during mid-loop context optimization. */
-function ContextCompressingCard({
-  level,
-  usageRatio,
-}: {
-  level: number;
-  usageRatio: number;
-}) {
-  const { t } = useTranslation();
-  const percent = Math.round(finiteNumber(usageRatio) * 100);
-  return (
-    <div className="mt-3 rounded-lg border border-blue-300/40 bg-blue-50/80 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
-        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        {t("message.contextCompressing", { level })}
-      </div>
-      <div className="mt-1 text-xs text-blue-600">
-        {t("message.contextUsageHint", { percent })}
-      </div>
-    </div>
-  );
-}
-
-/** In-flight ReAct loop context status pushed by the backend. */
-function ContextWindowStatusCard({
-  usedTokens,
-  totalTokens,
-  percentage,
-  messageCount,
-}: {
-  usedTokens: number;
-  totalTokens: number;
-  percentage: number;
-  messageCount: number;
-}) {
-  const { t } = useTranslation();
-  const safePercentage = finiteNumber(percentage);
-  const percent = Math.round(safePercentage);
-  const width = Math.min(Math.max(safePercentage, 0), 100);
-  return (
-    <div className="mt-3 rounded-lg border border-miro-border/30 bg-white/80 px-4 py-2.5">
-      <div className="flex items-center justify-between gap-3 text-xs text-miro-text-secondary">
-        <span>
-          {t("message.contextWindowStatus", {
-            percent,
-            used: formatTokenK(finiteNumber(usedTokens)),
-            total: formatTokenK(finiteNumber(totalTokens)),
-            count: messageCount,
-          })}
-        </span>
-        <span className="shrink-0 font-medium text-miro-text">{percent}%</span>
-      </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-miro-border/40">
-        <div
-          className="h-full rounded-full bg-miro-blue transition-all duration-300"
-          style={{ width: `${width}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** Context compressed card — shown briefly after compression completes. */
-function ContextCompressedCard({
-  compressedCount,
-  tokensSaved,
-  newUsageRatio,
-}: {
-  compressedCount: number;
-  tokensSaved: number;
-  newUsageRatio: number;
-}) {
-  const { t } = useTranslation();
-  const percent = Math.round(finiteNumber(newUsageRatio) * 100);
-  return (
-    <div className="mt-3 rounded-lg border border-green-300/40 bg-green-50/80 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-green-700">
-        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-        </svg>
-        {t("message.contextCompressed", { count: compressedCount })}
-      </div>
-      <div className="mt-1 text-xs text-green-600">
-        {t("message.contextCompressedDetail", {
-          percent,
-          saved: tokensSaved > 0 ? `~${tokensSaved}` : "",
-        })}
-      </div>
-    </div>
-  );
-}
+/** Store selectors for assistant message rendering. */
 
 const _sel_providerModels = (s: import("../../stores/appStore.types").AppStore) => s.providerModels;
 const _sel_workspace_activeConversationId = (s: import("../../stores/appStore.types").AppStore) => s.workspace.activeConversationId;
@@ -242,7 +149,7 @@ function AssistantMessageFrame({
             </span>
           ) : null}
           {statusText ? (
-            <span className="app-status-pill border-miro-border/20 bg-white/80 text-miro-text-secondary">
+            <span className="app-status-pill border-miro-border/20 bg-miro-card/80 text-miro-text-secondary">
               {statusText}
             </span>
           ) : null}

@@ -140,6 +140,10 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0011: Provider reasoning content persistence for thinking models
     let sql_0011 = include_str!("migrations/0011_message_reasoning_content.sql");
     execute_migration_sql(pool, sql_0011, "Migration 0011").await;
+
+    // 0012: Branch diff summaries cache
+    let sql_0012 = include_str!("migrations/0012_branch_diff_summaries.sql");
+    execute_migration_sql(pool, sql_0012, "Migration 0012").await;
 }
 
 /**
