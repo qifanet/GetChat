@@ -142,7 +142,6 @@ pub fn estimate_messages_token_breakdown(messages: &[PromptMessage]) -> ContextT
         assistant_tokens: 0,
         tool_tokens: 0,
         compressed_context_tokens: 0,
-        skill_prompt_tokens: 0,
     };
 
     for msg in messages {
@@ -153,11 +152,6 @@ pub fn estimate_messages_token_breakdown(messages: &[PromptMessage]) -> ContextT
             && msg.content.starts_with("[Compressed Context Summary]")
         {
             breakdown.compressed_context_tokens += tokens;
-            continue;
-        }
-
-        if msg.source_message_id.is_none() && msg.content.starts_with("[Always-Active Rules]") {
-            breakdown.skill_prompt_tokens += tokens;
             continue;
         }
 
@@ -180,7 +174,6 @@ pub fn sum_context_token_breakdown(breakdown: &ContextTokenBreakdownDto) -> u32 
         + breakdown.assistant_tokens
         + breakdown.tool_tokens
         + breakdown.compressed_context_tokens
-        + breakdown.skill_prompt_tokens
 }
 
 /// Estimate tokens used by tool definitions sent alongside chat messages.
@@ -302,7 +295,8 @@ mod tests {
 
         let breakdown = estimate_messages_token_breakdown(&messages);
 
-        assert!(breakdown.skill_prompt_tokens > 0);
+        // [Always-Active Rules] is now classified as system_tokens
+        assert!(breakdown.system_tokens > 0);
         assert!(breakdown.user_tokens > 0);
         assert!(breakdown.tool_tokens > 0);
         let message_total: u32 = messages.iter().map(estimate_prompt_message_tokens).sum();

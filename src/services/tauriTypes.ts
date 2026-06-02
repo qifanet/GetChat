@@ -296,9 +296,8 @@ export interface StartModelStreamInput {
   toolChoice?: string;
   conversationId?: string;
   branchId?: BranchId;
+  activatedSkill?: string;
 }
-
-/** Runtime stream chunk event sent from the Tauri backend over Channel IPC. */
 export interface ModelStreamChunkEvent {
   kind: "CHUNK";
   requestId: RequestId;
@@ -423,7 +422,6 @@ export interface ContextTokenBreakdownDto {
   assistantTokens: number;
   toolTokens: number;
   compressedContextTokens: number;
-  skillPromptTokens: number;
 }
 
 export interface ContextStatusDto {

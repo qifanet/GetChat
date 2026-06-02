@@ -24,6 +24,7 @@ use super::messages::MessageDto;
 pub struct ConversationSummaryDto {
     pub id: String,
     pub title: String,
+    pub title_source: String,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_opened_at: Option<i64>,

@@ -95,10 +95,10 @@ export function SearchDialog({ onClose, onNavigate }: SearchDialogProps) {
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
       <button
         type="button"
-        className="fixed inset-0 bg-slate-950/20 backdrop-blur-sm"
+        className="fixed inset-0 bg-miro-scrim backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border border-miro-border/30 bg-white shadow-2xl">
+      <div className="relative z-10 w-full max-w-lg rounded-xl border border-miro-border/30 bg-miro-card shadow-2xl">
         <div className="flex items-center border-b border-miro-border/20 px-4">
           <svg
             width={16}
@@ -225,7 +225,7 @@ function highlightSnippet(snippet: string, query: string): React.ReactNode {
   return (
     <>
       {before}
-      <mark className="rounded-sm bg-amber-200/80 px-0.5 text-miro-text">{match}</mark>
+      <mark className="rounded-sm bg-miro-amber-light/80 px-0.5 text-miro-text">{match}</mark>
       {after}
     </>
   );

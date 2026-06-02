@@ -73,7 +73,7 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
 
   if (resolved === "approved") {
     return (
-      <div className="my-1.5 rounded-lg border border-emerald-200/60 bg-emerald-50/50 px-3 py-2 text-xs text-emerald-700">
+      <div className="my-1.5 rounded-lg border border-miro-green-light/60 bg-miro-green-light/50 px-3 py-2 text-xs text-miro-green">
         {t("toolCall.approvalApproved", { fn: functionName })}
       </div>
     );
@@ -90,22 +90,22 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
   }
 
   return (
-    <div className="my-1.5 rounded-lg border border-amber-300/50 bg-amber-50/60 text-sm">
+    <div className="my-1.5 rounded-lg border border-miro-amber-light/50 bg-miro-amber-light/60 text-sm">
       <div className="px-3 py-2">
         <div className="mb-1.5 flex items-center gap-2">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-          <code className="font-mono text-xs font-semibold text-amber-800">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-miro-amber" />
+          <code className="font-mono text-xs font-semibold text-miro-amber">
             {functionName}
           </code>
-          <span className="app-status-pill border-amber-300/40 bg-amber-100/70 text-amber-600">
+          <span className="app-status-pill border-miro-amber-light/40 bg-miro-amber-light/70 text-miro-amber">
             {t("toolCall.approvalRequired")}
           </span>
         </div>
-        <p className="mb-2 text-xs text-amber-900/80">{description}</p>
+        <p className="mb-2 text-xs text-miro-amber/80">{description}</p>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded-md bg-emerald-500 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-600"
+            className="rounded-md bg-miro-green px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-miro-green"
             onClick={() => void handleApprove()}
           >
             {t("toolCall.approve")}
@@ -117,7 +117,7 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
           >
             {t("toolCall.reject")}
           </button>
-          <span className="ml-auto text-[10px] text-amber-600/70">
+          <span className="ml-auto text-[10px] text-miro-amber/70">
             {t("toolCall.approvalCountdown", { seconds: secondsLeft })}
           </span>
         </div>

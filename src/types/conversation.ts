@@ -199,6 +199,7 @@ export interface BranchEntity {
 export interface ConversationSummary {
   id: ConversationId;
   title: string;
+  titleSource: "DEFAULT" | "AI_GENERATED" | "USER_SET";
   createdAt: UnixMs;
   updatedAt: UnixMs;
   lastOpenedAt: UnixMs | null;

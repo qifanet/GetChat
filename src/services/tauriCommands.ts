@@ -76,7 +76,11 @@ function cmd<T>(promise: Promise<T>, commandName: string): Promise<T> {
     const duration = Date.now() - start;
     if (typeof err === "object" && err !== null && "code" in err) {
       const raw = err as { code: string; message: string; details?: string };
-      console.error(`[tauri] ${raw.code} ${commandName} (${duration}ms)`, raw.message);
+      console.error(
+        `[tauri] ${raw.code} ${commandName} (${duration}ms)`,
+        raw.message,
+        raw.details ? `details: ${raw.details}` : ""
+      );
       throw new TauriAppError(
         raw.code as TauriAppError["code"],
         raw.message,
@@ -177,6 +181,10 @@ export async function setShellPath(path: string): Promise<string> {
   return executeCommand<string>("set_shell_path", { path });
 }
 
+export async function detectShellPath(): Promise<string | null> {
+  return executeCommand<string | null>("detect_shell_path");
+}
+
 // ============================================================================
 // Provider Commands
 // ============================================================================
@@ -274,6 +282,16 @@ export async function generateConversationTitle(
   return executeCommand<{ title: string | null; skipReason: string | null } | null>("generate_conversation_title", {
     conversationId,
   });
+}
+
+/** Import conversations from external formats (ChatGPT, GetChat JSON) */
+export async function importConversations(
+  input: { format: string; jsonContent: string }
+): Promise<{ importedCount: number; skippedCount: number; errors: string[] }> {
+  return executeCommand<{ importedCount: number; skippedCount: number; errors: string[] }>(
+    "import_conversations",
+    { input }
+  );
 }
 
 /** Set or clear the workspace directory path for file-system tools */
@@ -613,6 +631,14 @@ export async function setMcpServerEnabled(
   return executeCommand<boolean>("set_mcp_server_enabled", { name, enabled });
 }
 
+export async function getMcpConfigJson(): Promise<string> {
+  return executeCommand<string>("get_mcp_config_json");
+}
+
+export async function saveMcpConfigJson(jsonContent: string): Promise<string> {
+  return executeCommand<string>("save_mcp_config_json", { jsonContent });
+}
+
 export interface ContextTokenBreakdownDto {
   systemTokens: number;
   toolPromptTokens: number;
@@ -620,7 +646,6 @@ export interface ContextTokenBreakdownDto {
   assistantTokens: number;
   toolTokens: number;
   compressedContextTokens: number;
-  skillPromptTokens: number;
 }
 
 export interface ContextStatusDto {
@@ -684,32 +709,8 @@ export async function checkDbInvariants(): Promise<InvariantCheckResult> {
 }
 
 // ============================================================================
-// Skills Commands
+// Skills & Slash Commands
 // ============================================================================
-
-export interface SkillDto {
-  id: string;
-  name: string;
-  displayName: string;
-  description: string;
-  triggerType: string;
-  promptTemplate: string;
-  variablesJson: string;
-  boundToolsJson: string;
-  scope: string;
-  sourceType: string;
-  enabled: boolean;
-}
-
-export interface CreateSkillInput {
-  name: string;
-  displayName: string;
-  description: string;
-  triggerType: string;
-  promptTemplate: string;
-  variablesJson?: string;
-  boundToolsJson?: string;
-}
 
 export interface SlashItemDto {
   itemType: string;
@@ -720,38 +721,8 @@ export interface SlashItemDto {
   serverName?: string;
 }
 
-export async function listSkills(): Promise<SkillDto[]> {
-  return executeCommand<SkillDto[]>("list_skills");
-}
-
-export async function createSkill(input: CreateSkillInput): Promise<SkillDto> {
-  return executeCommand<SkillDto>("create_skill", { input });
-}
-
-export async function updateSkill(input: CreateSkillInput): Promise<SkillDto> {
-  return executeCommand<SkillDto>("update_skill", { input });
-}
-
-export async function deleteSkill(id: string): Promise<void> {
-  return executeCommand<void>("delete_skill", { id });
-}
-
-export async function setSkillEnabled(
-  id: string,
-  enabled: boolean
-): Promise<boolean> {
-  return executeCommand<boolean>("set_skill_enabled", { id, enabled });
-}
-
 export async function listSlashItems(): Promise<SlashItemDto[]> {
   return executeCommand<SlashItemDto[]>("list_slash_items");
-}
-
-export async function executeSkill(
-  name: string,
-  argumentsJson: string
-): Promise<string> {
-  return executeCommand<string>("execute_skill", { name, argumentsJson });
 }
 
 export async function executeMcpPrompt(
@@ -768,14 +739,6 @@ export async function executeMcpPrompt(
 
 export async function getSkillsDirectory(): Promise<string> {
   return executeCommand<string>("get_skills_directory");
-}
-
-export async function importSkill(sourcePath: string): Promise<void> {
-  return executeCommand<void>("import_skill", { sourcePath });
-}
-
-export async function refreshSkillsFromDisk(): Promise<void> {
-  return executeCommand<void>("refresh_skills_from_disk");
 }
 
 // ============================================================================

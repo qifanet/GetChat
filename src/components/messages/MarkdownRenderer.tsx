@@ -224,7 +224,7 @@ function buildMarkdownComponents(
     // For unregistered languages, render as plain text with proper whitespace
     if (language) {
       return (
-        <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
+        <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
           <CodeBlockHeader
             language={language}
             rawCode={rawCode}
@@ -247,7 +247,7 @@ function buildMarkdownComponents(
     })();
 
     return (
-      <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-[#f6f7fb]">
+      <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
         <CodeBlockHeader
           language={displayLang}
           rawCode={rawCode}
@@ -323,7 +323,7 @@ function buildMarkdownComponents(
     // Inline code — detect multi-line content and render as block
     if (codeText.includes("\n")) {
       return (
-        <div className="my-2 overflow-x-auto rounded-lg bg-[#f6f7fb] px-4 py-3 font-mono text-[0.85em] leading-relaxed text-miro-text">
+        <div className="my-2 overflow-x-auto rounded-lg bg-miro-surface-low px-4 py-3 font-mono text-[0.85em] leading-relaxed text-miro-text">
           {codeText}
         </div>
       );

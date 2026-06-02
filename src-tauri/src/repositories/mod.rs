@@ -19,5 +19,4 @@ pub mod mcp_servers;
 pub mod messages;
 pub mod provider_models;
 pub mod providers;
-pub mod skills;
 pub mod tool_calls;

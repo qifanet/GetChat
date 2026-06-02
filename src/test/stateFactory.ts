@@ -134,6 +134,7 @@ export function createSnapshot(
     summary: {
       id: "conv_1",
       title: "Test Conversation",
+      titleSource: "DEFAULT",
       createdAt: now,
       updatedAt: now,
       lastOpenedAt: now,

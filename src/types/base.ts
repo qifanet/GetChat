@@ -69,4 +69,4 @@ export type BranchFilterMode = "NEARBY" | "ACTIVE" | "ARCHIVED";
 /** Export scope for the export dialog */
 export type ExportScope = "CURRENT_PATH" | "WHOLE_TREE";
 /** Export format */
-export type ExportFormat = "MARKDOWN" | "JSON";
+export type ExportFormat = "MARKDOWN" | "JSON" | "HTML";

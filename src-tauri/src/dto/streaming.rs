@@ -56,7 +56,6 @@ pub struct ContextTokenBreakdownDto {
     pub assistant_tokens: u32,
     pub tool_tokens: u32,
     pub compressed_context_tokens: u32,
-    pub skill_prompt_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +108,10 @@ pub struct StartModelStreamInput {
     /// Current branch ID for branch-aware context compression.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_id: Option<String>,
+
+    /// Skill name activated by the user via slash command (Tier 3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activated_skill: Option<String>,
 }
 
 // ============================================================================

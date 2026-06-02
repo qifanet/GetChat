@@ -34,6 +34,33 @@
 
 GetChat 让你从任意消息处分叉——就像给思路建一个 Git 分支，但这是你的思考过程。原路径永远不会被破坏。你可以自由探索，并排对比，最后把最满意的那条路径设为主线。
 
+## 应用截图
+
+<p align="center">
+  <img src="docs/image/homepage-sidebar.png" width="700" alt="应用首页" />
+</p>
+<p align="center"><em>应用首页 — 左侧侧边栏管理多个会话</em></p>
+
+<p align="center">
+  <img src="docs/image/chat-file-sidebar.png" width="700" alt="对话页面" />
+</p>
+<p align="center"><em>对话页面 — 项目文件侧边栏 + 实时上下文状态查看</em></p>
+
+<p align="center">
+  <img src="docs/image/branch-view.png" width="700" alt="分支视图" />
+</p>
+<p align="center"><em>分支面板 — 直接在分支视图上管理（重命名、归档、删除）</em></p>
+
+<p align="center">
+  <img src="docs/image/branch-compare.png" width="700" alt="分支对比" />
+</p>
+<p align="center"><em>对比模式 — 并排查看差异，AI 自动总结减轻对比压力</em></p>
+
+<p align="center">
+  <img src="docs/image/settings.png" width="700" alt="设置页面" />
+</p>
+<p align="center"><em>设置页面 — 安全权限控制、内置工具开关、MCP 与 Skills 配置</em></p>
+
 ## 能做什么？
 
 ### 随处分叉
@@ -50,7 +77,7 @@ GetChat 让你从任意消息处分叉——就像给思路建一个 Git 分支�
 
 ### Skills 系统
 
-通过 Skills 自定义 AI 行为。导入包含提示词模板、工具绑定和资源文件的技能目录。在对话框中用斜杠命令触发技能。你的 AI 助手随你的工作流而变。
+基于文件系统的热插拔技能发现。将 `SKILL.md` 文件放入技能目录即可立即生效——无需重启、无需数据库。采用渐进式披露架构：元数据始终对模型可见以实现自动发现，完整内容按需加载，斜杠命令提供快速激活。你的 AI 助手随你的工作流而变。
 
 ### 上下文管理
 

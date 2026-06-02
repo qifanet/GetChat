@@ -64,6 +64,8 @@ pub struct ResolvedModelStreamRequest {
     pub branch_id: Option<String>,
     /// Per-conversation workspace root for file-scoped tools.
     pub workspace_path: Option<String>,
+    /// Skill name activated by the user via slash command (Tier 3).
+    pub activated_skill: Option<String>,
 }
 
 /** Normalized terminal outcome of a provider streaming session. */
@@ -107,7 +109,7 @@ impl ModelStreamFailure {
     }
 
     /** Build a non-retriable runtime failure. */
-    fn terminal(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn terminal(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
             message: message.into(),
@@ -267,6 +269,7 @@ pub async fn resolve_stream_request(
         conversation_id: input.conversation_id.clone(),
         branch_id: input.branch_id.clone(),
         workspace_path,
+        activated_skill: input.activated_skill.clone(),
     })
 }
 
@@ -991,8 +994,12 @@ async fn stream_openai_compatible_response(
                         }
                     }
 
-                    // Accumulate tool_calls delta
-                    if let Some(tc_array) = value.pointer("/choices/0/delta/tool_calls").and_then(Value::as_array) {
+                    // Accumulate tool_calls delta — check both delta and message paths
+                    // (some providers use message/tool_calls for full non-streaming responses within SSE)
+                    let tc_source = value.pointer("/choices/0/delta/tool_calls")
+                        .or_else(|| value.pointer("/choices/0/message/tool_calls"))
+                        .and_then(Value::as_array);
+                    if let Some(tc_array) = tc_source {
                         for tc in tc_array {
                             let index = tc["index"].as_u64().unwrap_or(0) as usize;
                             let entry = pending_tool_calls.entry(index).or_insert((String::new(), String::new(), String::new()));
@@ -1002,8 +1009,18 @@ async fn stream_openai_compatible_response(
                             if let Some(name) = tc.pointer("/function/name").and_then(Value::as_str) {
                                 entry.1 = name.to_string();
                             }
-                            if let Some(args) = tc.pointer("/function/arguments").and_then(Value::as_str) {
-                                entry.2.push_str(args);
+                            // Arguments may be a JSON string (standard OpenAI) or a JSON
+                            // object/array (some providers). Handle both cases.
+                            if let Some(args) = tc.pointer("/function/arguments") {
+                                match args {
+                                    Value::String(s) => entry.2.push_str(s),
+                                    Value::Object(_) | Value::Array(_) => {
+                                        if let Ok(serialized) = serde_json::to_string(args) {
+                                            entry.2.push_str(&serialized);
+                                        }
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -1030,8 +1047,37 @@ async fn stream_openai_compatible_response(
 fn finalize_tool_calls(pending: &mut std::collections::HashMap<usize, (String, String, String)>) -> Vec<ToolCallDto> {
     let mut keys: Vec<usize> = pending.keys().copied().collect();
     keys.sort();
-    keys.into_iter().map(|idx| {
+    keys.into_iter().enumerate().map(|(seq, idx)| {
         let (id, name, arguments) = pending.remove(&idx).unwrap_or_default();
+        // Some OpenAI-compatible providers (e.g., SenseNova) may not include
+        // a tool_call ID in their streaming deltas. Generate a synthetic one
+        // to ensure the tool transcript remains valid across iterations.
+        let id = if id.trim().is_empty() {
+            let synthetic = format!("call_synthetic_{}", seq);
+            tracing::warn!(
+                seq,
+                name = %name,
+                synthetic_id = %synthetic,
+                "finalize_tool_calls: provider returned tool_call without ID, using synthetic"
+            );
+            synthetic
+        } else {
+            id
+        };
+        if name.trim().is_empty() || arguments.trim().is_empty() {
+            tracing::warn!(
+                seq,
+                id = %id,
+                name_len = name.len(),
+                arguments_len = arguments.len(),
+                "finalize_tool_calls: tool_call has empty name or arguments, provider may not support this"
+            );
+        }
+        let arguments = if arguments.trim().is_empty() {
+            "{}".to_string()
+        } else {
+            arguments
+        };
         ToolCallDto {
             id,
             call_type: "function".to_string(),

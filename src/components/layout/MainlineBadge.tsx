@@ -26,7 +26,7 @@ export function MainlineBadge() {
     );
   }
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-miro-border bg-white px-3 py-1 text-[11px] font-display font-semibold uppercase tracking-[0.14em] text-miro-text-secondary">
+    <span className="inline-flex items-center gap-2 rounded-full border border-miro-border bg-miro-card px-3 py-1 text-[11px] font-display font-semibold uppercase tracking-[0.14em] text-miro-text-secondary">
       <IconStarOutline size={12} />
       {t("common.branch")}
     </span>

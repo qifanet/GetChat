@@ -10,11 +10,12 @@ import { useTranslation } from "react-i18next";
 import { getConversationDisplayTitle } from "../../i18n/displayNames";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import type { ConversationSummary } from "../../types/conversation";
-import { IconArchive, IconPencilSquare, IconTrash } from "../common/Icon";
+import { IconArchive, IconPencilSquare, IconRefresh, IconTrash } from "../common/Icon";
 import { confirmDialog } from "../common/confirmDialog";
 const _sel_renameConversation = (s: import("../../stores/appStore.types").AppStore) => s.renameConversation;
 const _sel_archiveConversation = (s: import("../../stores/appStore.types").AppStore) => s.archiveConversation;
 const _sel_deleteConversation = (s: import("../../stores/appStore.types").AppStore) => s.deleteConversation;
+const _sel_autoGenerateTitle = (s: import("../../stores/appStore.types").AppStore) => s.autoGenerateTitle;
 interface ConversationListItemProps {
   summary: ConversationSummary;
   isActive: boolean;
@@ -37,10 +38,12 @@ export function ConversationListItem({
   const renameConversation = useAppStore(_sel_renameConversation);
   const archiveConversation = useAppStore(_sel_archiveConversation);
   const deleteConversation = useAppStore(_sel_deleteConversation);
+  const autoGenerateTitle = useAppStore(_sel_autoGenerateTitle);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(summary.title);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const displayTitle = getConversationDisplayTitle(summary.title, t);
   useEffect(() => {
     setTitleDraft(summary.title);
@@ -120,12 +123,28 @@ export function ConversationListItem({
       setIsSubmitting(false);
     }
   }
+
+  async function handleGenerateTitle(): Promise<void> {
+    setIsGeneratingTitle(true);
+    setError(null);
+    try {
+      await autoGenerateTitle(summary.id);
+    } catch (genError) {
+      setError(
+        genError instanceof Error
+          ? genError.message
+          : t("conversation.generateTitle")
+      );
+    } finally {
+      setIsGeneratingTitle(false);
+    }
+  }
   return (
     <div
       className={`group rounded-[18px] px-3 py-2.5 text-sm transition-colors ${
         isActive
           ? "bg-miro-blue-light/85 text-miro-blue shadow-ring"
-          : "bg-white/82 text-miro-text hover:bg-white"
+          : "bg-miro-card/82 text-miro-text hover:bg-miro-card"
       }`}
     >
       {isRenaming ? (
@@ -178,6 +197,17 @@ export function ConversationListItem({
               isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
             }`}
           >
+            {summary.titleSource === "DEFAULT" && (
+              <button
+                type="button"
+                className="app-icon-button h-6 w-6 rounded-lg"
+                disabled={isGeneratingTitle}
+                onClick={() => void handleGenerateTitle()}
+                title={t("conversation.generateTitle")}
+              >
+                <IconRefresh size={12} className={isGeneratingTitle ? "animate-spin" : ""} />
+              </button>
+            )}
             <button
               type="button"
               className="app-icon-button h-6 w-6 rounded-lg"
@@ -196,7 +226,7 @@ export function ConversationListItem({
             </button>
             <button
               type="button"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-miro-red transition-colors hover:bg-miro-red-light hover:text-miro-red"
               onClick={() => void handleDelete()}
               title={t("conversation.delete")}
             >
@@ -205,7 +235,7 @@ export function ConversationListItem({
           </div>
         </div>
       )}
-      {error ? <p className="mt-2 text-[11px] leading-5 text-red-600">{error}</p> : null}
+      {error ? <p className="mt-2 text-[11px] leading-5 text-miro-red">{error}</p> : null}
     </div>
   );
 }

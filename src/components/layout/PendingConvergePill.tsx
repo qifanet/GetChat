@@ -34,7 +34,7 @@ export function PendingConvergePill() {
   if (count <= 0) return null;
   return (
     <button
-      className="inline-flex items-center gap-2 rounded-full border border-miro-amber/20 bg-miro-amber-light px-3 py-1 text-[11px] font-display font-semibold uppercase tracking-[0.14em] text-miro-amber transition-colors hover:bg-miro-orange-light disabled:cursor-not-allowed disabled:border-miro-border disabled:bg-white disabled:text-miro-text-secondary"
+      className="inline-flex items-center gap-2 rounded-full border border-miro-amber/20 bg-miro-amber-light px-3 py-1 text-[11px] font-display font-semibold uppercase tracking-[0.14em] text-miro-amber transition-colors hover:bg-miro-orange-light disabled:cursor-not-allowed disabled:border-miro-border disabled:bg-miro-card disabled:text-miro-text-secondary"
       onClick={() => {
         if (!currentBranchId || !suggestedCompareTargetBranchId) {
           return;

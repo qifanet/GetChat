@@ -34,6 +34,33 @@ Most AI chat tools treat conversations as a straight line. One wrong turn and yo
 
 GetChat lets you branch from *any* message — like forking a Git repo, but for your train of thought. The original path is never destroyed. You can explore freely, compare branches side-by-side, and merge your favorite path back as the main thread.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/image/homepage-sidebar.png" width="700" alt="Homepage with conversation sidebar" />
+</p>
+<p align="center"><em>Homepage — manage conversations in the sidebar</em></p>
+
+<p align="center">
+  <img src="docs/image/chat-file-sidebar.png" width="700" alt="Chat with file explorer and context status" />
+</p>
+<p align="center"><em>Chat view — file explorer on the left, real-time context status in the toolbar</em></p>
+
+<p align="center">
+  <img src="docs/image/branch-view.png" width="700" alt="Branch view with management actions" />
+</p>
+<p align="center"><em>Branch panel — manage branches directly (rename, archive, delete)</em></p>
+
+<p align="center">
+  <img src="docs/image/branch-compare.png" width="700" alt="Branch comparison with AI diff summary" />
+</p>
+<p align="center"><em>Compare mode — side-by-side with AI-powered diff summary</em></p>
+
+<p align="center">
+  <img src="docs/image/settings.png" width="700" alt="Settings page with security and tool controls" />
+</p>
+<p align="center"><em>Settings — security policies, built-in tools, MCP & Skills configuration</em></p>
+
 ## What Can You Do?
 
 ### Branch From Anywhere
@@ -50,7 +77,7 @@ Let the AI call tools and external services during a conversation. Connect any M
 
 ### Skills System
 
-Customize AI behavior with Skills. Import skill directories containing prompt templates with optional tool bindings and resources. Trigger skills with slash commands in the composer. Your AI assistant adapts to your workflow.
+Hot-pluggable skill prompts discovered from the filesystem. Drop a `SKILL.md` file into the skills directory and it's instantly available — no restart, no database. Skills use a Progressive Disclosure architecture: metadata is always visible to the model for auto-discovery, full content loads on demand, and slash commands provide quick activation. Your AI assistant adapts to your workflow.
 
 ### Context Management
 

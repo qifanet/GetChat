@@ -37,7 +37,7 @@ export function HistoryForkBanner() {
         </p>
       </div>
       <button
-        className="shrink-0 rounded-xl px-3 py-1 text-xs font-semibold text-miro-blue transition-colors hover:bg-white/60"
+        className="shrink-0 rounded-xl px-3 py-1 text-xs font-semibold text-miro-blue transition-colors hover:bg-miro-card/60"
         onClick={clearForkIntent}
       >
         {t("common.cancel")}

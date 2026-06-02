@@ -65,13 +65,13 @@ export function BranchRenameDialog() {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <button
         type="button"
-        className="fixed inset-0 bg-slate-950/30 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-miro-scrim backdrop-blur-[2px]"
         onClick={closeDialog}
         aria-label={t("common.cancel")}
       />
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="relative z-10 w-full max-w-sm rounded-shell bg-white px-7 py-7 shadow-panel"
+        className="relative z-10 w-full max-w-sm rounded-shell bg-miro-card px-7 py-7 shadow-panel"
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold tracking-[-0.03em] text-miro-text">
@@ -95,7 +95,7 @@ export function BranchRenameDialog() {
           className="app-input mb-4 w-full"
         />
         {error ? (
-          <p className="mb-3 text-xs leading-5 text-red-600">{error}</p>
+          <p className="mb-3 text-xs leading-5 text-miro-red">{error}</p>
         ) : null}
         <div className="flex items-center justify-end gap-2">
           <button

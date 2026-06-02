@@ -82,10 +82,10 @@ export const TodoStatusBar = memo(function TodoStatusBar({ conversationId }: Tod
               key={item.id}
               className={`inline-block h-1.5 w-1.5 rounded-full ${
                 item.status === "completed"
-                  ? "bg-green-500"
+                  ? "bg-miro-green"
                   : item.status === "in_progress"
-                  ? "bg-blue-500 animate-pulse"
-                  : "bg-gray-300"
+                  ? "bg-miro-blue animate-pulse"
+                  : "bg-miro-surface-high"
               }`}
             />
           ))}

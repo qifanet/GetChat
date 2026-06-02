@@ -71,6 +71,7 @@ const initialUi: UiState = {
   rightPanelCollapsed: false,
   rightPanelTab: "BRANCHES",
   exportDialogOpen: false,
+  importDialogOpen: false,
   branchRenameDialogOpen: false,
   scrollToMessageId: null,
   fileExplorerOpen: false,
@@ -1524,6 +1525,26 @@ export const useAppStore = create<AppStore>()(
             },
             undefined,
             "ui/exportDialogClosed"
+          );
+        },
+
+        openImportDialog: () => {
+          set(
+            (s) => {
+              s.ui.importDialogOpen = true;
+            },
+            undefined,
+            "ui/importDialogOpened"
+          );
+        },
+
+        closeImportDialog: () => {
+          set(
+            (s) => {
+              s.ui.importDialogOpen = false;
+            },
+            undefined,
+            "ui/importDialogClosed"
           );
         },
 

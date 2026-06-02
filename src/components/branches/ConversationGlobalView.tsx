@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStoreSelector";
+import { useThemeStore } from "../../stores/useThemeStore";
 import {
   selectGlobalView,
   type GlobalViewNode,
@@ -122,6 +123,43 @@ export function ConversationGlobalView({ onClose }: Props) {
     x: number;
     y: number;
   }>({ visible: false, text: "", branchName: "", x: 0, y: 0 });
+
+  const isDark = useThemeStore((s) => s.mode === "dark" || (s.mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches));
+
+  // Theme-aware SVG palette
+  const svgPalette = useMemo(() => isDark ? {
+    edgeNormal: "#3d444d",
+    edgeFork: "#818cf8",
+    nodeFillUser: "rgba(99, 102, 241, 0.12)",
+    nodeFillSystem: "rgba(210, 153, 34, 0.12)",
+    nodeFillAssistant: "rgba(63, 185, 80, 0.12)",
+    nodeStrokeUser: "rgba(129, 140, 248, 0.35)",
+    nodeStrokeSystem: "rgba(210, 153, 34, 0.35)",
+    nodeStrokeAssistant: "rgba(63, 185, 80, 0.35)",
+    roleUser: "#818cf8",
+    roleSystem: "#d29922",
+    roleAssistant: "#3fb950",
+    labelText: "#e6edf3",
+    selectStroke: "#f85149",
+    selectFill: "rgba(248, 81, 73, 0.12)",
+    branchBadge: "#818cf8",
+  } : {
+    edgeNormal: "#d1d5db",
+    edgeFork: "#5b76fe",
+    nodeFillUser: "#eef1ff",
+    nodeFillSystem: "#fff4e5",
+    nodeFillAssistant: "#edfcf2",
+    nodeStrokeUser: "#c7d2fe",
+    nodeStrokeSystem: "#fbcf8b",
+    nodeStrokeAssistant: "#bbf7d0",
+    roleUser: "#5b76fe",
+    roleSystem: "#d97706",
+    roleAssistant: "#16a34a",
+    labelText: "#1c1c1e",
+    selectStroke: "#ef4444",
+    selectFill: "#fee2e2",
+    branchBadge: "#5b76fe",
+  }, [isDark]);
 
   // Layout
   const layouts = useMemo(() => layoutTree(data.roots), [data.roots]);
@@ -375,7 +413,7 @@ export function ConversationGlobalView({ onClose }: Props) {
             }}
             className={`px-3 py-1.5 text-xs font-medium transition-colors ${
               managementMode
-                ? "bg-red-500 text-white hover:bg-red-600"
+                ? "bg-miro-red text-white hover:bg-miro-red"
                 : "app-secondary-button"
             }`}
           >
@@ -386,7 +424,7 @@ export function ConversationGlobalView({ onClose }: Props) {
               type="button"
               disabled={deleting}
               onClick={() => void handleDeleteSelected()}
-              className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+              className="rounded-md bg-miro-red px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-miro-red disabled:opacity-50"
             >
               {deleting
                 ? t("globalView.deleting")
@@ -460,7 +498,7 @@ export function ConversationGlobalView({ onClose }: Props) {
               key={i}
               d={`M ${edge.x1} ${edge.y1} C ${edge.x1} ${edge.y1 + V_GAP * 1.5}, ${edge.x2} ${edge.y2 - V_GAP * 1.5}, ${edge.x2} ${edge.y2}`}
               fill="none"
-              stroke={edge.isFork ? "#5b76fe" : "#d1d5db"}
+              stroke={edge.isFork ? svgPalette.edgeFork : svgPalette.edgeNormal}
               strokeWidth={edge.isFork ? 1.5 : 1}
               strokeOpacity={edge.isFork ? 0.6 : 0.4}
             />
@@ -474,9 +512,9 @@ export function ConversationGlobalView({ onClose }: Props) {
             const isCurrentBranch = n.branchId === currentBranchId;
             const hasForks = n.forkBranches.length > 0;
             const isSelected = managementMode && selectedBranchIds.has(n.branchId);
-            const nodeFill = isUser ? "#eef1ff" : isSystem ? "#fff4e5" : "#edfcf2";
-            const nodeStroke = isUser ? "#c7d2fe" : isSystem ? "#fbcf8b" : "#bbf7d0";
-            const roleColor = isUser ? "#5b76fe" : isSystem ? "#d97706" : "#16a34a";
+            const nodeFill = isUser ? svgPalette.nodeFillUser : isSystem ? svgPalette.nodeFillSystem : svgPalette.nodeFillAssistant;
+            const nodeStroke = isUser ? svgPalette.nodeStrokeUser : isSystem ? svgPalette.nodeStrokeSystem : svgPalette.nodeStrokeAssistant;
+            const roleColor = isUser ? svgPalette.roleUser : isSystem ? svgPalette.roleSystem : svgPalette.roleAssistant;
             const roleLabel = isUser ? "U" : isSystem ? "S" : "A";
 
             return (
@@ -498,7 +536,7 @@ export function ConversationGlobalView({ onClose }: Props) {
                     height={NODE_H + 6}
                     rx={BORDER_RADIUS + 2}
                     fill="none"
-                    stroke="#ef4444"
+                    stroke={svgPalette.selectStroke}
                     strokeWidth={2}
                     strokeDasharray="4 2"
                     opacity={0.8}
@@ -509,14 +547,14 @@ export function ConversationGlobalView({ onClose }: Props) {
                   width={NODE_W}
                   height={NODE_H}
                   rx={BORDER_RADIUS}
-                  fill={managementMode && isSelected ? "#fee2e2" : nodeFill}
+                  fill={managementMode && isSelected ? svgPalette.selectFill : nodeFill}
                   stroke={
                     managementMode && isSelected
-                      ? "#ef4444"
+                      ? svgPalette.selectStroke
                       : isCurrentBranch
-                        ? "#5b76fe"
+                        ? svgPalette.edgeFork
                         : hasForks
-                          ? "#5b76fe"
+                          ? svgPalette.edgeFork
                           : nodeStroke
                   }
                   strokeWidth={isCurrentBranch ? 1.5 : 1}
@@ -541,7 +579,7 @@ export function ConversationGlobalView({ onClose }: Props) {
                   y={NODE_H / 2}
                   dominantBaseline="central"
                   fontSize={10}
-                  fill="#1c1c1e"
+                  fill={svgPalette.labelText}
                 >
                   {n.label.length > 14 ? n.label.slice(0, 14) + "…" : n.label || t("globalView.emptyMessage")}
                 </text>
@@ -553,7 +591,7 @@ export function ConversationGlobalView({ onClose }: Props) {
                     cx={NODE_W - 8}
                     cy={NODE_H / 2}
                     r={4}
-                    fill="#5b76fe"
+                    fill={svgPalette.branchBadge}
                     opacity={0.6}
                   />
                 )}

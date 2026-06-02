@@ -35,8 +35,8 @@ export function EditForkBanner() {
     [
       "rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors",
       active
-        ? "bg-white text-miro-violet shadow-ring"
-        : "text-miro-text-secondary hover:bg-white/50",
+        ? "bg-miro-card text-miro-violet shadow-ring"
+        : "text-miro-text-secondary hover:bg-miro-card/50",
     ].join(" ");
 
   return (
@@ -53,14 +53,14 @@ export function EditForkBanner() {
             </span>
           </p>
           {isDirectOverwrite ? (
-            <p className="mt-1 max-w-3xl text-[11px] leading-5 text-red-700">
+            <p className="mt-1 max-w-3xl text-[11px] leading-5 text-miro-red">
               {t("workspace.editForkDirectWarning")}
             </p>
           ) : null}
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <div className="flex rounded-2xl border border-miro-violet/20 bg-white/35 p-1">
+        <div className="flex rounded-2xl border border-miro-violet/20 bg-miro-card/35 p-1">
           <button
             type="button"
             className={buttonClass(!isDirectOverwrite)}
@@ -79,7 +79,7 @@ export function EditForkBanner() {
           </button>
         </div>
         <button
-          className="rounded-xl px-3 py-1 text-xs font-semibold text-miro-violet transition-colors hover:bg-white/50"
+          className="rounded-xl px-3 py-1 text-xs font-semibold text-miro-violet transition-colors hover:bg-miro-card/50"
           onClick={clearForkIntent}
         >
           {t("workspace.cancelEdit")}

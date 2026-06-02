@@ -40,6 +40,7 @@ pub struct ToolExecutionContext {
     pub conversation_id: Option<String>,
     pub workspace_path: Option<String>,
     pub shell_path: Option<String>,
+    pub skills_dir: Option<String>,
 }
 
 /** Async trait for executing a named tool with JSON arguments. */
@@ -110,6 +111,7 @@ impl BuiltinToolExecutor {
         executor.register_todo();
         executor.register_terminal();
         executor.register_web_search();
+        executor.register_load_skill();
         let known_disabled_tools = disabled_tools
             .into_iter()
             .filter(|name| executor.tools.contains_key(name))
@@ -883,6 +885,29 @@ impl BuiltinToolExecutor {
             Box::pin(web_search_handler(args))
         });
     }
+
+    /** Register the load_skill tool (Tier 2 — on-demand SKILL.md loading). */
+    fn register_load_skill(&mut self) {
+        let definition = ToolDefinitionDto {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDefDto {
+                name: "load_skill".to_string(),
+                description: "Load the full content of a skill by name. Returns the skill's SKILL.md instructions that should be followed for the current task. Call this tool when the user's task matches one of the available skills listed in the system prompt.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The skill name (from the [Available Skills] list in the system prompt)"
+                        }
+                    },
+                    "required": ["name"]
+                }),
+            },
+        };
+
+        self.register(definition, |args, context| load_skill_handler(args, context));
+    }
 }
 
 // ============================================================================
@@ -1147,7 +1172,7 @@ async fn run_shell_with_passive_timeout(
     working_dir: &std::path::Path,
     initial_timeout_secs: u64,
 ) -> ToolExecutionResult {
-    let max_total_secs: u64 = 600;
+    let _max_total_secs: u64 = 600;
 
     // Determine how to invoke the shell
     let (program, args) = if shell.ends_with("cmd.exe") || shell.ends_with("cmd") {
@@ -1189,92 +1214,142 @@ async fn run_shell_with_passive_timeout(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    // Read output with passive timeout detection
+    // Streaming read with passive timeout and output activity tracking
+    const MAX_OUTPUT_BYTES: usize = 100_000;
+    const OUTPUT_IDLE_THRESHOLD_SECS: u64 = 30;
+    const MAX_TOTAL_SECS: u64 = 600;
+
     let mut total_output = String::new();
+    let mut truncated = false;
     let start = std::time::Instant::now();
-    let mut next_deadline = initial_timeout_secs;
-    let mut extensions = 0u32;
-    const MAX_EXTENSIONS: u32 = 10;
+    let mut last_output_at = std::time::Instant::now();
+    let mut deadline_exts = 0u32;
 
-    // Combine stdout and stderr into a single read task
-    let output_task = async {
-        let mut stdout_buf = Vec::new();
-        let mut stderr_buf = Vec::new();
-        if let Some(mut out) = stdout {
-            let _ = tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_buf).await;
-        }
-        if let Some(mut err) = stderr {
-            let _ = tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_buf).await;
-        }
-        (stdout_buf, stderr_buf)
-    };
+    // Merge stdout and stderr into a single line stream via a channel
+    let (line_tx, mut line_rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(256);
 
-    tokio::pin!(output_task);
+    // Spawn reader tasks for stdout and stderr
+    if let Some(out) = stdout {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let reader = BufReader::new(out);
+            let mut lines = reader.lines();
+            while let Some(line) = lines.next_line().await.transpose() {
+                if tx.send(line).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    if let Some(err) = stderr {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let reader = BufReader::new(err);
+            let mut lines = reader.lines();
+            while let Some(line) = lines.next_line().await.transpose() {
+                if tx.send(line).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    // Drop the original sender so line_rx gets None when all readers finish
+    drop(line_tx);
+
+    // Initial deadline
+    let deadline_duration = std::time::Duration::from_secs(initial_timeout_secs.min(MAX_TOTAL_SECS));
+    let mut deadline = tokio::time::Instant::now() + deadline_duration;
 
     loop {
-        let deadline_dur = std::time::Duration::from_secs(next_deadline.saturating_sub(start.elapsed().as_secs()));
-        let sleep = tokio::time::sleep(deadline_dur);
-        tokio::pin!(sleep);
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let sleep = tokio::time::sleep(remaining);
 
         tokio::select! {
-            result = &mut output_task => {
-                // Process completed
-                let (stdout_buf, stderr_buf) = result;
-                let stdout_str = String::from_utf8_lossy(&stdout_buf);
-                let stderr_str = String::from_utf8_lossy(&stderr_buf);
-
-                if !stdout_str.is_empty() {
-                    total_output.push_str(&stdout_str);
-                }
-                if !stderr_str.is_empty() {
-                    if !total_output.is_empty() {
-                        total_output.push_str("\n--- stderr ---\n");
+            line_result = line_rx.recv() => {
+                match line_result {
+                    Some(Ok(line)) => {
+                        if !total_output.is_empty() {
+                            total_output.push('\n');
+                        }
+                        if total_output.len() + line.len() < MAX_OUTPUT_BYTES {
+                            total_output.push_str(&line);
+                        } else if !truncated {
+                            truncated = true;
+                        }
+                        last_output_at = std::time::Instant::now();
                     }
-                    total_output.push_str(&stderr_str);
+                    Some(Err(_)) => {
+                        // IO error on one of the readers, continue draining
+                    }
+                    None => {
+                        // All readers finished — process exited
+                        break;
+                    }
                 }
-                break;
             }
-            _ = &mut sleep => {
-                // Timeout boundary reached — check if process is still running
+            _ = sleep => {
+                // Deadline reached — decide whether to extend or kill
                 let elapsed = start.elapsed().as_secs();
+                let idle_secs = last_output_at.elapsed().as_secs();
 
-                // Check if the process has already exited
                 match child.try_wait() {
-                    Ok(Some(_status)) => {
-                        // Process already completed — the output_task will
-                        // finish shortly and collect remaining stdout/stderr.
-                        // Just let the loop's output_task arm handle it.
+                    Ok(Some(_)) => {
+                        // Process already exited, drain remaining lines
+                        loop {
+                            match line_rx.try_recv() {
+                                Ok(Ok(line)) => {
+                                    if !total_output.is_empty() {
+                                        total_output.push('\n');
+                                    }
+                                    if total_output.len() + line.len() < MAX_OUTPUT_BYTES {
+                                        total_output.push_str(&line);
+                                    } else if !truncated {
+                                        truncated = true;
+                                    }
+                                }
+                                _ => break,
+                            }
+                        }
+                        break;
                     }
                     Ok(None) => {
-                        // Process still running — passive detection
-                        if extensions >= MAX_EXTENSIONS || elapsed >= max_total_secs {
-                            // Hard limit reached, kill the process
-                            tracing::warn!(
-                                elapsed_secs = elapsed,
-                                extensions,
-                                "terminal: hard timeout, killing process"
-                            );
+                        // Still running — check activity
+                        if elapsed >= MAX_TOTAL_SECS {
+                            tracing::warn!(elapsed_secs = elapsed, "terminal: hard total timeout, killing");
                             let _ = child.kill().await;
                             total_output.push_str(&format!(
-                                "\n\n[Process killed after {}s ({} deadline extensions)]",
-                                elapsed, extensions
+                                "\n\n[Process killed after {}s (total runtime limit)]",
+                                elapsed
                             ));
                             break;
                         }
-
-                        // Process is still running and producing output — extend deadline
-                        let extension_secs = (initial_timeout_secs / 2).max(60).min(120);
-                        next_deadline = (elapsed + extension_secs).min(max_total_secs);
-                        extensions += 1;
+                        if idle_secs >= OUTPUT_IDLE_THRESHOLD_SECS {
+                            tracing::warn!(
+                                elapsed_secs = elapsed,
+                                idle_secs,
+                                "terminal: idle timeout, killing"
+                            );
+                            let _ = child.kill().await;
+                            total_output.push_str(&format!(
+                                "\n\n[Process killed after {}s ({}s idle)]",
+                                elapsed, idle_secs
+                            ));
+                            break;
+                        }
+                        // Still producing output — extend deadline
+                        let ext_secs = (initial_timeout_secs / 2).max(60).min(120);
+                        deadline_exts += 1;
+                        deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(ext_secs);
                         tracing::info!(
                             elapsed_secs = elapsed,
-                            extension_secs,
-                            extensions,
-                            "terminal: passive timeout, extending deadline"
+                            ext_secs,
+                            deadline_exts,
+                            "terminal: active output, extending deadline"
                         );
                     }
                     Err(_) => {
-                        // Can't check status — kill and return
                         let _ = child.kill().await;
                         break;
                     }
@@ -1283,15 +1358,12 @@ async fn run_shell_with_passive_timeout(
         }
     }
 
+    if truncated {
+        total_output.push_str("\n... (output truncated at 100KB)");
+    }
+
     // Wait for process exit if not already done
     let exit_status: Option<std::process::ExitStatus> = child.wait().await.ok();
-
-    // Truncate very long output
-    const MAX_OUTPUT: usize = 30_000;
-    if total_output.len() > MAX_OUTPUT {
-        total_output.truncate(MAX_OUTPUT);
-        total_output.push_str("\n... (output truncated)");
-    }
 
     let success = exit_status.map_or(false, |s: std::process::ExitStatus| s.success());
     ToolExecutionResult { success, output: total_output }
@@ -1303,122 +1375,6 @@ fn get_default_shell() -> String {
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    }
-}
-
-async fn run_shell_command(shell: &str, command: &str, working_dir: &Path) -> ToolExecutionResult {
-    use tokio::process::Command;
-
-    // Determine how to invoke the shell
-    let (program, args) = if shell.ends_with("cmd.exe") || shell.ends_with("cmd") {
-        (shell.to_string(), vec!["/C".to_string(), command.to_string()])
-    } else if shell.ends_with("powershell.exe")
-        || shell.ends_with("pwsh.exe")
-        || shell.ends_with("pwsh")
-        || shell.ends_with("powershell")
-    {
-        (shell.to_string(), vec!["-NoProfile".to_string(), "-Command".to_string(), command.to_string()])
-    } else {
-        // sh, bash, zsh, fish, git-bash, wsl, etc.
-        (shell.to_string(), vec!["-c".to_string(), command.to_string()])
-    };
-
-    let mut cmd = Command::new(&program);
-    cmd.args(&args)
-        .current_dir(working_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // On Windows, prevent visible console window
-    #[cfg(target_os = "windows")]
-    {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let output = match cmd.output().await {
-        Ok(o) => o,
-        Err(e) => {
-            return ToolExecutionResult {
-                success: false,
-                output: format!("Failed to execute command: {e}\nShell: {program}"),
-            };
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    let mut result = String::new();
-    if !stdout.is_empty() {
-        result.push_str(&stdout);
-    }
-    if !stderr.is_empty() {
-        if !result.is_empty() {
-            result.push_str("\n--- stderr ---\n");
-        }
-        result.push_str(&stderr);
-    }
-
-    // Truncate very long output
-    const MAX_OUTPUT: usize = 30_000;
-    if result.len() > MAX_OUTPUT {
-        result.truncate(MAX_OUTPUT);
-        result.push_str("\n... (output truncated)");
-    }
-
-    // Post-execution: detect cd failures and append guidance
-    if !output.status.success() {
-        let lower = result.to_lowercase();
-        let is_cd_error = lower.contains("no such file or directory")
-            || lower.contains("cannot find the path")
-            || lower.contains("系统找不到指定的路径")
-            || lower.contains("找不到")
-            || lower.contains("not a directory")
-            || lower.contains("does not exist");
-
-        if is_cd_error {
-            // List available items in the working directory to help the model self-correct
-            let list_result = list_directory_for_guidance(working_dir);
-            result.push_str(&format!(
-                "\n\n[System Guidance] The path does not exist. This is NOT a container — do NOT use /workspace. \
-                 Available items in the current working directory ({}):\n{}",
-                working_dir.display().to_string().replace('\\', "/"),
-                list_result,
-            ));
-        }
-    }
-
-    ToolExecutionResult {
-        success: output.status.success(),
-        output: result,
-    }
-}
-
-/// List directory contents for terminal error guidance (max 30 entries, names only).
-fn list_directory_for_guidance(dir: &Path) -> String {
-    let mut entries: Vec<String> = Vec::new();
-    if let Ok(read_dir) = std::fs::read_dir(dir) {
-        for entry in read_dir.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let prefix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                "📁 "
-            } else {
-                "📄 "
-            };
-            entries.push(format!("{prefix}{name}"));
-            if entries.len() >= 30 {
-                entries.push("... (more items)".to_string());
-                break;
-            }
-        }
-    }
-    if entries.is_empty() {
-        "(empty directory)".to_string()
-    } else {
-        entries.join("\n")
     }
 }
 
@@ -1738,6 +1694,56 @@ async fn web_search_handler(args: Value) -> ToolExecutionResult {
     ToolExecutionResult {
         success: true,
         output,
+    }
+}
+
+// ============================================================================
+// Load Skill Handler (Tier 2 — on-demand SKILL.md loading)
+// ============================================================================
+
+fn load_skill_handler(args: Value, context: ToolExecutionContext) -> ToolExecutionResult {
+    let name = match args.get("name").and_then(Value::as_str) {
+        Some(n) => n.trim().to_string(),
+        None => {
+            return ToolExecutionResult {
+                success: false,
+                output: "Missing required parameter: name".to_string(),
+            };
+        }
+    };
+
+    if name.is_empty() {
+        return ToolExecutionResult {
+            success: false,
+            output: "Skill name cannot be empty".to_string(),
+        };
+    }
+
+    let skills_dir = match context.skills_dir.as_deref() {
+        Some(d) => std::path::Path::new(d),
+        None => {
+            return ToolExecutionResult {
+                success: false,
+                output: "Skills directory is not configured for this session".to_string(),
+            };
+        }
+    };
+
+    match crate::services::skill_fs::find_skill_by_name(skills_dir, &name) {
+        Ok(skill) => {
+            let output = format!(
+                "<skill_content name=\"{}\" display_name=\"{}\">\n{}\n</skill_content>",
+                skill.name, skill.display_name, skill.content
+            );
+            ToolExecutionResult {
+                success: true,
+                output,
+            }
+        }
+        Err(e) => ToolExecutionResult {
+            success: false,
+            output: format!("Failed to load skill '{name}': {e}"),
+        },
     }
 }
 

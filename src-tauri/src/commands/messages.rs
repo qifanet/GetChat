@@ -215,7 +215,23 @@ pub async fn complete_assistant_message(
     let msg_id = input.message_id.clone();
     let request_id = input.request_id.clone();
     let content_length = input.content_text.len();
+    let reasoning_length = input.reasoning_content.as_ref().map(|s| s.len()).unwrap_or(0);
+    let blocks_count = input.content_blocks.as_ref().map(|b| b.len()).unwrap_or(0);
+    let tool_calls_count = input.tool_calls.as_ref().map(|tc| tc.len()).unwrap_or(0);
+    let blocks_json_estimate: usize = input.content_blocks.as_ref()
+        .map(|blocks| blocks.iter().map(|b| serde_json::to_string(b).map(|s| s.len()).unwrap_or(0)).sum())
+        .unwrap_or(0);
     release_pending_model_stream_gate(&state, &request_id).await;
+    tracing::info!(
+        cmd = "complete_assistant_message",
+        msg_id = %msg_id,
+        content_length,
+        reasoning_length,
+        blocks_count,
+        blocks_json_estimate,
+        tool_calls_count,
+        "starting"
+    );
     let result = snapshot_service::complete_assistant_message(&state.db, &input).await;
     match &result {
         Ok(_) => tracing::info!(
@@ -225,6 +241,7 @@ pub async fn complete_assistant_message(
         Err(e) => tracing::warn!(
             cmd = "complete_assistant_message", msg_id = %msg_id,
             error_code = %e.code, message = %e.message, details = ?e.details,
+            content_length, reasoning_length, blocks_json_estimate, tool_calls_count,
             duration_ms = start.elapsed().as_millis() as u64, "error"
         ),
     }

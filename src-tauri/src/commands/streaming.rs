@@ -64,12 +64,14 @@ pub async fn get_enabled_tool_definitions(
 /** Build the backend-authoritative enabled tool list. Frontend input is only a hint. */
 async fn build_backend_enabled_tool_definitions(state: &State<'_, AppState>) -> Vec<ToolDefinitionDto> {
     let mut defs = state.tool_executor.definitions();
-    let disabled_servers: HashSet<String> = crate::repositories::mcp_servers::list_all(&state.db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|r| !r.enabled)
-        .map(|r| r.name)
+
+    let app_data_dir = state.app_handle.path().app_data_dir().unwrap_or_default();
+    let config_result = crate::services::mcp_config_file::load_mcp_config_file(&app_data_dir);
+    let disabled_servers: HashSet<String> = config_result
+        .servers
+        .iter()
+        .filter(|s| s.config.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false))
+        .map(|s| s.name.clone())
         .collect();
 
     let mcp_manager = state.mcp_manager.lock().await;
@@ -678,40 +680,119 @@ fn apply_deterministic_budget_trim(
         .position(|msg| msg.source_message_id.is_some())
         .unwrap_or(prompt_messages.len());
 
-    // Preserve the last 4 messages (2 turns: user + assistant) for coherence
-    let preserve_recent = 4;
-    let conversation_len = prompt_messages.len().saturating_sub(system_prefix_end);
-    let min_preserve_from_end = preserve_recent.min(conversation_len);
+    // Identify safe cut points in the conversation portion.
+    // A safe cut point is an index AFTER which we can start keeping messages
+    // without breaking tool_call → tool_result sequence integrity.
+    //
+    // Safe cuts:
+    //   1. After a `user` message
+    //   2. After an `assistant` message with NO tool_calls (text-only)
+    //   3. After the LAST tool result that completes an assistant's tool_calls
+    //      (this is critical for multi-turn tool call conversations where
+    //       almost all messages are assistant+tool pairs)
+    let conversation_messages = &prompt_messages[system_prefix_end..];
+    let mut safe_cut_indices: Vec<usize> = Vec::new();
+    let mut pending_tool_ids: Vec<String> = Vec::new();
 
-    // Calculate how many messages we need to drop from the start of conversation
+    for (i, msg) in conversation_messages.iter().enumerate() {
+        let role = msg.role.to_lowercase();
+        if role == "assistant" {
+            // Before processing a new assistant message, any previously pending
+            // tool_calls are fully answered — the cut before this assistant is safe.
+            if !pending_tool_ids.is_empty() {
+                safe_cut_indices.push(i);
+                pending_tool_ids.clear();
+            }
+            // Track new tool_calls from this assistant
+            if let Some(tcs) = msg.tool_calls.as_ref() {
+                for tc in tcs {
+                    let id = tc.id.trim().to_string();
+                    if !id.is_empty() {
+                        pending_tool_ids.push(id);
+                    }
+                }
+            } else {
+                // Text-only assistant — safe cut after it
+                safe_cut_indices.push(i + 1);
+            }
+        } else if role == "user" {
+            // Any pending tool_calls should have been answered — cut before user
+            if !pending_tool_ids.is_empty() {
+                safe_cut_indices.push(i);
+                pending_tool_ids.clear();
+            }
+            safe_cut_indices.push(i + 1); // cut AFTER this user message
+        } else if role == "tool" {
+            // Remove the matching tool_call_id from pending
+            if let Some(ref tc_id) = msg.tool_call_id {
+                let id = tc_id.trim().to_string();
+                pending_tool_ids.retain(|pending| pending != &id);
+            }
+            // If all pending tool_calls are now answered, the cut AFTER this
+            // tool message is safe (complete tool sequence).
+            if pending_tool_ids.is_empty() {
+                safe_cut_indices.push(i + 1);
+            }
+        }
+    }
+
+    if safe_cut_indices.is_empty() {
+        // No safe cut point found — fall back to preserving everything
+        tracing::warn!(
+            "apply_deterministic_budget_trim: no safe cut points found, keeping all messages"
+        );
+        return prompt_messages.to_vec();
+    }
+
+    // Preserve at least the last 6 messages (3 turns) for coherence
+    let preserve_recent = 6;
+    let min_start = conversation_messages.len().saturating_sub(preserve_recent);
+
     let tool_tokens = crate::services::token_estimator::estimate_tool_definitions_tokens(tools);
     let available_for_messages = budget.saturating_sub(tool_tokens);
+
+    // Find the earliest safe cut that brings us within budget,
+    // but never cut past min_start
+    let mut chosen_start = 0usize;
+    let mut found_valid = false;
+
+    for &cut_idx in &safe_cut_indices {
+        if cut_idx > min_start {
+            break;
+        }
+        // Estimate tokens from cut_idx to end
+        let tokens_from_here: u32 = conversation_messages[cut_idx..]
+            .iter()
+            .map(|m| crate::services::token_estimator::estimate_dto_message_tokens(m))
+            .sum();
+        if tokens_from_here <= available_for_messages {
+            chosen_start = cut_idx;
+            found_valid = true;
+            break;
+        }
+        // If the largest safe cut still exceeds budget, use the latest one before min_start
+        chosen_start = cut_idx;
+    }
+
+    if !found_valid && chosen_start == 0 {
+        // Even the last safe cut before min_start doesn't fit — use the latest
+        // safe cut that's as close to min_start as possible
+        chosen_start = safe_cut_indices
+            .iter()
+            .copied()
+            .filter(|&idx| idx <= min_start)
+            .last()
+            .unwrap_or(0);
+    }
 
     let mut result: Vec<ModelPromptMessageDto> = Vec::new();
     // Always keep system prefix
     for msg in &prompt_messages[..system_prefix_end] {
         result.push(msg.clone());
     }
-
-    // Add conversation messages from oldest to newest, dropping from the start
-    // if budget would be exceeded, but always preserving the last `min_preserve_from_end`
-    let conversation_messages = &prompt_messages[system_prefix_end..];
-    let drop_limit = conversation_messages.len().saturating_sub(min_preserve_from_end);
-    let mut accumulated_tokens: u32 = 0;
-
-    for (i, msg) in conversation_messages.iter().enumerate() {
-        let remaining_slots = conversation_messages.len().saturating_sub(i);
-        if remaining_slots <= min_preserve_from_end {
-            // Always include the last few messages
-            result.push(msg.clone());
-            continue;
-        }
-        let msg_tokens = crate::services::token_estimator::estimate_dto_message_tokens(msg);
-        if accumulated_tokens + msg_tokens <= available_for_messages || i >= drop_limit {
-            accumulated_tokens += msg_tokens;
-            result.push(msg.clone());
-        }
-        // else: skip this old message to save tokens
+    // Keep conversation messages from chosen_start
+    for msg in &conversation_messages[chosen_start..] {
+        result.push(msg.clone());
     }
 
     let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(&result, tools);
@@ -721,7 +802,9 @@ fn apply_deterministic_budget_trim(
         old_tokens = current_tokens,
         new_tokens,
         budget,
-        "apply_deterministic_budget_trim: trimmed prompt"
+        chosen_start,
+        safe_cuts = safe_cut_indices.len(),
+        "apply_deterministic_budget_trim: trimmed prompt (tool-sequence-safe)"
     );
 
     result
@@ -883,8 +966,12 @@ async fn mid_loop_compress(
                 return Ok(None);
             }
             // AI compression failed — fall back to deterministic budget trimming.
-            // Drop oldest non-system messages until the prompt fits within budget,
-            // preserving the system prefix and the most recent messages.
+            // Unlike the budget check in `apply_deterministic_budget_trim` itself
+            // (which returns early if within budget), we always run the trim here
+            // because compression was already triggered at the 60% threshold.
+            // Without this, the prompt can keep growing between 60%–100% with no
+            // effective compression, eventually overflowing and breaking tool
+            // message sequences.
             tracing::warn!(
                 error = %e.message,
                 "mid_loop_compress: AI compression failed, applying deterministic fallback"
@@ -893,10 +980,11 @@ async fn mid_loop_compress(
                 prompt_messages,
                 tools,
             );
-            if old_tokens <= effective_budget {
-                return Ok(None);
-            }
-            let trimmed = apply_deterministic_budget_trim(prompt_messages, effective_budget, tools);
+            // Trim towards 70% of effective budget to create headroom for
+            // upcoming tool call iterations.  Without this margin, each tool
+            // result immediately pushes the prompt back over 100%.
+            let target_budget = (effective_budget as f32 * 0.70) as u32;
+            let trimmed = apply_deterministic_budget_trim(prompt_messages, target_budget, tools);
             let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(
                 &trimmed,
                 tools,
@@ -1100,6 +1188,7 @@ async fn stream_final_response_without_tools(
         conversation_id: initial_request.conversation_id.clone(),
         branch_id: initial_request.branch_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
+        activated_skill: initial_request.activated_skill.clone(),
     };
 
     match model_stream_service::stream_model_response(&final_request, channel, cancel_rx).await {
@@ -1169,6 +1258,9 @@ async fn run_react_loop(
         conversation_id: conversation_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
         shell_path,
+        skills_dir: state.app_handle.path().app_data_dir().ok().map(|p| {
+            crate::services::skill_fs::skills_root_from_app_data(&p).to_string_lossy().to_string()
+        }),
     };
     let mut consecutive_tool_failures = 0u32;
 
@@ -1243,6 +1335,43 @@ async fn run_react_loop(
                 });
             }
         }
+
+        // Inject skill metadata (Tier 1) and activation hint (Tier 3)
+        if let Some(app_data) = state.app_handle.path().app_data_dir().ok() {
+            let skills_dir = crate::services::skill_fs::skills_root_from_app_data(&app_data);
+            let skills = crate::services::skill_fs::discover_skills(&skills_dir);
+
+            if !skills.is_empty() {
+                let skill_metadata = crate::services::skill_fs::build_skill_metadata_prompt(&skills);
+                if let Some(first) = prompt_messages.first_mut() {
+                    if first.role == "system" || first.role == "SYSTEM" {
+                        first.content.push_str("\n\n");
+                        first.content.push_str(&skill_metadata);
+                    } else {
+                        prompt_messages.insert(0, ModelPromptMessageDto {
+                            source_message_id: None,
+                            role: "system".to_string(),
+                            content: skill_metadata,
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                }
+            }
+
+            // Tier 3: activation hint for slash command
+            if let Some(ref skill_name) = initial_request.activated_skill {
+                let hint = crate::services::skill_fs::build_skill_activation_hint(skill_name);
+                if let Some(first) = prompt_messages.first_mut() {
+                    if first.role == "system" || first.role == "SYSTEM" {
+                        first.content.push_str("\n\n");
+                        first.content.push_str(&hint);
+                    }
+                }
+            }
+        }
     }
 
     for iteration in 0..max_iterations {
@@ -1283,9 +1412,8 @@ async fn run_react_loop(
             conversation_id: conversation_id.clone(),
             branch_id: branch_id.clone(),
             workspace_path: initial_request.workspace_path.clone(),
+            activated_skill: initial_request.activated_skill.clone(),
         };
-
-        // After the first iteration, tools are still available but model
         // may choose not to call them. We keep tools in the request so
         // the model can chain multiple tool calls across iterations.
 
@@ -1556,16 +1684,71 @@ async fn run_react_loop(
                         success: result.success,
                     });
 
-                    // Add tool result to prompt messages
+                    // Add tool result to prompt messages — immediately truncate
+                    // if the output is excessively large to prevent prompt overflow.
+                    const MAX_INLINE_TOOL_CHARS: usize = 8_000;
+                    let tool_content = if result.output.len() > MAX_INLINE_TOOL_CHARS {
+                        let truncated: String = result.output.chars().take(MAX_INLINE_TOOL_CHARS).collect();
+                        format!(
+                            "{}\n\n[... output truncated ({} chars total) ...]",
+                            truncated,
+                            result.output.len()
+                        )
+                    } else {
+                        result.output.clone()
+                    };
+
                     let tool_result_message = ModelPromptMessageDto {
                         source_message_id: None,
                         role: "tool".to_string(),
-                        content: result.output.clone(),
+                        content: tool_content.clone(),
                         reasoning_content: None,
                         tool_calls: None,
                         tool_call_id: Some(tc.id.clone()),
                         name: Some(tc.function.name.clone()),
                     };
+
+                    // Pre-append compression: predict whether adding this result
+                    // would push the prompt over the danger threshold.  If so,
+                    // compress the CURRENT prompt (without the new result) first
+                    // to create room.  This prevents overflow before it happens.
+                    let result_tokens = crate::services::token_estimator::estimate_dto_message_tokens(
+                        &tool_result_message,
+                    );
+                    let pre_append_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                        &prompt_messages,
+                        &current_tools,
+                    );
+                    let projected_tokens = pre_append_tokens.saturating_add(result_tokens);
+                    let danger_threshold = (effective_input_budget as f32 * 0.96) as u32;
+
+                    if projected_tokens > danger_threshold && effective_input_budget > 0 {
+                        tracing::info!(
+                            request_id = %request_id,
+                            iteration,
+                            pre_append_tokens,
+                            result_tokens,
+                            projected_tokens,
+                            danger_threshold,
+                            "react loop: pre-append compression triggered (tool result would exceed 96%)"
+                        );
+                        maybe_compress_react_prompt(
+                            state,
+                            &request_id,
+                            iteration,
+                            &model_id,
+                            &conversation_id,
+                            &branch_id,
+                            &mut prompt_messages,
+                            &current_tools,
+                            context_budget_tokens,
+                            effective_input_budget,
+                            compression_trigger_tokens,
+                            channel,
+                        )
+                        .await;
+                    }
+
                     prompt_messages.push(tool_result_message);
 
                     if result.success {
@@ -1683,6 +1866,7 @@ async fn run_react_loop(
         conversation_id: conversation_id.clone(),
         branch_id: branch_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
+        activated_skill: initial_request.activated_skill.clone(),
     };
 
     match model_stream_service::stream_model_response(
@@ -2100,31 +2284,6 @@ fn decode_mcp_env_from_storage(
     Ok(env)
 }
 
-fn public_mcp_env_from_storage(env_json: &str) -> HashMap<String, String> {
-    let parsed: serde_json::Value = serde_json::from_str(env_json).unwrap_or_default();
-    let Some(object) = parsed.as_object() else {
-        return HashMap::new();
-    };
-
-    let mut env = HashMap::new();
-    for (key, value) in object {
-        if value.get("kind").and_then(|v| v.as_str()) == Some("secure") {
-            env.insert(key.clone(), String::new());
-        } else if value.get("kind").and_then(|v| v.as_str()) == Some("plain") {
-            if let Some(raw) = value.get("value").and_then(|v| v.as_str()) {
-                env.insert(key.clone(), raw.to_string());
-            }
-        } else if let Some(raw) = value.as_str() {
-            if is_sensitive_env_key(key) {
-                env.insert(key.clone(), String::new());
-            } else {
-                env.insert(key.clone(), raw.to_string());
-            }
-        }
-    }
-    env
-}
-
 fn decode_mcp_headers_from_storage(
     server_name: &str,
     headers_json: &str,
@@ -2176,31 +2335,6 @@ fn decode_mcp_headers_from_storage(
         }
     }
     Ok(headers)
-}
-
-fn public_mcp_headers_from_storage(headers_json: &str) -> HashMap<String, String> {
-    let parsed: serde_json::Value = serde_json::from_str(headers_json).unwrap_or_default();
-    let Some(object) = parsed.as_object() else {
-        return HashMap::new();
-    };
-
-    let mut headers = HashMap::new();
-    for (key, value) in object {
-        if value.get("kind").and_then(|v| v.as_str()) == Some("secure") {
-            headers.insert(key.clone(), String::new());
-        } else if value.get("kind").and_then(|v| v.as_str()) == Some("plain") {
-            if let Some(raw) = value.get("value").and_then(|v| v.as_str()) {
-                headers.insert(key.clone(), raw.to_string());
-            }
-        } else if let Some(raw) = value.as_str() {
-            if is_sensitive_header_key(key) {
-                headers.insert(key.clone(), String::new());
-            } else {
-                headers.insert(key.clone(), raw.to_string());
-            }
-        }
-    }
-    headers
 }
 
 fn cleanup_mcp_env_secrets(
@@ -2408,32 +2542,82 @@ async fn restore_mcp_runtime_from_row(
 pub async fn list_mcp_servers(
     state: State<'_, AppState>,
 ) -> Result<Vec<McpServerStateDto>, AppError> {
-    let db_rows = crate::repositories::mcp_servers::list_all(&state.db)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to list MCP servers: {e}")))?;
+    let app_data_dir = state
+        .app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::db_error(&format!("Failed to resolve app data dir: {e}")))?;
 
-    let disabled_server_names: Vec<String> = db_rows
-        .iter()
-        .filter(|row| !row.enabled)
-        .map(|row| row.name.clone())
-        .collect();
+    let config_result = crate::services::mcp_config_file::load_mcp_config_file(&app_data_dir);
 
-    let mut manager = state.mcp_manager.lock().await;
-    for name in &disabled_server_names {
-        manager.remove_server(name).await;
-    }
+    let runtime_states: HashMap<String, crate::services::mcp_client::McpServerState> = {
+        let manager = state.mcp_manager.lock().await;
+        manager
+            .server_states()
+            .into_iter()
+            .map(|state| (state.name.clone(), state))
+            .collect()
+    };
 
-    let runtime_states: HashMap<String, crate::services::mcp_client::McpServerState> = manager
-        .server_states()
-        .into_iter()
-        .map(|state| (state.name.clone(), state))
-        .collect();
+    let mut result = Vec::with_capacity(config_result.servers.len());
+    for parsed in &config_result.servers {
+        let config = &parsed.config;
+        let disabled = config
+            .get("disabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-    let mut result = Vec::with_capacity(db_rows.len());
-    for row in db_rows {
-        let args: Vec<String> = serde_json::from_str(&row.args_json).unwrap_or_default();
-        let runtime_state = runtime_states.get(&row.name);
-        let status = if !row.enabled {
+        let transport_raw = config
+            .get("transport")
+            .or_else(|| config.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("stdio");
+        let transport = normalize_mcp_transport_for_storage(transport_raw).to_string();
+
+        let command = config
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let args: Vec<String> = config
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let url = config
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let env: HashMap<String, String> = config
+            .get("env")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let headers: HashMap<String, String> = config
+            .get("headers")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let runtime_state = runtime_states.get(&parsed.name);
+        let status = if disabled {
             "disabled".to_string()
         } else if let Some(state) = runtime_state {
             match &state.status {
@@ -2461,18 +2645,16 @@ pub async fn list_mcp_servers(
             })
             .unwrap_or_default();
         tools.sort_by(|a, b| a.name.cmp(&b.name));
-        let public_env = public_mcp_env_from_storage(&row.env_json);
-        let public_headers = public_mcp_headers_from_storage(&row.headers_json);
 
         result.push(McpServerStateDto {
-            enabled: row.enabled,
-            name: row.name,
-            transport: row.transport,
-            command: row.command,
+            enabled: !disabled,
+            name: parsed.name.clone(),
+            transport,
+            command,
             args,
-            env: public_env,
-            url: row.url,
-            headers: public_headers,
+            env,
+            url,
+            headers,
             status,
             tools,
         });
@@ -2644,32 +2826,37 @@ pub async fn remove_mcp_server(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<(), AppError> {
-    if let Some(row) = crate::repositories::mcp_servers::find_by_name(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to load MCP config: {e}")))?
-    {
-        cleanup_mcp_env_secrets(
-            &name,
-            &row.env_json,
-            state.key_store.as_ref(),
-            &HashSet::new(),
-        )?;
-        cleanup_mcp_header_secrets(
-            &name,
-            &row.headers_json,
-            state.key_store.as_ref(),
-            &HashSet::new(),
-        )?;
+    let app_data_dir = state
+        .app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::db_error(&format!("Failed to resolve app data dir: {e}")))?;
+
+    let raw_json = std::fs::read_to_string(
+        crate::services::mcp_config_file::mcps_json_path(&app_data_dir),
+    )
+    .map_err(|e| AppError::db_error(&format!("Failed to read mcps.json: {e}")))?;
+
+    let mut parsed: serde_json::Value = serde_json::from_str(&raw_json)
+        .map_err(|e| AppError::invalid_argument(format!("Invalid mcps.json: {e}")))?;
+
+    let server_map = crate::services::mcp_config_file::extract_server_map_mut(&mut parsed)
+        .ok_or_else(|| AppError::not_found("No server map found in mcps.json"))?;
+
+    if server_map.remove(&name).is_none() {
+        return Err(AppError::not_found(&format!("MCP server not found: {name}")));
     }
 
-    // Remove from database
-    crate::repositories::mcp_servers::delete(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to delete MCP config: {e}")))?;
+    let new_json = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| AppError::db_error(&format!("Failed to serialize mcps.json: {e}")))?;
+    crate::services::mcp_config_file::save_mcp_config_file(&app_data_dir, &new_json)
+        .map_err(|e| AppError::db_error(&format!("Failed to save mcps.json: {e}")))?;
 
     // Stop and remove from runtime
     let mut manager = state.mcp_manager.lock().await;
     manager.remove_server(&name).await;
+
+    tracing::info!(cmd = "remove_mcp_server", server = %name, "ok");
     Ok(())
 }
 
@@ -2690,55 +2877,87 @@ pub async fn set_mcp_server_enabled(
     name: String,
     enabled: bool,
 ) -> Result<bool, AppError> {
+    let app_data_dir = state
+        .app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::db_error(&format!("Failed to resolve app data dir: {e}")))?;
+
+    // Read current mcps.json
+    let raw_json = std::fs::read_to_string(
+        crate::services::mcp_config_file::mcps_json_path(&app_data_dir),
+    )
+    .map_err(|e| AppError::db_error(&format!("Failed to read mcps.json: {e}")))?;
+
+    let mut parsed: serde_json::Value = serde_json::from_str(&raw_json)
+        .map_err(|e| AppError::invalid_argument(format!("Invalid mcps.json: {e}")))?;
+
+    // Find the server entry
+    let server_obj = crate::services::mcp_config_file::extract_server_map_mut(&mut parsed)
+        .and_then(|map| map.get_mut(&name))
+        .ok_or_else(|| AppError::not_found(&format!("MCP server not found: {name}")))?;
+
     if enabled {
-        let row = crate::repositories::mcp_servers::find_by_name(&state.db, &name)
-            .await
-            .map_err(|e| AppError::db_error(&format!("Failed to load MCP config: {e}")))?
-            .ok_or_else(|| AppError::not_found(&format!("MCP server not found: {name}")))?;
-        let args: Vec<String> = serde_json::from_str(&row.args_json)
-            .map_err(|e| AppError::invalid_argument(format!("Invalid MCP args metadata: {e}")))?;
-        let env = decode_mcp_env_from_storage(&row.name, &row.env_json, state.key_store.as_ref())?;
-        let headers = decode_mcp_headers_from_storage(&row.name, &row.headers_json, state.key_store.as_ref())?;
+        server_obj.as_object_mut().map(|o| o.remove("disabled"));
+    } else {
+        server_obj.as_object_mut().map(|o| o.insert("disabled".to_string(), serde_json::Value::Bool(true)));
+    }
 
-        let mut manager = state.mcp_manager.lock().await;
-        manager
-            .add_server(
-                row.name.clone(),
-                crate::services::mcp_client::McpServerConfig {
-                    transport: row.transport.clone(),
-                    command: row.command.clone(),
-                    args,
-                    env,
-                    url: row.url.clone(),
-                    headers,
-                },
-            )
-            .await
-            .map_err(|e| AppError::invalid_argument(&e))?;
+    // Save updated file
+    let new_json = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| AppError::db_error(&format!("Failed to serialize mcps.json: {e}")))?;
+    crate::services::mcp_config_file::save_mcp_config_file(&app_data_dir, &new_json)
+        .map_err(|e| AppError::db_error(&format!("Failed to save mcps.json: {e}")))?;
 
-        let found = match crate::repositories::mcp_servers::set_enabled(&state.db, &name, true).await {
-            Ok(found) => found,
-            Err(error) => {
-                manager.remove_server(&name).await;
-                return Err(AppError::db_error(&format!(
-                    "Failed to toggle MCP server: {error}"
-                )));
+    // Reload only the affected server
+    let mut manager = state.mcp_manager.lock().await;
+    if enabled {
+        // Parse the server config from the saved JSON and start it
+        let smap = parsed.get("mcpServers")
+            .or_else(|| parsed.get("servers"))
+            .and_then(|v| v.as_object())
+            .or_else(|| parsed.as_object());
+        if let Some(smap) = smap {
+            if let Some(config_value) = smap.get(&name) {
+                let transport_raw = config_value.get("transport")
+                    .or_else(|| config_value.get("type"))
+                    .and_then(|v| v.as_str()).unwrap_or("stdio");
+                let transport = crate::services::mcp_client::normalize_mcp_transport(transport_raw);
+                let command = config_value.get("command")
+                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let args: Vec<String> = config_value.get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let url = config_value.get("url")
+                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let env = config_value.get("env")
+                    .and_then(|v| v.as_object())
+                    .map(|obj| obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect())
+                    .unwrap_or_default();
+                let headers = config_value.get("headers")
+                    .and_then(|v| v.as_object())
+                    .map(|obj| obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect())
+                    .unwrap_or_default();
+
+                let config = crate::services::mcp_client::McpServerConfig {
+                    transport, command, args, env, url, headers,
+                };
+
+                match manager.add_server(name.clone(), config).await {
+                    Ok(()) => tracing::info!(server = %name, "MCP server re-enabled"),
+                    Err(e) => tracing::warn!(server = %name, error = %e, "Failed to start re-enabled MCP server"),
+                }
             }
-        };
-        if !found {
-            manager.remove_server(&name).await;
-            return Err(AppError::not_found(&format!("MCP server not found: {name}")));
         }
     } else {
-        let found = crate::repositories::mcp_servers::set_enabled(&state.db, &name, false)
-            .await
-            .map_err(|e| AppError::db_error(&format!("Failed to toggle MCP server: {e}")))?;
-        if !found {
-            return Err(AppError::not_found(&format!("MCP server not found: {name}")));
-        }
-
-        let mut manager = state.mcp_manager.lock().await;
+        // Just stop the single server
         manager.remove_server(&name).await;
+        tracing::info!(server = %name, "MCP server disabled and stopped");
     }
 
     tracing::info!(cmd = "set_mcp_server_enabled", server = %name, enabled, "ok");
@@ -2767,6 +2986,10 @@ pub async fn get_context_status(
         up_to_message_id: up_to_message_id.clone(),
         max_tokens_budget: None,
         branch_id: Some(branch_id.clone()),
+        skills_dir: state.app_handle.path().app_data_dir().ok().map(|p| {
+            crate::services::skill_fs::skills_root_from_app_data(&p).to_string_lossy().to_string()
+        }),
+        activated_skill: None,
     };
 
     let raw_messages = crate::services::prompt_service::build_prompt_messages(&state.db, &raw_input)
@@ -2810,6 +3033,10 @@ pub async fn get_context_status(
         up_to_message_id,
         max_tokens_budget: Some(prompt_budget_tokens.min(i32::MAX as u32) as i32),
         branch_id: Some(branch_id.clone()),
+        skills_dir: state.app_handle.path().app_data_dir().ok().map(|p| {
+            crate::services::skill_fs::skills_root_from_app_data(&p).to_string_lossy().to_string()
+        }),
+        activated_skill: None,
     };
     let messages = crate::services::prompt_service::build_prompt_messages(&state.db, &budgeted_input)
         .await
@@ -2851,261 +3078,173 @@ pub async fn get_context_status(
  * Reload all persisted MCP servers from database on startup.
  * Silently skips servers that fail to connect.
  */
-pub async fn reload_mcp_servers_from_db(
+/**
+ * Reload MCP servers from mcps.json file (or migrate from SQLite on first run).
+ */
+pub async fn reload_mcp_servers_from_file(
+    app_handle: &tauri::AppHandle,
     db: &sqlx::SqlitePool,
-    key_store: &dyn crate::state::SecureKeyStore,
+    _key_store: &dyn crate::state::SecureKeyStore,
     mcp_manager: &std::sync::Arc<tokio::sync::Mutex<crate::services::mcp_client::McpManager>>,
 ) {
-    let rows = match crate::repositories::mcp_servers::list_all(db).await {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::warn!("Failed to load MCP server configs from DB: {e}");
-            return;
-        }
-    };
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .expect("Failed to resolve app data directory");
 
-    if rows.is_empty() {
+    use crate::services::mcp_config_file;
+
+    // Migration: if mcps.json doesn't exist but SQLite has servers, export first
+    let mcps_path = mcp_config_file::mcps_json_path(&app_dir);
+    if !mcps_path.exists() {
+        if let Ok(rows) = crate::repositories::mcp_servers::list_all(db).await {
+            if !rows.is_empty() {
+                let json = mcp_config_file::export_sqlite_to_mcps_json(&rows);
+                if let Err(e) = mcp_config_file::save_mcp_config_file(&app_dir, &json) {
+                    tracing::warn!("Failed to export MCP servers to mcps.json: {e}");
+                } else {
+                    tracing::info!(count = rows.len(), "Migrated MCP servers from SQLite to mcps.json");
+                }
+            }
+        }
+    }
+
+    let result = mcp_config_file::load_mcp_config_file(&app_dir);
+
+    for err in &result.parse_errors {
+        tracing::warn!("MCP config: {err}");
+    }
+
+    if result.servers.is_empty() {
         return;
     }
 
-    tracing::info!(count = rows.len(), "Reloading persisted MCP servers...");
+    tracing::info!(count = result.servers.len(), "Loading MCP servers from mcps.json...");
 
     let mut manager = mcp_manager.lock().await;
-    for row in rows {
-        if !row.enabled {
-            tracing::info!(server = %row.name, "MCP server is disabled; not reloading");
+    for server in &result.servers {
+        let config_value = &server.config;
+
+        // Extract fields from JSON value, tolerating missing/wrong types
+        let transport_raw = config_value.get("transport")
+            .or_else(|| config_value.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("stdio");
+        let transport = crate::services::mcp_client::normalize_mcp_transport(transport_raw);
+        let command = config_value.get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let args: Vec<String> = config_value.get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let url = config_value.get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let disabled = config_value.get("disabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if disabled {
+            tracing::info!(server = %server.name, "MCP server is disabled; skipping");
             continue;
         }
 
-        let args: Vec<String> = match serde_json::from_str(&row.args_json) {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::warn!(
-                    server = %row.name,
-                    error = %e,
-                    "Failed to parse args_json, skipping"
-                );
-                continue;
-            }
-        };
-        let env = match decode_mcp_env_from_storage(&row.name, &row.env_json, key_store) {
-            Ok(env) => env,
-            Err(e) => {
-                tracing::warn!(
-                    server = %row.name,
-                    error_code = %e.code,
-                    message = %e.message,
-                    "Failed to load MCP env metadata, skipping"
-                );
-                continue;
-            }
-        };
-        let headers = match decode_mcp_headers_from_storage(&row.name, &row.headers_json, key_store) {
-            Ok(headers) => headers,
-            Err(e) => {
-                tracing::warn!(
-                    server = %row.name,
-                    error_code = %e.code,
-                    message = %e.message,
-                    "Failed to load MCP HTTP header metadata, skipping"
-                );
-                continue;
-            }
-        };
+        // For env and headers, extract as plain string maps
+        // Sensitive values stored in keyring are NOT used in file mode
+        // Users should put real values directly in the JSON (or use env var references)
+        let env = config_value.get("env")
+            .and_then(|v| v.as_object())
+            .map(|obj| obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect::<HashMap<String, String>>()
+            )
+            .unwrap_or_default();
+        let headers = config_value.get("headers")
+            .and_then(|v| v.as_object())
+            .map(|obj| obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect::<HashMap<String, String>>()
+            )
+            .unwrap_or_default();
 
         let config = crate::services::mcp_client::McpServerConfig {
-            transport: row.transport.clone(),
-            command: row.command.clone(),
+            transport,
+            command,
             args,
             env,
-            url: row.url.clone(),
+            url,
             headers,
         };
 
-        match manager.add_server(row.name.clone(), config).await {
+        match manager.add_server(server.name.clone(), config.clone()).await {
             Ok(()) => {
-                tracing::info!(server = %row.name, "MCP server reloaded");
+                tracing::info!(server = %server.name, "MCP server loaded from file");
             }
             Err(e) => {
-                tracing::warn!(
-                    server = %row.name,
-                    error = %e,
-                    "Failed to reconnect MCP server"
-                );
+                tracing::warn!(server = %server.name, error = %e, "Failed to start MCP server");
             }
         }
     }
 }
 
+#[tauri::command]
+pub async fn get_mcp_config_json(
+    app_handle: tauri::AppHandle,
+) -> Result<String, AppError> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::invalid_argument(format!("Failed to resolve app data dir: {e}")))?;
+
+    use crate::services::mcp_config_file;
+    let path = mcp_config_file::mcps_json_path(&app_dir);
+
+    if !path.exists() {
+        // Return empty template
+        return Ok("{\n  \"mcpServers\": {}\n}".to_string());
+    }
+
+    std::fs::read_to_string(&path)
+        .map_err(|e| AppError::invalid_argument(format!("Failed to read mcps.json: {e}")))
+}
+
+#[tauri::command]
+pub async fn save_mcp_config_json(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    json_content: String,
+) -> Result<String, AppError> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::invalid_argument(format!("Failed to resolve app data dir: {e}")))?;
+
+    use crate::services::mcp_config_file;
+
+    mcp_config_file::save_mcp_config_file(&app_dir, &json_content)
+        .map_err(|e| AppError::invalid_argument(e))?;
+
+    // Reload all servers from the updated file
+    reload_mcp_servers_from_file(&app_handle, &state.db, state.key_store.as_ref(), &state.mcp_manager).await;
+
+    // Return validation info
+    let result = mcp_config_file::load_mcp_config_file(&app_dir);
+    let mut info = Vec::new();
+    for server in &result.servers {
+        info.push(format!("✓ {}", server.name));
+    }
+    for err in &result.parse_errors {
+        info.push(format!("⚠ {err}"));
+    }
+    Ok(info.join("\n"))
+}
+
 // ============================================================================
-// Skills Commands
+// Skills & Slash Commands
 // ============================================================================
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillDto {
-    pub id: String,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub trigger_type: String,
-    pub prompt_template: String,
-    pub variables_json: String,
-    pub bound_tools_json: String,
-    pub scope: String,
-    pub source_type: String,
-    pub enabled: bool,
-}
-
-impl From<crate::repositories::skills::SkillRow> for SkillDto {
-    fn from(row: crate::repositories::skills::SkillRow) -> Self {
-        Self {
-            id: row.id,
-            name: row.name,
-            display_name: row.display_name,
-            description: row.description,
-            trigger_type: row.trigger_type,
-            prompt_template: row.prompt_template,
-            variables_json: row.variables_json,
-            bound_tools_json: row.bound_tools,
-            scope: row.scope,
-            source_type: row.source_type,
-            enabled: row.enabled,
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateSkillInput {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub trigger_type: String,
-    pub prompt_template: String,
-    #[serde(default)]
-    pub variables_json: String,
-    #[serde(default)]
-    pub bound_tools_json: String,
-}
-
-#[tauri::command]
-pub async fn list_skills(
-    state: State<'_, AppState>,
-) -> Result<Vec<SkillDto>, AppError> {
-    let rows = crate::repositories::skills::list_all(&state.db)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to list skills: {e}")))?;
-    Ok(rows.into_iter().map(SkillDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn create_skill(
-    state: State<'_, AppState>,
-    input: CreateSkillInput,
-) -> Result<SkillDto, AppError> {
-    let name = input.name.trim().to_string();
-    if name.is_empty() {
-        return Err(AppError::invalid_argument("Skill name cannot be empty"));
-    }
-    if input.prompt_template.trim().is_empty() {
-        return Err(AppError::invalid_argument("Prompt template cannot be empty"));
-    }
-    let trigger = if ["ALWAYS", "SLASH", "MANUAL"].contains(&input.trigger_type.as_str()) {
-        input.trigger_type.clone()
-    } else {
-        "MANUAL".to_string()
-    };
-
-    crate::repositories::skills::upsert(
-        &state.db,
-        &name,
-        &input.display_name,
-        &input.description,
-        &trigger,
-        &input.prompt_template,
-        &input.variables_json,
-        &input.bound_tools_json,
-        "GLOBAL",
-        "USER",
-        true,
-        "",
-    )
-    .await
-    .map_err(|e| AppError::db_error(&format!("Failed to save skill: {e}")))?;
-
-    let row = crate::repositories::skills::get_by_name(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to read skill: {e}")))?
-        .ok_or_else(|| AppError::not_found("Skill not found after save"))?;
-
-    Ok(SkillDto::from(row))
-}
-
-#[tauri::command]
-pub async fn update_skill(
-    state: State<'_, AppState>,
-    input: CreateSkillInput,
-) -> Result<SkillDto, AppError> {
-    let name = input.name.trim().to_string();
-    let existing = crate::repositories::skills::get_by_name(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to find skill: {e}")))?
-        .ok_or_else(|| AppError::not_found(&format!("Skill '{name}' not found")))?;
-
-    let trigger = if ["ALWAYS", "SLASH", "MANUAL"].contains(&input.trigger_type.as_str()) {
-        input.trigger_type.clone()
-    } else {
-        existing.trigger_type.clone()
-    };
-
-    crate::repositories::skills::upsert(
-        &state.db,
-        &name,
-        &input.display_name,
-        &input.description,
-        &trigger,
-        &input.prompt_template,
-        &input.variables_json,
-        &input.bound_tools_json,
-        &existing.scope,
-        &existing.source_type,
-        existing.enabled,
-        &existing.local_path,
-    )
-    .await
-    .map_err(|e| AppError::db_error(&format!("Failed to update skill: {e}")))?;
-
-    let row = crate::repositories::skills::get_by_name(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to read skill: {e}")))?
-        .ok_or_else(|| AppError::not_found("Skill not found after update"))?;
-
-    Ok(SkillDto::from(row))
-}
-
-#[tauri::command]
-pub async fn delete_skill(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), AppError> {
-    crate::repositories::skills::delete(&state.db, &id)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to delete skill: {e}")))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn set_skill_enabled(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<bool, AppError> {
-    crate::repositories::skills::set_enabled(&state.db, &id, enabled)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to toggle skill: {e}")))?;
-    Ok(true)
-}
 
 /// Return all skills and MCP prompts available for slash commands.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -3119,26 +3258,27 @@ pub struct SlashItemDto {
     pub server_name: Option<String>,
 }
 
+/// List slash items from filesystem skills + MCP prompts.
 #[tauri::command]
 pub async fn list_slash_items(
     state: State<'_, AppState>,
 ) -> Result<Vec<SlashItemDto>, AppError> {
     let mut items = Vec::new();
 
-    // Skills from DB
-    let skills = crate::repositories::skills::list_enabled_slash(&state.db)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to list slash skills: {e}")))?;
-
-    for skill in skills {
-        items.push(SlashItemDto {
-            item_type: "skill".to_string(),
-            name: skill.name,
-            display_name: skill.display_name,
-            description: skill.description,
-            arguments_json: skill.variables_json,
-            server_name: None,
-        });
+    // Skills from filesystem
+    if let Ok(app_data) = state.app_handle.path().app_data_dir() {
+        let skills_dir = crate::services::skill_fs::skills_root_from_app_data(&app_data);
+        let skills = crate::services::skill_fs::discover_skills(&skills_dir);
+        for skill in skills {
+            items.push(SlashItemDto {
+                item_type: "skill".to_string(),
+                name: skill.name,
+                display_name: skill.display_name,
+                description: skill.description,
+                arguments_json: "[]".to_string(),
+                server_name: None,
+            });
+        }
     }
 
     // MCP prompts from connected servers
@@ -3160,22 +3300,6 @@ pub async fn list_slash_items(
     Ok(items)
 }
 
-/// Execute a skill by name, rendering the template with provided arguments.
-#[tauri::command]
-pub async fn execute_skill(
-    state: State<'_, AppState>,
-    name: String,
-    arguments_json: String,
-) -> Result<String, AppError> {
-    let row = crate::repositories::skills::get_by_name(&state.db, &name)
-        .await
-        .map_err(|e| AppError::db_error(&format!("Failed to find skill: {e}")))?
-        .ok_or_else(|| AppError::not_found(&format!("Skill '{name}' not found")))?;
-
-    let rendered = render_template(&row.prompt_template, &arguments_json);
-    Ok(rendered)
-}
-
 /// Execute an MCP prompt by server name + prompt name.
 #[tauri::command]
 pub async fn execute_mcp_prompt(
@@ -3193,7 +3317,6 @@ pub async fn execute_mcp_prompt(
         .await
         .map_err(|e| AppError::invalid_argument(&e))?;
 
-    // Concatenate all message texts into a single prompt
     let texts: Vec<String> = messages
         .iter()
         .filter_map(|m| match &m.content {
@@ -3204,398 +3327,20 @@ pub async fn execute_mcp_prompt(
     Ok(texts.join("\n\n"))
 }
 
-/// Resolve the skills directory path under app data.
-fn skills_dir(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
-        .expect("Failed to resolve app data directory");
-    app_dir.join("skills")
-}
-
+/// Return (and create if needed) the skills directory path under app data.
 #[tauri::command]
 pub async fn get_skills_directory(state: State<'_, AppState>) -> Result<String, AppError> {
-    let dir = skills_dir(&state.app_handle);
+    let app_data = state.app_handle.path().app_data_dir()
+        .map_err(|e| AppError::invalid_argument(&format!("Failed to resolve app data dir: {e}")))?;
+    let dir = crate::services::skill_fs::skills_root_from_app_data(&app_data);
     std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::db_error(&format!("Failed to create skills dir: {e}")))?;
     Ok(dir.to_string_lossy().to_string())
 }
 
-#[tauri::command]
-pub async fn import_skill(
-    state: State<'_, AppState>,
-    source_path: String,
-) -> Result<(), AppError> {
-    let source = std::path::Path::new(&source_path);
-    if !source.is_dir() {
-        return Err(AppError::invalid_argument("Source path is not a directory"));
-    }
-
-    let import_data = read_standard_skill_dir(source)?;
-
-    let dest_dir = skills_dir(&state.app_handle).join(&import_data.name);
-    if dest_dir.exists() {
-        return Err(AppError::conflict(&format!(
-            "Skill '{}' already exists",
-            import_data.name
-        )));
-    }
-
-    copy_dir_recursive(source, &dest_dir)?;
-
-    // Keep a local app metadata file for refresh/rebuild while preserving the
-    // standard SKILL.md as the source of prompt instructions.
-    let dest_skill_json = dest_dir.join("skill.json");
-    if !dest_skill_json.exists() {
-        if let Err(error) = std::fs::write(&dest_skill_json, import_data.skill_json.to_string()) {
-            let _ = std::fs::remove_dir_all(&dest_dir);
-            return Err(AppError::db_error(&format!(
-                "Failed to write skill.json: {error}"
-            )));
-        }
-    }
-
-    if let Err(error) = crate::repositories::skills::upsert(
-        &state.db,
-        &import_data.name,
-        &import_data.display_name,
-        &import_data.description,
-        &import_data.trigger_type,
-        &import_data.prompt_template,
-        &import_data.variables_json,
-        &import_data.bound_tools_json,
-        &import_data.scope,
-        &import_data.source_type,
-        true,
-        &dest_dir.to_string_lossy(),
-    )
-    .await
-    {
-        let _ = std::fs::remove_dir_all(&dest_dir);
-        return Err(AppError::db_error(&format!(
-            "Failed to persist skill: {error}"
-        )));
-    }
-
-    tracing::info!(cmd = "import_skill", name = %import_data.name, "ok");
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn refresh_skills_from_disk(state: State<'_, AppState>) -> Result<(), AppError> {
-    let dir = skills_dir(&state.app_handle);
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    let entries = std::fs::read_dir(&dir)
-        .map_err(|e| AppError::db_error(&format!("Failed to read skills dir: {e}")))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let skill_data = match read_skill_dir_metadata(&path) {
-            Ok(data) => data,
-            Err(error) => {
-                tracing::warn!(
-                    cmd = "refresh_skills_from_disk",
-                    path = %path.display(),
-                    error = %error,
-                    "skip_invalid_skill"
-                );
-                continue;
-            }
-        };
-
-        crate::repositories::skills::upsert(
-            &state.db,
-            &skill_data.name,
-            &skill_data.display_name,
-            &skill_data.description,
-            &skill_data.trigger_type,
-            &skill_data.prompt_template,
-            &skill_data.variables_json,
-            &skill_data.bound_tools_json,
-            &skill_data.scope,
-            &skill_data.source_type,
-            true,
-            &path.to_string_lossy(),
-        )
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("Failed to sync skill '{}': {}", skill_data.name, e);
-        });
-    }
-
-    tracing::info!(cmd = "refresh_skills_from_disk", "ok");
-    Ok(())
-}
-
-/// Recursively copy a directory.
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), AppError> {
-    std::fs::create_dir_all(dst)
-        .map_err(|e| AppError::db_error(&format!("Failed to create directory: {e}")))?;
-
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| AppError::db_error(&format!("Failed to read directory: {e}")))?
-    {
-        let entry = entry.map_err(|e| AppError::db_error(&format!("Dir entry error: {e}")))?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)
-                .map_err(|e| AppError::db_error(&format!("Failed to copy file: {e}")))?;
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct StandardSkillImportData {
-    name: String,
-    display_name: String,
-    description: String,
-    trigger_type: String,
-    prompt_template: String,
-    variables_json: String,
-    bound_tools_json: String,
-    scope: String,
-    source_type: String,
-    skill_json: serde_json::Value,
-}
-
-fn read_standard_skill_dir(path: &std::path::Path) -> Result<StandardSkillImportData, AppError> {
-    if !path.join("SKILL.md").is_file() {
-        return Err(AppError::invalid_argument(
-            "Source directory must contain SKILL.md",
-        ));
-    }
-    read_skill_dir_metadata(path)
-}
-
-fn read_skill_dir_metadata(path: &std::path::Path) -> Result<StandardSkillImportData, AppError> {
-    let skill_md_path = path.join("SKILL.md");
-    let skill_md = std::fs::read_to_string(&skill_md_path)
-        .map_err(|e| AppError::db_error(&format!("Failed to read SKILL.md: {e}")))?;
-    let (frontmatter, body) = parse_skill_markdown(&skill_md)?;
-    let frontmatter_json = parse_skill_frontmatter(frontmatter)?;
-
-    let directory_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unnamed-skill");
-    let raw_name = frontmatter_json
-        .get("name")
-        .and_then(|value| value.as_str())
-        .unwrap_or(directory_name)
-        .trim();
-    let name = normalize_skill_name(raw_name)?;
-    let description = frontmatter_json
-        .get("description")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| first_markdown_paragraph(body));
-    let display_name = frontmatter_json
-        .get("displayName")
-        .or_else(|| frontmatter_json.get("display_name"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| name.clone());
-    let user_invocable = frontmatter_json
-        .get("user-invocable")
-        .or_else(|| frontmatter_json.get("user_invocable"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
-    let disable_model_invocation = frontmatter_json
-        .get("disable-model-invocation")
-        .or_else(|| frontmatter_json.get("disable_model_invocation"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let trigger_type = if !user_invocable {
-        "MANUAL"
-    } else if disable_model_invocation {
-        "SLASH"
-    } else {
-        "SLASH"
-    }
-    .to_string();
-    let bound_tools = frontmatter_json
-        .get("allowed-tools")
-        .or_else(|| frontmatter_json.get("allowed_tools"))
-        .map(parse_skill_list_value)
-        .unwrap_or_else(|| serde_json::json!([]));
-    let variables = frontmatter_json
-        .get("arguments")
-        .map(parse_skill_list_value)
-        .unwrap_or_else(|| serde_json::json!([]));
-    let skill_json = serde_json::json!({
-        "name": name,
-        "displayName": display_name,
-        "description": description,
-        "triggerType": trigger_type,
-        "variables": variables,
-        "boundTools": bound_tools,
-        "scope": "GLOBAL",
-        "sourceType": "USER",
-    });
-
-    Ok(StandardSkillImportData {
-        name,
-        display_name,
-        description,
-        trigger_type,
-        prompt_template: body.trim().to_string(),
-        variables_json: variables.to_string(),
-        bound_tools_json: bound_tools.to_string(),
-        scope: "GLOBAL".to_string(),
-        source_type: "USER".to_string(),
-        skill_json,
-    })
-}
-
-fn parse_skill_markdown(content: &str) -> Result<(&str, &str), AppError> {
-    let trimmed = content.strip_prefix("---").ok_or_else(|| {
-        AppError::invalid_argument("SKILL.md must start with YAML frontmatter")
-    })?;
-    let trimmed = trimmed
-        .strip_prefix("\r\n")
-        .or_else(|| trimmed.strip_prefix('\n'))
-        .unwrap_or(trimmed);
-    let Some(end_index) = trimmed.find("\n---") else {
-        return Err(AppError::invalid_argument(
-            "SKILL.md frontmatter must be closed with ---",
-        ));
-    };
-    let frontmatter = &trimmed[..end_index];
-    let after_marker = &trimmed[end_index + "\n---".len()..];
-    let body = after_marker
-        .strip_prefix("\r\n")
-        .or_else(|| after_marker.strip_prefix('\n'))
-        .unwrap_or(after_marker);
-    Ok((frontmatter, body))
-}
-
-fn parse_skill_frontmatter(
-    frontmatter: &str,
-) -> Result<serde_json::Map<String, serde_json::Value>, AppError> {
-    let yaml_value: serde_yaml::Value = serde_yaml::from_str(frontmatter).map_err(|error| {
-        AppError::invalid_argument(&format!("Invalid YAML in SKILL.md frontmatter: {error}"))
-    })?;
-    let json_value = serde_json::to_value(yaml_value).map_err(|error| {
-        AppError::invalid_argument(&format!("Invalid SKILL.md frontmatter value: {error}"))
-    })?;
-    json_value.as_object().cloned().ok_or_else(|| {
-        AppError::invalid_argument("SKILL.md frontmatter must be a YAML object")
-    })
-}
-
-fn parse_skill_list_value(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(items) => serde_json::Value::Array(items.clone()),
-        serde_json::Value::String(text) => serde_json::Value::Array(
-            text.split(|ch: char| ch.is_whitespace() || ch == ',')
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(|item| serde_json::Value::String(item.to_string()))
-                .collect(),
-        ),
-        _ => serde_json::json!([]),
-    }
-}
-
-fn normalize_skill_name(raw: &str) -> Result<String, AppError> {
-    let normalized = raw
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' {
-                ch
-            } else if ch == '_' || ch.is_whitespace() {
-                '-'
-            } else {
-                '\0'
-            }
-        })
-        .filter(|ch| *ch != '\0')
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-    if normalized.is_empty() || normalized.len() > 64 {
-        return Err(AppError::invalid_argument(
-            "SKILL.md frontmatter name must be 1-64 lowercase letters, numbers, or hyphens",
-        ));
-    }
-    Ok(normalized)
-}
-
-fn first_markdown_paragraph(body: &str) -> String {
-    body.split("\n\n")
-        .map(str::trim)
-        .find(|paragraph| !paragraph.is_empty() && !paragraph.starts_with('#'))
-        .unwrap_or("")
-        .chars()
-        .take(512)
-        .collect()
-}
-
-#[cfg(test)]
-mod skill_import_tests {
-    use super::read_standard_skill_dir;
-    use std::fs;
-
-    #[test]
-    fn reads_standard_skill_md_metadata() {
-        let dir = std::env::temp_dir().join(format!(
-            "getchat_skill_import_{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).expect("create temp skill dir");
-        fs::write(
-            dir.join("SKILL.md"),
-            "---\nname: test-skill\ndescription: Test skill import.\nallowed-tools:\n  - Read\n  - Grep\narguments: topic language\n---\n\nFollow the workflow.\n",
-        )
-        .expect("write SKILL.md");
-
-        let data = read_standard_skill_dir(&dir).expect("read standard skill");
-
-        assert_eq!(data.name, "test-skill");
-        assert_eq!(data.display_name, "test-skill");
-        assert_eq!(data.description, "Test skill import.");
-        assert_eq!(data.trigger_type, "SLASH");
-        assert_eq!(data.variables_json, "[\"topic\",\"language\"]");
-        assert_eq!(data.bound_tools_json, "[\"Read\",\"Grep\"]");
-        assert!(data.prompt_template.contains("Follow the workflow."));
-        assert!(!data.prompt_template.contains("name: test-skill"));
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn rejects_directory_without_skill_md() {
-        let dir = std::env::temp_dir().join(format!(
-            "getchat_skill_import_missing_{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).expect("create temp skill dir");
-
-        let error = read_standard_skill_dir(&dir).expect_err("SKILL.md is required");
-        assert!(error.to_string().contains("SKILL.md"));
-
-        let _ = fs::remove_dir_all(dir);
-    }
-}
+// ============================================================================
+// Context Compression
+// ============================================================================
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3661,23 +3406,4 @@ fn is_expected_compression_noop(error: &AppError) -> bool {
                 | "Not enough messages to compress"
                 | "Branch has no messages"
         )
-}
-
-/// Render a skill template by replacing {{variable}} placeholders.
-fn render_template(template: &str, arguments_json: &str) -> String {
-    let args: serde_json::Value =
-        serde_json::from_str(arguments_json).unwrap_or(serde_json::json!({}));
-
-    let mut result = template.to_string();
-    if let Some(obj) = args.as_object() {
-        for (key, value) in obj {
-            let placeholder = format!("{{{{{}}}}}", key);
-            let replacement = match value {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            result = result.replace(&placeholder, &replacement);
-        }
-    }
-    result
 }

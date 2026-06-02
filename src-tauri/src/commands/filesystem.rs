@@ -137,60 +137,62 @@ pub async fn list_directory_entries(
         return Err(AppError::invalid_argument("Path is not a directory"));
     }
 
-    let mut entries = Vec::new();
-    let mut read_dir = std::fs::read_dir(&resolved)
-        .map_err(|e| AppError::db_error(&format!("Cannot read directory: {e}")))?;
+    tokio::task::spawn_blocking(move || {
+        let mut entries = Vec::new();
+        let mut read_dir = std::fs::read_dir(&resolved)
+            .map_err(|e| AppError::db_error(&format!("Cannot read directory: {e}")))?;
 
-    while let Some(entry) = read_dir
-        .next()
-        .transpose()
-        .map_err(|e| AppError::db_error(&format!("Cannot read entry: {e}")))?
-    {
-        let name = entry
-            .file_name()
-            .to_str()
-            .unwrap_or("(invalid)")
-            .to_string();
+        while let Some(entry) = read_dir
+            .next()
+            .transpose()
+            .map_err(|e| AppError::db_error(&format!("Cannot read entry: {e}")))?
+        {
+            let name = entry
+                .file_name()
+                .to_str()
+                .unwrap_or("(invalid)")
+                .to_string();
 
-        // Skip hidden files/dirs (starting with .)
-        if name.starts_with('.') {
-            continue;
-        }
+            if name.starts_with('.') {
+                continue;
+            }
 
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => match std::fs::metadata(entry.path()) {
+            let metadata = match entry.metadata() {
                 Ok(m) => m,
-                Err(_) => continue,
-            },
-        };
+                Err(_) => match std::fs::metadata(entry.path()) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                },
+            };
 
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
 
-        entries.push(DirectoryEntryDto {
-            path: entry.path().to_str().unwrap_or("").to_string(),
-            name,
-            is_dir: metadata.is_dir(),
-            size: metadata.len(),
-            modified,
-        });
-    }
-
-    // Sort: directories first, then files, alphabetically within each group
-    entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            entries.push(DirectoryEntryDto {
+                path: entry.path().to_str().unwrap_or("").to_string(),
+                name,
+                is_dir: metadata.is_dir(),
+                size: metadata.len(),
+                modified,
+            });
         }
-    });
 
-    Ok(entries)
+        entries.sort_by(|a, b| {
+            match (a.is_dir, b.is_dir) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            }
+        });
+
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| AppError::db_error(&format!("Blocking task failed: {e}")))?
 }
 
 /// Check if bytes appear to be binary (contain null bytes in the first 8 KB).
@@ -246,80 +248,81 @@ pub async fn read_file_preview(
         return Err(AppError::invalid_argument("Path is not a file"));
     }
 
-    let metadata = std::fs::metadata(&resolved)
-        .map_err(|e| AppError::db_error(&format!("Cannot read file metadata: {e}")))?;
-    let file_size = metadata.len();
+    let limit = max_lines.unwrap_or(500);
 
-    // Fast path: known binary extension → skip reading content
-    if is_known_binary_extension(&resolved) {
-        return Ok(FilePreviewDto {
-            path: resolved.to_str().unwrap_or("").to_string(),
-            content: String::new(),
-            total_lines: 0,
-            truncated: false,
-            language: infer_language(&resolved),
-            is_binary: true,
-            file_size,
-        });
-    }
+    tokio::task::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&resolved)
+            .map_err(|e| AppError::db_error(&format!("Cannot read file metadata: {e}")))?;
+        let file_size = metadata.len();
 
-    // Enforce maximum file size to prevent OOM on large files
-    const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024; // 4 MB
-    if file_size > MAX_PREVIEW_BYTES {
-        return Ok(FilePreviewDto {
+        if is_known_binary_extension(&resolved) {
+            return Ok(FilePreviewDto {
+                path: resolved.to_str().unwrap_or("").to_string(),
+                content: String::new(),
+                total_lines: 0,
+                truncated: false,
+                language: infer_language(&resolved),
+                is_binary: true,
+                file_size,
+            });
+        }
+
+        const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
+        if file_size > MAX_PREVIEW_BYTES {
+            return Ok(FilePreviewDto {
+                path: resolved.to_str().unwrap_or("").to_string(),
+                content: format!(
+                    "File too large to preview ({}). Maximum preview size is {}.",
+                    format_file_size(file_size),
+                    format_file_size(MAX_PREVIEW_BYTES),
+                ),
+                total_lines: 0,
+                truncated: true,
+                language: infer_language(&resolved),
+                is_binary: false,
+                file_size,
+            });
+        }
+
+        let raw_bytes = std::fs::read(&resolved)
+            .map_err(|e| AppError::db_error(&format!("Cannot read file: {e}")))?;
+
+        if is_likely_binary(&raw_bytes) {
+            return Ok(FilePreviewDto {
+                path: resolved.to_str().unwrap_or("").to_string(),
+                content: String::new(),
+                total_lines: 0,
+                truncated: false,
+                language: infer_language(&resolved),
+                is_binary: true,
+                file_size,
+            });
+        }
+
+        let content = String::from_utf8(raw_bytes)
+            .map_err(|e| AppError::db_error(&format!("Cannot decode file as UTF-8: {e}")))?;
+
+        let total_lines = content.lines().count();
+        let truncated = total_lines > limit;
+
+        let display_content = if truncated {
+            content.lines().take(limit).collect::<Vec<_>>().join("\n")
+        } else {
+            content
+        };
+
+        Ok(FilePreviewDto {
             path: resolved.to_str().unwrap_or("").to_string(),
-            content: format!(
-                "File too large to preview ({}). Maximum preview size is {}.",
-                format_file_size(file_size),
-                format_file_size(MAX_PREVIEW_BYTES),
-            ),
-            total_lines: 0,
-            truncated: true,
+            content: display_content,
+            total_lines,
+            truncated,
             language: infer_language(&resolved),
             is_binary: false,
             file_size,
-        });
-    }
-
-    // Read raw bytes first for binary detection
-    let raw_bytes = std::fs::read(&resolved)
-        .map_err(|e| AppError::db_error(&format!("Cannot read file: {e}")))?;
-
-    if is_likely_binary(&raw_bytes) {
-        return Ok(FilePreviewDto {
-            path: resolved.to_str().unwrap_or("").to_string(),
-            content: String::new(),
-            total_lines: 0,
-            truncated: false,
-            language: infer_language(&resolved),
-            is_binary: true,
-            file_size,
-        });
-    }
-
-    // Text file: decode as UTF-8
-    let content = String::from_utf8(raw_bytes)
-        .map_err(|e| AppError::db_error(&format!("Cannot decode file as UTF-8: {e}")))?;
-
-    let limit = max_lines.unwrap_or(500);
-    let total_lines = content.lines().count();
-    let truncated = total_lines > limit;
-
-    let display_content = if truncated {
-        content.lines().take(limit).collect::<Vec<_>>().join("\n")
-    } else {
-        content
-    };
-
-    Ok(FilePreviewDto {
-        path: resolved.to_str().unwrap_or("").to_string(),
-        content: display_content,
-        total_lines,
-        truncated,
-        language: infer_language(&resolved),
-        is_binary: false,
-        file_size,
+        })
     })
+    .await
+    .map_err(|e| AppError::db_error(&format!("Blocking task failed: {e}")))?
 }
 
 /// Open a path in the system file manager (Finder / Explorer / etc.).

@@ -151,7 +151,7 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
   return (
     <div
       className={`group rounded-[22px] px-3 py-3 transition-colors ${
-        isCurrent ? "bg-white shadow-ring" : "bg-white/72 hover:bg-white"
+        isCurrent ? "bg-miro-card shadow-ring" : "bg-miro-card/72 hover:bg-miro-card"
       }`}
       role="button"
       tabIndex={0}
@@ -224,7 +224,7 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
               </div>
             </>
           )}
-          {error ? <p className="mt-2 text-[11px] leading-5 text-red-600">{error}</p> : null}
+          {error ? <p className="mt-2 text-[11px] leading-5 text-miro-red">{error}</p> : null}
         </div>
         {!isRenaming ? (
           <div

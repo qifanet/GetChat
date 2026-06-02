@@ -96,31 +96,4 @@ where
     Ok(())
 }
 
-/** Delete an MCP server configuration by name. */
-pub async fn delete<'e, E>(executor: E, name: &str) -> sqlx::Result<()>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    sqlx::query("DELETE FROM mcp_servers WHERE name = ?")
-        .bind(name)
-        .execute(executor)
-        .await?;
 
-    Ok(())
-}
-
-/** Toggle the enabled state of an MCP server. Returns false if not found. */
-pub async fn set_enabled<'e, E>(executor: E, name: &str, enabled: bool) -> sqlx::Result<bool>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let result = sqlx::query(
-        "UPDATE mcp_servers SET enabled = ?, updated_at = unixepoch() WHERE name = ?",
-    )
-    .bind(enabled)
-    .bind(name)
-    .execute(executor)
-    .await?;
-
-    Ok(result.rows_affected() > 0)
-}

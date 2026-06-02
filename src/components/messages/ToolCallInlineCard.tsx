@@ -46,10 +46,10 @@ export const ToolCallInlineCard = memo(function ToolCallInlineCard({
   }
 
   return (
-    <div className="my-1.5 rounded-lg border border-miro-border/20 bg-white/60 text-sm">
+    <div className="my-1.5 rounded-lg border border-miro-border/20 bg-miro-card/60 text-sm">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/45"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-miro-card/45"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? (
@@ -63,11 +63,11 @@ export const ToolCallInlineCard = memo(function ToolCallInlineCard({
         </code>
 
         {isPending ? (
-          <span className="app-status-pill border-amber-300/40 bg-amber-50/70 text-amber-600">
+          <span className="app-status-pill border-miro-amber-light/40 bg-miro-amber-light/70 text-miro-amber">
             {t("toolCall.running")}
           </span>
         ) : isSuccess ? (
-          <IconCheck size={14} className="shrink-0 text-emerald-500" />
+          <IconCheck size={14} className="shrink-0 text-miro-green" />
         ) : (
           <IconX size={14} className="shrink-0 text-miro-red" />
         )}

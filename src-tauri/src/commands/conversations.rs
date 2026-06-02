@@ -333,3 +333,32 @@ pub async fn read_todo_items(conversation_id: Option<String>) -> Vec<TodoItemDto
         status: t.status,
     }).collect()
 }
+
+#[tauri::command]
+pub async fn import_conversations(
+    state: State<'_, AppState>,
+    input: crate::services::import_service::ImportInput,
+) -> Result<crate::services::import_service::ImportResult, AppError> {
+    let start = std::time::Instant::now();
+    let format = input.format.clone();
+    let result = crate::services::import_service::import_conversations(&state.db, &input).await;
+    match &result {
+        Ok(r) => tracing::info!(
+            cmd = "import_conversations",
+            format = %format,
+            imported = r.imported_count,
+            skipped = r.skipped_count,
+            errors = r.errors.len(),
+            duration_ms = start.elapsed().as_millis() as u64,
+            "ok"
+        ),
+        Err(e) => tracing::warn!(
+            cmd = "import_conversations",
+            format = %format,
+            error = %e.message,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "error"
+        ),
+    }
+    result
+}
