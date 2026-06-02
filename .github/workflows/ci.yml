@@ -39,9 +39,9 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install Tauri CLI dependencies
-        run: |
-          cargo install tauri-cli --locked 2>$null
+      - name: Generate Cargo.lock
+        working-directory: src-tauri
+        run: cargo generate-lockfile
 
       - name: Cargo check
         working-directory: src-tauri

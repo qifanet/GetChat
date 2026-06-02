@@ -126,11 +126,16 @@ pub fn save_mcp_config_file(app_data_dir: &PathBuf, json_content: &str) -> Resul
             .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
     }
 
-    // Write atomically: write to temp file, then rename
+    // Write atomically: write to temp file, then replace
     let temp_path = path.with_extension("json.tmp");
     std::fs::write(&temp_path, json_content)
         .map_err(|e| format!("Failed to write {}: {}", temp_path.display(), e))?;
 
+    // On Windows, rename fails if destination already exists — remove it first.
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to remove old {}: {}", path.display(), e))?;
+    }
     std::fs::rename(&temp_path, &path)
         .map_err(|e| format!("Failed to rename {} -> {}: {}", temp_path.display(), path.display(), e))?;
 

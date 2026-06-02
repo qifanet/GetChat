@@ -326,6 +326,13 @@ async fn import_getchat(pool: &SqlitePool, json_content: &str) -> Result<ImportR
         let conv_title = snapshot["summary"]["title"].as_str().unwrap_or("Imported");
         let conv_id = uuid::Uuid::new_v4().to_string();
 
+        // Resolve the mainline head from the exported branches array
+        let exported_head_id = snapshot["branches"]
+            .as_array()
+            .and_then(|arr| arr.iter().find(|b| b["isMainline"].as_bool() == Some(true)))
+            .and_then(|b| b["headMessageId"].as_str().unwrap_or("").to_string().into())
+            .filter(|s| !s.is_empty());
+
         let messages = match snapshot["messages"].as_array() {
             Some(m) => m,
             None => {
@@ -341,16 +348,35 @@ async fn import_getchat(pool: &SqlitePool, json_content: &str) -> Result<ImportR
             continue;
         }
 
+        // Topological sort: messages may arrive in any order (Object.values is unordered).
+        // We must ensure every message is inserted after its parent.
+        let sorted_indices = topological_sort_messages(messages);
+
         let mut tx = pool.begin().await.map_err(AppError::from)?;
 
+        // Use USER_SET for imported conversations that already carry a title
+        let title_source = if snapshot["summary"]["title"].as_str().map_or(false, |t| !t.is_empty() && t != "Imported") {
+            "USER_SET"
+        } else {
+            "DEFAULT"
+        };
         crate::repositories::conversations::insert(&mut *tx, &conv_id, conv_title, ts)
             .await
             .map_err(AppError::from)?;
+        // Set title_source separately since insert() defaults to 'DEFAULT'
+        if title_source == "USER_SET" {
+            sqlx::query("UPDATE conversations SET title_source = 'USER_SET' WHERE id = ?")
+                .bind(&conv_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(AppError::from)?;
+        }
 
         let mut msg_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let mut head_id: Option<String> = None;
+        let mut last_inserted_id: Option<String> = None;
 
-        for (idx, msg) in messages.iter().enumerate() {
+        for (depth, &idx) in sorted_indices.iter().enumerate() {
+            let msg = &messages[idx];
             let old_id = msg["id"].as_str().unwrap_or("");
             let new_id = uuid::Uuid::new_v4().to_string();
             let role = msg["role"].as_str().unwrap_or("USER");
@@ -367,18 +393,24 @@ async fn import_getchat(pool: &SqlitePool, json_content: &str) -> Result<ImportR
             .bind(&conv_id)
             .bind(role)
             .bind(parent_msg_id)
-            .bind(idx as i32)
+            .bind(depth as i32)
             .bind(0i32)
             .bind(content)
-            .bind(ts + idx as i64)
-            .bind(ts + idx as i64)
+            .bind(ts + depth as i64)
+            .bind(ts + depth as i64)
             .execute(&mut *tx)
             .await
             .map_err(AppError::from)?;
 
             msg_id_map.insert(old_id.to_string(), new_id.clone());
-            head_id = Some(new_id);
+            last_inserted_id = Some(new_id);
         }
+
+        // Prefer the exported mainline head; fall back to last-inserted message
+        let head_id = exported_head_id
+            .as_ref()
+            .and_then(|old_id| msg_id_map.get(old_id).cloned())
+            .or(last_inserted_id);
 
         // Create mainline branch
         let branch_id = uuid::Uuid::new_v4().to_string();
@@ -396,4 +428,69 @@ async fn import_getchat(pool: &SqlitePool, json_content: &str) -> Result<ImportR
     }
 
     Ok(ImportResult { imported_count, skipped_count, errors })
+}
+
+/// Topological sort of messages by parentId.
+/// Ensures parents are always inserted before their children, regardless
+/// of the iteration order of `Object.values()` used during export.
+fn topological_sort_messages(messages: &[Value]) -> Vec<usize> {
+    let n = messages.len();
+    if n <= 1 {
+        return (0..n).collect();
+    }
+
+    // Build index: old_id → position
+    let mut id_to_idx: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (i, msg) in messages.iter().enumerate() {
+        if let Some(id) = msg["id"].as_str() {
+            id_to_idx.insert(id, i);
+        }
+    }
+
+    // Kahn's algorithm: compute in-degree (number of children per parent)
+    let mut in_degree = vec![0usize; n];
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut roots: Vec<usize> = Vec::new();
+
+    for (i, msg) in messages.iter().enumerate() {
+        let parent_old = msg["parentId"].as_str().unwrap_or("");
+        if parent_old.is_empty() {
+            roots.push(i);
+        } else if let Some(&parent_idx) = id_to_idx.get(parent_old) {
+            children[parent_idx].push(i);
+            in_degree[i] += 1;
+        } else {
+            // Parent not found in this batch — treat as root
+            roots.push(i);
+        }
+    }
+
+    // Seed the queue with all root nodes
+    let mut queue: std::collections::VecDeque<usize> = roots.into_iter().collect();
+    let mut result: Vec<usize> = Vec::with_capacity(n);
+
+    while let Some(idx) = queue.pop_front() {
+        result.push(idx);
+        for &child in &children[idx] {
+            in_degree[child] -= 1;
+            if in_degree[child] == 0 {
+                queue.push_back(child);
+            }
+        }
+    }
+
+    // If there were cycles, append remaining indices
+    if result.len() < n {
+        let mut in_result = vec![false; n];
+        for &i in &result {
+            in_result[i] = true;
+        }
+        for i in 0..n {
+            if !in_result[i] {
+                result.push(i);
+            }
+        }
+    }
+
+    result
 }

@@ -37,10 +37,14 @@ export const useThemeStore = create<ThemeState>()(
 );
 
 if (typeof window !== "undefined") {
-  window
-    .matchMedia("(prefers-color-scheme: dark)")
-    .addEventListener("change", () => {
-      const { mode } = useThemeStore.getState();
-      if (mode === "system") applyTheme("system");
-    });
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  const handler = () => {
+    const { mode } = useThemeStore.getState();
+    if (mode === "system") applyTheme("system");
+  };
+  if (mql.addEventListener) {
+    mql.addEventListener("change", handler);
+  } else if (mql.addListener) {
+    mql.addListener(handler);
+  }
 }
