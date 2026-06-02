@@ -1794,6 +1794,7 @@ mod tests {
             conversation_id: None,
             branch_id: None,
             workspace_path: None,
+            activated_skill: None,
         };
 
         let (channel, events) = recording_channel();
@@ -1878,6 +1879,7 @@ mod tests {
             conversation_id: None,
             branch_id: None,
             workspace_path: None,
+            activated_skill: None,
         };
 
         let (channel, events) = recording_channel();
@@ -1962,6 +1964,7 @@ mod tests {
             conversation_id: None,
             branch_id: None,
             workspace_path: None,
+            activated_skill: None,
         };
 
         let (channel, events) = recording_channel();

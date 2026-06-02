@@ -285,7 +285,6 @@ pub fn extract_server_map_mut(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_extract_mcp_servers_format() {
