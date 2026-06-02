@@ -38,13 +38,10 @@ export const useThemeStore = create<ThemeState>()(
 
 if (typeof window !== "undefined") {
   const mql = window.matchMedia("(prefers-color-scheme: dark)");
-  const handler = () => {
+  // Use onchange assignment (overwrites previous handler) to prevent
+  // duplicate listeners during HMR or module reload.
+  mql.onchange = () => {
     const { mode } = useThemeStore.getState();
     if (mode === "system") applyTheme("system");
   };
-  if (mql.addEventListener) {
-    mql.addEventListener("change", handler);
-  } else if (mql.addListener) {
-    mql.addListener(handler);
-  }
 }

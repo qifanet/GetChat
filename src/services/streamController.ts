@@ -820,6 +820,7 @@ export async function completeStream(
   // Extract tool calls from runtime session for persistence
   const runtimeToolCalls = runtime.toolCalls.length > 0
     ? runtime.toolCalls.map(tc => ({
+        id: tc.callId,
         callId: tc.callId,
         functionName: tc.functionName,
         argumentsJson: tc.argumentsJson,
@@ -1053,6 +1054,7 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     : undefined;
   const runtimeToolCalls = runtime?.toolCalls.length
     ? runtime.toolCalls.map((tc) => ({
+        id: tc.callId,
         callId: tc.callId,
         functionName: tc.functionName,
         argumentsJson: tc.argumentsJson,
@@ -1112,8 +1114,9 @@ export async function cancelStream(requestId: RequestId): Promise<void> {
     useAppStore.getState().patchMessageLocal(session.targetMessageId, {
       status: "FAILED",
       updatedAt: now,
-      content: partialText ? { text: partialText, format: "MARKDOWN" as const } : undefined,
+      content: partialText ? { text: partialText, format: "MARKDOWN" as const, blocks: partialContentBlocks } : undefined,
       error: { code: "USER_CANCELLED", message: "Generation cancelled by user", retriable: true },
+      toolCalls: runtimeToolCalls,
     });
   }
 

@@ -70,9 +70,12 @@ function buildMarkdownFromMessages(
 
     // Assign branch labels to non-mainline messages
     const branchLabels = new Map<string, string>();
+    // Track which parent IDs have branch points, but don't write annotations yet
+    const branchPointParents = new Map<string, number>(); // parentId → child count
     let branchIdx = 1;
     for (const [parentId, children] of childrenByParent) {
       if (children.length <= 1) continue;
+      branchPointParents.set(parentId, children.length);
       for (const child of children) {
         if (mainlineIds.has(child.id)) continue;
         if (!branchLabels.has(child.id)) {
@@ -80,12 +83,15 @@ function buildMarkdownFromMessages(
           branchIdx++;
         }
       }
-      lines.push(`<!-- Branch point: ${children.length} variants -->`);
     }
 
-    // Walk messages in order and annotate
+    // Walk messages in order and annotate at the correct location
     let currentBranch = "Mainline";
     for (const msg of messages) {
+      // Emit branch point annotation right after the parent message that forks
+      if (branchPointParents.has(msg.id)) {
+        lines.push(`<!-- Branch point: ${branchPointParents.get(msg.id)} variants -->`);
+      }
       if (branchLabels.has(msg.id)) {
         currentBranch = branchLabels.get(msg.id)!;
         lines.push("", `---`, "", `> [${currentBranch}]`, "");

@@ -50,4 +50,4 @@ windows = { version = "0.58", features = ["Win32_System_Console"] }
 # Content-Type header (e.g. ZhiPu zread).  Remove this patch when upstream
 # releases a fix.  Ref: modelcontextprotocol/rust-sdk#237, #688
 [patch.crates-io]
-rmcp = { git = "https://github.com/NianLog/rust-sdk", branch = "fix/v1.7.0-content-type-tolerance" }
+rmcp = { git = "https://github.com/NianLog/rust-sdk", rev = "d3509c4deffb031c7a61aec7bc34bbecd9dcdc47" }

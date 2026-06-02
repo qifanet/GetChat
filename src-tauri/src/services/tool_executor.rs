@@ -1284,8 +1284,19 @@ async fn run_shell_with_passive_timeout(
                         // IO error on one of the readers, continue draining
                     }
                     None => {
-                        // All readers finished — process exited
-                        break;
+                        // All readers finished — check if process actually exited
+                        match child.try_wait() {
+                            Ok(Some(_)) => break, // process exited, safe to break
+                            Ok(None) => {
+                                // Readers hit EOF but process still alive — keep waiting
+                                // with a short timeout so we don't hang forever
+                                continue;
+                            }
+                            Err(_) => {
+                                let _ = child.kill().await;
+                                break;
+                            }
+                        }
                     }
                 }
             }

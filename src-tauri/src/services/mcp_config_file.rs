@@ -126,18 +126,39 @@ pub fn save_mcp_config_file(app_data_dir: &PathBuf, json_content: &str) -> Resul
             .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
     }
 
-    // Write atomically: write to temp file, then replace
+    // Write atomically with backup: write temp → backup old → rename temp → remove backup
     let temp_path = path.with_extension("json.tmp");
     std::fs::write(&temp_path, json_content)
         .map_err(|e| format!("Failed to write {}: {}", temp_path.display(), e))?;
 
-    // On Windows, rename fails if destination already exists — remove it first.
+    // Backup existing file before replacing, so a failed rename doesn't lose data
+    let backup_path = path.with_extension("json.bak");
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove old {}: {}", path.display(), e))?;
+        if let Err(e) = std::fs::rename(&path, &backup_path) {
+            // On Windows rename may fail if dest exists; fall back to copy+delete
+            let _ = std::fs::copy(&path, &backup_path);
+            let _ = std::fs::remove_file(&path);
+            let bak_err = e; // suppress unused
+            let _ = bak_err;
+        }
     }
-    std::fs::rename(&temp_path, &path)
-        .map_err(|e| format!("Failed to rename {} -> {}: {}", temp_path.display(), path.display(), e))?;
+
+    if let Err(e) = std::fs::rename(&temp_path, &path) {
+        // Restore from backup
+        if backup_path.exists() {
+            let _ = std::fs::rename(&backup_path, &path)
+                .or_else(|_| {
+                    let _ = std::fs::copy(&backup_path, &path);
+                    std::fs::remove_file(&backup_path)
+                });
+        }
+        return Err(format!("Failed to rename {} -> {}: {}", temp_path.display(), path.display(), e));
+    }
+
+    // Clean up backup on success
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(&backup_path);
+    }
 
     Ok(())
 }
