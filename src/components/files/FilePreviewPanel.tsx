@@ -244,7 +244,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={`${t("fileExplorer.searchPlaceholder")} (Ctrl+F)`}
-              className="h-7 w-[180px] rounded-md border border-miro-border/30 bg-miro-surface-low px-2 text-[12px] text-miro-text placeholder:text-miro-text-secondary/60 focus:border-miro-blue focus:outline-none"
+              className="h-7 w-[180px] rounded-md border border-miro-border/30 bg-miro-surface-low px-2 text-[12px] text-miro-text placeholder:text-miro-text-secondary/60 focus:border-miro-blue focus:outline-hidden"
             />
             {searchResults.length > 0 && (
               <span className="shrink-0 text-[10px] tabular-nums text-miro-text-secondary">
@@ -368,7 +368,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
                     ref={isMatch ? (el) => {
                       if (el) matchRefs.current.set(index, el);
                     } : undefined}
-                    className={`flex rounded-sm ${
+                    className={`flex rounded-xs ${
                       isCurrentMatch
                         ? "bg-miro-blue-light/80"
                         : isMatch

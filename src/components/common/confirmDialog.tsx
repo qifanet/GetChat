@@ -79,7 +79,7 @@ export function ConfirmDialogPortal() {
   const confirmLabel = opts.confirmLabel ?? t("common.confirm");
   const cancelLabel = opts.cancelLabel ?? t("common.cancel");
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+    <div className="fixed inset-0 z-10000 flex items-center justify-center">
       <button
         type="button"
         className="fixed inset-0 bg-miro-scrim backdrop-blur-[2px]"
@@ -121,7 +121,7 @@ export function ConfirmDialogPortal() {
             onClick={handleConfirm}
             className={
               opts.destructive
-                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-miro-red px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-miro-red active:bg-miro-red"
+                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-miro-red px-4 py-2 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-miro-red active:bg-miro-red"
                 : "app-primary-button px-4 py-2 text-sm"
             }
           >

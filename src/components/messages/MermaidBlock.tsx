@@ -108,7 +108,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
           <span className="font-mono text-[11px] font-medium text-miro-red">{t("markdown.mermaidError")}</span>
         </div>
         <div className="border-b border-miro-red/10 px-4 py-1.5">
-          <p className="break-words font-mono text-[11px] leading-relaxed text-miro-red/80">
+          <p className="wrap-break-word font-mono text-[11px] leading-relaxed text-miro-red/80">
             {error.length > 300 ? error.slice(0, 300) + "..." : error}
           </p>
         </div>
@@ -212,9 +212,9 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col bg-miro-surface-high">
+    <div className="fixed inset-0 z-9999 flex flex-col bg-miro-surface-high">
       {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-miro-border/10 bg-miro-card px-4 py-2.5 shadow-sm">
+      <div className="flex shrink-0 items-center justify-between border-b border-miro-border/10 bg-miro-card px-4 py-2.5 shadow-xs">
         <span className="text-xs font-medium text-miro-text-secondary">
           {t("markdown.diagramView")}
         </span>
@@ -222,7 +222,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
           <ToolBtn onClick={() => setScale((s) => Math.min(MAX_SCALE, s * 1.25))}>
             <ZoomInIcon />
           </ToolBtn>
-          <span className="min-w-[3.5rem] text-center text-[10px] tabular-nums text-miro-text-tertiary">
+          <span className="min-w-14 text-center text-[10px] tabular-nums text-miro-text-tertiary">
             {Math.round(scale * 100)}%
           </span>
           <ToolBtn onClick={() => setScale((s) => Math.max(MIN_SCALE, s / 1.25))}>
@@ -263,7 +263,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
       </div>
 
       {/* Footer */}
-      <div className="flex-shrink-0 border-t border-miro-border/10 bg-miro-card px-4 py-1.5 text-center">
+      <div className="shrink-0 border-t border-miro-border/10 bg-miro-card px-4 py-1.5 text-center">
         <span className="text-[10px] text-miro-text-tertiary">{t("markdown.diagramHint")}</span>
       </div>
     </div>

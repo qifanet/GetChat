@@ -390,7 +390,7 @@ export function ConversationGlobalView({ onClose }: Props) {
   }, [selectedBranchIds, data.branchesById, t]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex flex-col bg-miro-surface-high backdrop-blur-xl">
+    <div className="fixed inset-0 z-9999 flex flex-col bg-miro-surface-high backdrop-blur-xl">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b border-miro-border/10 px-6 py-4">
         <div className="flex items-center gap-4">

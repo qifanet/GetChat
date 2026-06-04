@@ -289,7 +289,7 @@ function WorkspaceEmptyState({
           <div className="mx-auto mb-8 flex justify-center">
             <BrandLogo
               size={56}
-              iconWrapperClassName="h-24 w-24 rounded-[28px] bg-miro-card shadow-panel"
+              iconWrapperClassName="h-24 w-24 rounded-shell bg-miro-card shadow-panel"
             />
           </div>
           <p className="app-section-label mb-4">

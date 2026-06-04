@@ -95,7 +95,7 @@ export function SearchDialog({ onClose, onNavigate }: SearchDialogProps) {
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
       <button
         type="button"
-        className="fixed inset-0 bg-miro-scrim backdrop-blur-sm"
+        className="fixed inset-0 bg-miro-scrim backdrop-blur-xs"
         onClick={onClose}
       />
       <div className="relative z-10 w-full max-w-lg rounded-xl border border-miro-border/30 bg-miro-card shadow-2xl">
@@ -109,7 +109,7 @@ export function SearchDialog({ onClose, onNavigate }: SearchDialogProps) {
             strokeWidth={1.5}
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="mr-3 flex-shrink-0 text-miro-text-secondary"
+            className="mr-3 shrink-0 text-miro-text-secondary"
           >
             <circle cx="11" cy="11" r="8" />
             <path d="M21 21l-4.35-4.35" />
@@ -120,13 +120,13 @@ export function SearchDialog({ onClose, onNavigate }: SearchDialogProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("search.placeholder")}
-            className="h-12 w-full bg-transparent text-sm text-miro-text outline-none placeholder:text-miro-text-secondary/50"
+            className="h-12 w-full bg-transparent text-sm text-miro-text outline-hidden placeholder:text-miro-text-secondary/50"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="ml-2 flex-shrink-0 rounded-md px-1.5 py-0.5 text-xs text-miro-text-secondary hover:bg-miro-surface-low"
+              className="ml-2 shrink-0 rounded-md px-1.5 py-0.5 text-xs text-miro-text-secondary hover:bg-miro-surface-low"
             >
               Esc
             </button>
@@ -225,7 +225,7 @@ function highlightSnippet(snippet: string, query: string): React.ReactNode {
   return (
     <>
       {before}
-      <mark className="rounded-sm bg-miro-amber-light/80 px-0.5 text-miro-text">{match}</mark>
+      <mark className="rounded-xs bg-miro-amber-light/80 px-0.5 text-miro-text">{match}</mark>
       {after}
     </>
   );

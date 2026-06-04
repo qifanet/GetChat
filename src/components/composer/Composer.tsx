@@ -431,7 +431,7 @@ export function Composer() {
               ].join("\n");
               return (
                 <span
-                  className={`app-status-pill group relative flex items-center gap-1.5 px-2.5 py-1 text-[10px] focus:outline-none focus-visible:ring-2 focus-visible:ring-miro-blue/30 ${textColor}`}
+                  className={`app-status-pill group relative flex items-center gap-1.5 px-2.5 py-1 text-[10px] focus:outline-hidden focus-visible:ring-2 focus-visible:ring-miro-blue/30 ${textColor}`}
                   aria-label={contextTooltip}
                   tabIndex={0}
                 >
@@ -489,7 +489,7 @@ export function Composer() {
             </div>
           )}
           <div className="flex items-end gap-2.5">
-            <div className="flex-1 min-h-[34px] overflow-hidden rounded-[20px] bg-miro-card shadow-ring composer-input-box">
+            <div className="flex-1 min-h-[34px] overflow-hidden rounded-panel bg-miro-card shadow-ring composer-input-box">
               <div className="w-[calc(100%-6px)]">
               <textarea
                 ref={textareaRef}
@@ -499,7 +499,7 @@ export function Composer() {
                 onKeyDown={handleKeyDown}
                 placeholder={disabledReason ?? t("composer.placeholder")}
                 rows={1}
-                className={`min-h-[34px] w-full resize-none border-none bg-transparent pl-3 pr-1 pt-2 pb-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-none focus:ring-0 ${
+                className={`min-h-[34px] w-full resize-none border-none bg-transparent pl-3 pr-1 pt-2 pb-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-hidden focus:ring-0 ${
                   scrollable
                     ? "overflow-y-auto composer-scrollbar"
                     : "overflow-hidden"

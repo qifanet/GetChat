@@ -238,7 +238,7 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
   const menu = (
     <div
       ref={menuRef}
-      className="fixed z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-miro-card py-1 shadow-lg"
+      className="fixed z-9999 min-w-[140px] rounded-lg border border-miro-border/40 bg-miro-card py-1 shadow-lg"
       style={{ left: coords.left, bottom: coords.bottom }}
       role="menu"
     >
@@ -256,7 +256,7 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
             ${item.disabled ? "cursor-not-allowed opacity-40" : ""}
             ${item.danger ? "text-miro-red hover:bg-miro-red-light/40" : "text-miro-text hover:bg-miro-border/10"}`}
         >
-          {item.icon ? <span className="flex-shrink-0">{item.icon}</span> : null}
+          {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
           {item.label}
         </button>
       ))}
