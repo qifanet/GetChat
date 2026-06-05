@@ -79,7 +79,7 @@ export function ConfirmDialogPortal() {
   const confirmLabel = opts.confirmLabel ?? t("common.confirm");
   const cancelLabel = opts.cancelLabel ?? t("common.cancel");
   return (
-    <div className="fixed inset-0 z-10000 flex items-center justify-center">
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center">
       <button
         type="button"
         className="fixed inset-0 bg-miro-scrim backdrop-blur-[2px]"

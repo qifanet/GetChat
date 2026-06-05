@@ -212,7 +212,7 @@ function FullscreenDiagram({ svg, onClose }: { svg: string; onClose: () => void 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-9999 flex flex-col bg-miro-surface-high">
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-miro-surface-high">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-miro-border/10 bg-miro-card px-4 py-2.5 shadow-xs">
         <span className="text-xs font-medium text-miro-text-secondary">

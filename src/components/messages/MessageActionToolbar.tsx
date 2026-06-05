@@ -238,7 +238,7 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
   const menu = (
     <div
       ref={menuRef}
-      className="fixed z-9999 min-w-[140px] rounded-lg border border-miro-border/40 bg-miro-card py-1 shadow-lg"
+      className="fixed z-[9999] min-w-[140px] rounded-lg border border-miro-border/40 bg-miro-card py-1 shadow-lg"
       style={{ left: coords.left, bottom: coords.bottom }}
       role="menu"
     >
