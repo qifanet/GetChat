@@ -281,7 +281,7 @@
 }
 
 @utility aborted {
-  & .assistant-message-bubble {
+  &.assistant-message-bubble {
     background-image: linear-gradient(
       135deg,
       var(--c-streaming-gradient-1),
