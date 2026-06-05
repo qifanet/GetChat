@@ -256,7 +256,7 @@ function MoreMenuPortal({ triggerRef, menuRef, items, onClose }: MoreMenuPortalP
             ${item.disabled ? "cursor-not-allowed opacity-40" : ""}
             ${item.danger ? "text-miro-red hover:bg-miro-red-light/40" : "text-miro-text hover:bg-miro-border/10"}`}
         >
-          {item.icon ? <span className="flex-shrink-0">{item.icon}</span> : null}
+          {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
           {item.label}
         </button>
       ))}

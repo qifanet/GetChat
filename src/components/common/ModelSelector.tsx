@@ -178,7 +178,7 @@ export function ModelSelector({
         <div
           ref={listRef}
           role="listbox"
-          className="absolute right-0 top-full z-50 mt-1 max-h-64 min-w-[240px] overflow-y-auto rounded-xl border border-miro-border/20 bg-miro-card/95 py-1 shadow-lg backdrop-blur-sm"
+          className="absolute right-0 top-full z-50 mt-1 max-h-64 min-w-[240px] overflow-y-auto rounded-xl border border-miro-border/20 bg-miro-card/95 py-1 shadow-lg backdrop-blur-xs"
           style={{ animation: "settings-toast-in 0.15s ease-out" }}
         >
           {/* "Use default" option */}

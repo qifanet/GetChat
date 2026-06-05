@@ -283,7 +283,7 @@ export function AppSettingsView() {
                   <button
                     type="button"
                     onClick={() => setDefaultModelDropdownOpen((prev) => !prev)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-none focus:ring-0"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {defaultModelDraft
@@ -371,7 +371,7 @@ export function AppSettingsView() {
                   <button
                     type="button"
                     onClick={() => setHelperModelDropdownOpen((prev) => !prev)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-none focus:ring-0"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {helperModelDraft

@@ -140,7 +140,7 @@ export function BranchPanel() {
     <div className="flex h-full flex-col" ref={panelRef}>
       {tooltipContainerRef.current && tooltip.visible && createPortal(
         <div
-          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded-xl border border-miro-border/40 bg-miro-card/95 px-4 py-2.5 text-[12px] leading-relaxed text-miro-text shadow-ring backdrop-blur-sm"
+          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded-xl border border-miro-border/40 bg-miro-card/95 px-4 py-2.5 text-[12px] leading-relaxed text-miro-text shadow-ring backdrop-blur-xs"
           style={{ right: `calc(100vw - ${tooltip.right}px)`, top: `${tooltip.y}px` }}
         >
           {tooltip.text}

@@ -118,7 +118,7 @@ function ToolSettingsSection() {
                     inputMode="numeric"
                     pattern="[0-9]*"
                     value={draft[f.key] ?? ""}
-                    className="w-24 rounded-md border border-miro-border/30 bg-miro-card px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-none"
+                    className="w-24 rounded-md border border-miro-border/30 bg-miro-card px-3 py-1.5 text-sm text-miro-text focus:border-miro-blue focus:outline-hidden"
                     onChange={(e) => updateField(f.key, e.target.value.replace(/[^0-9]/g, ""))}
                   />
                   <span className="min-w-0 flex-1 text-xs text-miro-text-secondary">
@@ -274,11 +274,11 @@ function BuiltinToolsSection() {
                 aria-checked={tool.enabled}
                 onClick={() => void handleToggle(tool.name, !tool.enabled)}
                 className={`relative ml-3 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors ${
-                  tool.enabled ? "border-transparent bg-miro-blue" : "border-[var(--c-border)] bg-[var(--c-surface-high)]"
+                  tool.enabled ? "border-transparent bg-miro-blue" : "border-(--c-border) bg-(--c-surface-high)"
                 }`}
               >
                 <span
-                  className="block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-all duration-200"
+                  className="block h-3.5 w-3.5 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-all duration-200"
                   style={{
                     transform: tool.enabled
                       ? 'translate(20px, 3px)'
@@ -497,12 +497,12 @@ function McpServersSection() {
                     aria-checked={server.status !== "disabled"}
                     onClick={() => void handleToggleServer(server.name, server.status === "disabled")}
                     className={`relative ml-3 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors ${
-                      server.status !== "disabled" ? "border-transparent bg-miro-blue" : "border-[var(--c-border)] bg-[var(--c-surface-high)]"
+                      server.status !== "disabled" ? "border-transparent bg-miro-blue" : "border-(--c-border) bg-(--c-surface-high)"
                     }`}
                     title={server.status === "disabled" ? t("settings.skillEnable", { defaultValue: "Enable" }) : t("settings.skillDisable", { defaultValue: "Disable" })}
                   >
                     <span
-                      className="block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-all duration-200"
+                      className="block h-3.5 w-3.5 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-all duration-200"
                       style={{
                         transform: server.status !== "disabled"
                           ? 'translate(20px, 3px)'

@@ -117,13 +117,13 @@ export function OnboardingScreen() {
   }
   return (
     <div className="app-shell flex h-full gap-4 p-4">
-      <section className="app-panel hidden w-[38%] min-w-[360px] flex-col justify-between rounded-shell bg-gradient-to-br from-miro-coral-light via-white to-miro-orange-light px-10 py-12 lg:flex">
+      <section className="app-panel hidden w-[38%] min-w-[360px] flex-col justify-between rounded-shell bg-linear-to-br from-miro-coral-light via-white to-miro-orange-light px-10 py-12 lg:flex">
         <div className="space-y-5">
           <span className="inline-flex rounded-full border border-miro-border bg-miro-card/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-miro-amber shadow-ring">
             {t("onboarding.badge")}
           </span>
           <div className="space-y-3">
-            <h1 className="max-w-sm font-display text-5xl font-semibold leading-tight tracking-[-0.05em] text-miro-text">
+            <h1 className="max-w-sm font-display text-5xl font-semibold leading-tight tracking-tighter text-miro-text">
               {t("onboarding.title")}
             </h1>
             <p className="max-w-md text-base leading-8 text-miro-text-secondary">
@@ -131,7 +131,7 @@ export function OnboardingScreen() {
             </p>
           </div>
         </div>
-        <div className="space-y-3 rounded-panel border border-white/80 bg-miro-card/80 p-5 shadow-ring backdrop-blur">
+        <div className="space-y-3 rounded-panel border border-white/80 bg-miro-card/80 p-5 shadow-ring backdrop-blur-sm">
           <h2 className="font-display text-base font-semibold text-miro-text">
             {t("onboarding.noteTitle")}
           </h2>

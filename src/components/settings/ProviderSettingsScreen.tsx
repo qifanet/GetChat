@@ -759,7 +759,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => startCreatingProvider()}
-                    className="mb-4 flex w-full items-center justify-center rounded-[20px] border border-dashed border-miro-blue/35 bg-miro-blue-light/55 px-3 py-3 font-display text-sm font-semibold text-miro-blue transition-colors hover:border-miro-blue hover:bg-miro-blue-light"
+                    className="mb-4 flex w-full items-center justify-center rounded-panel border border-dashed border-miro-blue/35 bg-miro-blue-light/55 px-3 py-3 font-display text-sm font-semibold text-miro-blue transition-colors hover:border-miro-blue hover:bg-miro-blue-light"
                   >
                     {t("settings.addProvider")}
                   </button>
@@ -987,7 +987,7 @@ export function ProviderSettingsScreen({
                       <button
                         type="button"
                         onClick={() => setProviderTypeDropdownOpen((prev) => !prev)}
-                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-none focus:ring-0"
+                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                       >
                         <span className="flex-1">
                           {getProviderTypeLabel(t, form.type as ProviderType)}
@@ -1077,7 +1077,7 @@ export function ProviderSettingsScreen({
                   {isFetchingModels ? t("settings.fetchingModels") : t("settings.fetchModels")}
                 </button>
                 )}
-                <section className="min-w-0 rounded-[28px] border border-miro-border/70 bg-miro-bg/70 p-5">
+                <section className="min-w-0 rounded-shell border border-miro-border/70 bg-miro-bg/70 p-5 mt-5">
                   <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <h4 className="font-display text-lg font-semibold tracking-[-0.02em] text-miro-text">

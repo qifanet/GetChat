@@ -121,7 +121,7 @@ export function ConfirmDialogPortal() {
             onClick={handleConfirm}
             className={
               opts.destructive
-                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-miro-red px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-miro-red active:bg-miro-red"
+                ? "inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-miro-red px-4 py-2 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-miro-red active:bg-miro-red"
                 : "app-primary-button px-4 py-2 text-sm"
             }
           >

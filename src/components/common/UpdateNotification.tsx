@@ -47,7 +47,7 @@ export function UpdateNotification() {
   // Full-screen overlay during install
   if (installing) {
     return (
-      <div role="dialog" aria-modal="true" aria-label={t("updater.installing")} className="fixed inset-0 z-[10000] flex items-center justify-center bg-miro-scrim backdrop-blur-sm">
+      <div role="dialog" aria-modal="true" aria-label={t("updater.installing")} className="fixed inset-0 z-[10000] flex items-center justify-center bg-miro-scrim backdrop-blur-xs">
         <div className="mx-4 max-w-sm rounded-2xl bg-miro-card p-6 text-center shadow-xl">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-miro-border border-t-miro-blue" />
           <p className="text-sm font-medium text-miro-text">
