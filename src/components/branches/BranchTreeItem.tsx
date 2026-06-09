@@ -86,7 +86,7 @@ export function BranchTreeItem({
       : "bg-miro-card/40 hover:bg-miro-card/70";
   return (
     <div
-      className={`group flex items-center gap-1.5 rounded-xl px-2 py-1.5 transition-colors cursor-pointer ${bgClass}`}
+      className={`group flex items-center gap-1.5 rounded-xl px-2 py-1.5 cursor-pointer ${bgClass}`}
       onClick={handleClick}
       role="button"
       tabIndex={0}
@@ -123,10 +123,10 @@ export function BranchTreeItem({
           <div className="flex min-w-0 items-center gap-1">
             <span className="truncate text-xs font-medium text-miro-text" title={branch.name}>{displayName}</span>
             {isMainline ? (
-              <span className="shrink-0 whitespace-nowrap app-status-pill border-miro-green/20 bg-miro-green-light/80 text-miro-green text-[9px]">{t("common.mainline")}</span>
+              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap app-status-pill border-miro-green/20 bg-miro-green-light/80 text-miro-green text-[9px] leading-none h-4">{t("common.mainline")}</span>
             ) : null}
             {isCurrent ? (
-              <span className="shrink-0 whitespace-nowrap app-status-pill border-miro-blue/15 bg-miro-blue-light text-miro-blue text-[9px]">{t("common.current")}</span>
+              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap app-status-pill border-miro-blue/15 bg-miro-blue-light text-miro-blue text-[9px] leading-none h-4">{t("common.current")}</span>
             ) : null}
             {messageCount != null ? (
               <span className="shrink-0 whitespace-nowrap text-[10px] text-miro-text-secondary">{messageCount} msg</span>

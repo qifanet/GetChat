@@ -560,6 +560,7 @@
     --c-ring: #cad2ff;
     --c-text: #113069;
     --c-text-secondary: #526074;
+    --c-text-tertiary: #6a7f99;
     --c-placeholder: #7486af;
     --c-blue: #3755c3;
     --c-blue-pressed: #2848b7;
@@ -608,68 +609,69 @@
 
   /* ── Dark theme ── */
   .dark {
-    /* Surface — GitHub Dark inspired, 5-8% luminance steps */
-    --c-page: #0d1117;
-    --c-bg: #131a24;
-    --c-card: #161b22;
-    --c-sidebar: #0d1117;
-    --c-surface-low: #1c2129;
-    --c-surface: #21262d;
-    --c-surface-high: #2d333b;
-    --c-surface-highest: #373e47;
-    --c-border: #30363d;
-    --c-ring: #3d444d;
-    /* Text — off-white to prevent halation, AAA contrast */
-    --c-text: #e6edf3;
-    --c-text-secondary: #8b949e;
-    --c-placeholder: #6e7681;
-    /* Accent — Indigo shifted brighter for dark */
-    --c-blue: #818cf8;
-    --c-blue-pressed: #a5b4fc;
-    --c-blue-light: rgba(99, 102, 241, 0.18);
-    --c-violet: #a78bfa;
-    --c-violet-light: rgba(167, 139, 250, 0.18);
-    /* Semantic — desaturated for dark comfort */
-    --c-green: #3fb950;
-    --c-green-light: rgba(63, 185, 80, 0.15);
-    --c-teal: #2dd4bf;
-    --c-teal-light: rgba(45, 212, 191, 0.15);
-    --c-coral: #f87171;
-    --c-coral-light: rgba(248, 113, 113, 0.15);
-    --c-amber: #d29922;
-    --c-amber-light: rgba(210, 153, 34, 0.15);
-    --c-orange-light: rgba(251, 146, 60, 0.15);
-    --c-pink-light: rgba(236, 72, 153, 0.15);
-    --c-red: #f85149;
-    --c-red-light: rgba(248, 81, 73, 0.15);
+    /* Surface — One Dark Pro inspired, warm blue-gray base */
+    --c-page: #282c34;
+    --c-bg: #282c34;
+    --c-card: #21252b;
+    --c-sidebar: #21252b;
+    --c-surface-low: #2c313c;
+    --c-surface: #353b45;
+    --c-surface-high: #3e4451;
+    --c-surface-highest: #4b5161;
+    --c-border: #3e4451;
+    --c-ring: #61afef40;
+    /* Text — soft off-white */
+    --c-text: #abb2bf;
+    --c-text-secondary: #7a828f;
+    --c-text-tertiary: #5c6370;
+    --c-placeholder: #5c6370;
+    /* Accent — One Dark blue */
+    --c-blue: #61afef;
+    --c-blue-pressed: #5294e2;
+    --c-blue-light: rgba(97, 175, 239, 0.15);
+    --c-violet: #c678dd;
+    --c-violet-light: rgba(198, 120, 221, 0.15);
+    /* Semantic */
+    --c-green: #98c379;
+    --c-green-light: rgba(152, 195, 121, 0.15);
+    --c-teal: #56b6c2;
+    --c-teal-light: rgba(86, 182, 194, 0.15);
+    --c-coral: #e06c75;
+    --c-coral-light: rgba(224, 108, 117, 0.15);
+    --c-amber: #e5c07b;
+    --c-amber-light: rgba(229, 192, 123, 0.15);
+    --c-orange-light: rgba(209, 154, 102, 0.15);
+    --c-pink-light: rgba(198, 120, 221, 0.15);
+    --c-red: #e06c75;
+    --c-red-light: rgba(224, 108, 117, 0.15);
 
-    --c-glass-bg: rgba(22, 27, 34, 0.92);
-    --c-shell-header-bg: rgba(13, 17, 23, 0.88);
-    --c-body-gradient-1: rgba(99, 102, 241, 0.04);
-    --c-body-gradient-2: rgba(45, 212, 191, 0.02);
-    --c-streaming-gradient-1: rgba(22, 27, 34, 0.98);
-    --c-streaming-gradient-2: rgba(33, 38, 45, 0.95);
-    --c-failed-gradient-2: rgba(127, 29, 29, 0.25);
-    --c-thead-bg: rgba(45, 51, 59, 0.9);
-    --c-blockquote-bg: rgba(99, 102, 241, 0.08);
-    --c-blockquote-border: rgba(129, 140, 248, 0.35);
-    --c-selection-bg: rgba(129, 140, 248, 0.3);
-    --c-caret-color: #818cf8;
+    --c-glass-bg: rgba(33, 37, 43, 0.95);
+    --c-shell-header-bg: rgba(40, 44, 52, 0.92);
+    --c-body-gradient-1: rgba(97, 175, 239, 0.04);
+    --c-body-gradient-2: rgba(198, 120, 221, 0.03);
+    --c-streaming-gradient-1: rgba(33, 37, 43, 0.98);
+    --c-streaming-gradient-2: rgba(44, 49, 60, 0.95);
+    --c-failed-gradient-2: rgba(224, 108, 117, 0.1);
+    --c-thead-bg: rgba(62, 68, 81, 0.9);
+    --c-blockquote-bg: rgba(97, 175, 239, 0.08);
+    --c-blockquote-border: rgba(97, 175, 239, 0.3);
+    --c-selection-bg: rgba(97, 175, 239, 0.2);
+    --c-caret-color: #61afef;
     /* Code block / Mermaid diagram background */
-    --c-code-bg: #0d1117;
+    --c-code-bg: #1e2227;
 
-    --c-shadow-ring: 0 0 0 1px rgba(240, 246, 252, 0.06);
-    --c-shadow-panel: 0 0 0 1px rgba(240, 246, 252, 0.06), 0 2px 8px rgba(0, 0, 0, 0.3);
-    --c-shadow-float: 0 0 0 1px rgba(240, 246, 252, 0.04), 0 4px 16px rgba(0, 0, 0, 0.25);
-    --c-shadow-focus: 0 0 0 4px rgba(129, 140, 248, 0.2);
+    --c-shadow-ring: 0 0 0 1px rgba(97, 175, 239, 0.15);
+    --c-shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 4px 12px rgba(0, 0, 0, 0.35);
+    --c-shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --c-shadow-focus: 0 0 0 3px rgba(97, 175, 239, 0.2);
     --c-scrim: rgba(0, 0, 0, 0.5);
 
     --app-panel-shadow: var(--c-shadow-panel);
     --app-float-shadow: var(--c-shadow-float);
-    --app-ghost-border: rgba(240, 246, 252, 0.06);
-    --app-thread-rail: rgba(48, 54, 61, 0.9);
-    --app-thread-rail-active: rgba(129, 140, 248, 0.5);
-    --app-primary-gradient: linear-gradient(135deg, #6366f1, #4f46e5);
+    --app-ghost-border: rgba(255, 255, 255, 0.03);
+    --app-thread-rail: rgba(62, 68, 81, 0.8);
+    --app-thread-rail-active: rgba(97, 175, 239, 0.5);
+    --app-primary-gradient: linear-gradient(135deg, #61afef, #5294e2);
   }
 
   :root {
