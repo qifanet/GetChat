@@ -115,14 +115,14 @@ function ThemeToggle() {
           key={mode}
           type="button"
           onClick={() => setThemeMode(mode)}
-          className={`rounded-lg px-3 py-1.5 text-sm font-semibold whitespace-nowrap transition-colors ${
+          className={`inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold whitespace-nowrap transition-colors ${
             themeMode === mode
               ? "bg-miro-blue-light text-miro-blue shadow-ring"
               : "bg-miro-surface-low text-miro-text-secondary hover:bg-miro-surface"
           }`}
           title={t(`settings.theme${mode.charAt(0).toUpperCase() + mode.slice(1)}`)}
         >
-          <span className="mr-1">{icon}</span>
+          <span className="mr-1.5">{icon}</span>
           {t(`settings.theme${mode.charAt(0).toUpperCase() + mode.slice(1)}`)}
         </button>
       ))}
@@ -283,7 +283,7 @@ export function AppSettingsView() {
                   <button
                     type="button"
                     onClick={() => setDefaultModelDropdownOpen((prev) => !prev)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/15 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {defaultModelDraft
@@ -297,7 +297,7 @@ export function AppSettingsView() {
                   {defaultModelDropdownOpen && (
                     <div
                       role="listbox"
-                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/40 bg-miro-card/95 p-1.5 shadow-ring"
+                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/15 bg-miro-card/95 p-1.5 shadow-ring"
                     >
                       <button
                         role="option"
@@ -371,7 +371,7 @@ export function AppSettingsView() {
                   <button
                     type="button"
                     onClick={() => setHelperModelDropdownOpen((prev) => !prev)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-miro-border/15 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {helperModelDraft
@@ -385,7 +385,7 @@ export function AppSettingsView() {
                   {helperModelDropdownOpen && (
                     <div
                       role="listbox"
-                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/40 bg-miro-card/95 p-1.5 shadow-ring"
+                      className="absolute left-0 top-full mt-1.5 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-miro-border/15 bg-miro-card/95 p-1.5 shadow-ring"
                     >
                       <button
                         role="option"

@@ -14,6 +14,7 @@
  * Raw HTML remains disabled so assistant output cannot inject arbitrary DOM.
  */
 import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
+import { useThemeStore } from "../../stores/useThemeStore";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -45,7 +46,7 @@ import swift from "react-syntax-highlighter/dist/esm/languages/prism/swift";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneLight, oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTranslation } from "react-i18next";
 import { copyTextToClipboard } from "../../utils/clipboard";
 import { FILE_LINK_PROTOCOL, parseFileLinkUrl, remarkFilePaths } from "../../utils/remarkFilePaths";
@@ -206,10 +207,16 @@ function FileLink({ path, children }: { path: string; children: ReactNode }) {
   );
 }
 
+/** Resolve syntax highlight theme based on dark mode flag. */
+function getSyntaxHighlightTheme(isDark: boolean) {
+  return isDark ? oneDark : oneLight;
+}
+
 function buildMarkdownComponents(
   copyLabel: string,
   copiedLabel: string,
   disableMermaid: boolean,
+  isDark: boolean,
 ): Components {
   return {
   pre({ node: _node, children }) {
@@ -293,7 +300,7 @@ function buildMarkdownComponents(
       return (
         <SyntaxHighlighter
           language={language}
-          style={oneLight}
+          style={getSyntaxHighlightTheme(isDark)}
           PreTag="div"
           customStyle={{
             margin: 0,
@@ -364,14 +371,17 @@ function normalizeMathDelimiters(text: string): string {
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, disableMermaid = false }: MarkdownRendererProps) {
   const { t } = useTranslation();
+  const themeMode = useThemeStore((s) => s.mode);
+  const isDark = themeMode === "dark" || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents(
         t("common.copyCode"),
         t("common.codeCopied"),
         disableMermaid,
+        isDark,
       ),
-    [t, disableMermaid]
+    [t, disableMermaid, isDark]
   );
   const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
   return (

@@ -987,7 +987,7 @@ export function ProviderSettingsScreen({
                       <button
                         type="button"
                         onClick={() => setProviderTypeDropdownOpen((prev) => !prev)}
-                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
+                        className="flex w-full items-center gap-2 rounded-xl border border-miro-border/15 bg-miro-card/88 px-3 py-2 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                       >
                         <span className="flex-1">
                           {getProviderTypeLabel(t, form.type as ProviderType)}
@@ -999,7 +999,7 @@ export function ProviderSettingsScreen({
                       {providerTypeDropdownOpen && (
                         <div
                           role="listbox"
-                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/40 bg-miro-card/95 p-1.5 shadow-ring"
+                          className="absolute left-0 top-full mt-1.5 z-50 w-full rounded-xl border border-miro-border/15 bg-miro-card/95 p-1.5 shadow-ring"
                         >
                           {providerTypeOptions.map((option) => (
                             <button

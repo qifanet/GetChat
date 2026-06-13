@@ -28,6 +28,7 @@
   --color-miro-scrim: var(--c-scrim);
   --color-miro-text: var(--c-text);
   --color-miro-text-secondary: var(--c-text-secondary);
+  --color-miro-text-tertiary: var(--c-text-tertiary);
   --color-miro-placeholder: var(--c-placeholder);
   --color-miro-blue: var(--c-blue);
   --color-miro-blue-pressed: var(--c-blue-pressed);
@@ -108,7 +109,7 @@
 
 @utility app-shell-header {
   @apply border-b backdrop-blur-chrome;
-  border-color: rgba(152, 177, 242, 0.1);
+  border-color: color-mix(in srgb, var(--c-border) 10%, transparent);
   background-color: var(--c-shell-header-bg);
 }
 
@@ -138,7 +139,7 @@
 
 @utility app-status-pill {
   @apply inline-flex items-center gap-2 rounded-full border bg-miro-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary;
-  border-color: rgba(152, 177, 242, 0.2);
+  border-color: color-mix(in srgb, var(--c-border) 20%, transparent);
 }
 
 @utility app-icon-button {
@@ -148,7 +149,7 @@
 @utility app-primary-button {
   @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5 font-display text-sm font-semibold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:bg-miro-ring disabled:text-miro-text-secondary;
   background-image: var(--app-primary-gradient);
-  box-shadow: 0 14px 24px -18px rgba(55, 85, 195, 0.85);
+  box-shadow: 0 14px 24px -18px color-mix(in srgb, var(--c-blue) 60%, transparent);
 
   &:hover:not(:disabled) {
     filter: brightness(1.03);
@@ -164,26 +165,26 @@
   @apply inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold text-miro-blue transition-colors duration-150;
 
   &:hover {
-    background-color: rgba(221, 225, 255, 0.7);
+    background-color: color-mix(in srgb, var(--c-blue-light) 70%, transparent);
   }
 }
 
 @utility app-input {
   @apply w-full rounded-2xl border border-transparent bg-miro-surface-low px-4 py-3 text-sm text-miro-text outline-hidden transition duration-150 placeholder:text-miro-placeholder focus:bg-miro-card focus:ring-4;
   --tw-ring-color: color-mix(in srgb, var(--c-blue) 10%, transparent);
-  box-shadow: inset 0 0 0 1px rgba(152, 177, 242, 0.12);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-border) 12%, transparent);
 }
 
 @utility composer-input-box {
   /* Composer input container — blue ring on focus */
   @apply transition-shadow duration-150;
   box-shadow:
-    0 0 0 0 rgba(91, 118, 254, 0),
-    inset 0 0 0 1px rgba(152, 177, 242, 0.12);
+    0 0 0 0 color-mix(in srgb, var(--c-blue) 0%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--c-border) 12%, transparent);
   &:focus-within {
     box-shadow:
-      0 0 0 4px rgba(91, 118, 254, 0.12),
-      inset 0 0 0 1px rgba(91, 118, 254, 0.5);
+      0 0 0 4px color-mix(in srgb, var(--c-blue) 12%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--c-blue) 50%, transparent);
   }
 }
 
@@ -292,7 +293,7 @@
 
 @utility assistant-message-callout {
   @apply rounded-2xl border px-4 py-3 text-sm leading-6;
-  box-shadow: inset 0 0 0 1px rgba(159, 64, 61, 0.08);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-coral) 8%, transparent);
 }
 
 @utility streaming-surface {
@@ -437,7 +438,7 @@
   /* Horizontal rule */
   & hr {
     border: none;
-    border-top: 1px solid rgba(152, 177, 242, 0.2);
+    border-top: 1px solid color-mix(in srgb, var(--c-border) 20%, transparent);
     margin: 1.5rem 0;
   }
 
@@ -467,20 +468,20 @@
   }
   & th {
     @apply text-sm font-semibold text-miro-text;
-    border-bottom: 2px solid rgba(152, 177, 242, 0.18);
+    border-bottom: 2px solid color-mix(in srgb, var(--c-border) 18%, transparent);
     padding: 0.75rem 1rem;
     text-align: left;
     vertical-align: top;
   }
   & td {
     @apply text-sm text-miro-text;
-    border-bottom: 1px solid rgba(152, 177, 242, 0.1);
+    border-bottom: 1px solid color-mix(in srgb, var(--c-border) 10%, transparent);
     padding: 0.65rem 1rem;
     text-align: left;
     vertical-align: top;
   }
   & tbody tr:hover {
-    background-color: rgba(221, 225, 255, 0.25);
+    background-color: color-mix(in srgb, var(--c-blue-light) 25%, transparent);
   }
   & tbody tr:last-child td {
     border-bottom: none;
@@ -506,11 +507,11 @@
     margin: 8px 0;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(96, 121, 183, 0.45);
+    background: color-mix(in srgb, var(--c-blue) 35%, transparent);
     border-radius: 999px;
   }
   &::-webkit-scrollbar-thumb:hover {
-    background: rgba(55, 85, 195, 0.65);
+    background: color-mix(in srgb, var(--c-blue) 55%, transparent);
   }
 }
 
@@ -657,8 +658,6 @@
     --c-blockquote-border: rgba(97, 175, 239, 0.3);
     --c-selection-bg: rgba(97, 175, 239, 0.2);
     --c-caret-color: #61afef;
-    /* Code block / Mermaid diagram background */
-    --c-code-bg: #1e2227;
 
     --c-shadow-ring: 0 0 0 1px rgba(97, 175, 239, 0.15);
     --c-shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -737,12 +736,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(96, 121, 183, 0.5);
+    background: color-mix(in srgb, var(--c-blue) 40%, transparent);
     border-radius: 999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(55, 85, 195, 0.72);
+    background: color-mix(in srgb, var(--c-blue) 60%, transparent);
   }
 }
 

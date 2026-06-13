@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef, memo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useThemeStore } from "../../stores/useThemeStore";
 
 interface MermaidBlockProps {
   code: string;
@@ -23,6 +24,7 @@ function cleanupMermaidErrorElements() {
 
 export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockProps) {
   const { t } = useTranslation();
+  const themeMode = useThemeStore((s) => s.mode);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,10 +45,11 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
       offscreenRef.current = offscreen;
 
       try {
+        const isDark = themeMode === "dark" || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         const mermaid = await import("mermaid");
         mermaid.default.initialize({
           startOnLoad: false,
-          theme: "default",
+          theme: isDark ? "dark" : "default",
           securityLevel: "loose",
           fontFamily: '"Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
         });
@@ -79,7 +82,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
       offscreenRef.current = null;
       cleanupMermaidErrorElements();
     };
-  }, [code]);
+  }, [code, themeMode]);
 
   const openFullscreen = useCallback(() => setFullscreen(true), []);
   const closeFullscreen = useCallback(() => setFullscreen(false), []);
