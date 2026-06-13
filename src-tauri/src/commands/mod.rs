@@ -19,3 +19,5 @@ pub mod filesystem;
 pub mod messages;
 pub mod settings;
 pub mod streaming;
+pub mod task_queue;
+pub mod proposal;

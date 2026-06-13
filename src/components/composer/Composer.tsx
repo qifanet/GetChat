@@ -170,6 +170,28 @@ export function Composer() {
       submitInFlightRef.current = false;
     }
   }, [canSend, activeSlashItem, draft, setDraft]);
+
+  /** Inject message to active stream (Dual-Queue v1.5.0) */
+  const [injectStatus, setInjectStatus] = useState<"idle" | "sent" | "failed">("idle");
+
+  const handleBoundaryInject = useCallback(async () => {
+    if (!activeRequestId || draft.trim().length === 0) {
+      return;
+    }
+
+    try {
+      await tauriCmd.injectUserMessageToStream(activeRequestId, draft.trim());
+      setDraft("");
+      setInjectStatus("sent");
+      console.info("[composer] Message injected to stream:", activeRequestId);
+      setTimeout(() => setInjectStatus("idle"), 2500);
+    } catch (error) {
+      console.error("[composer] Inject failed:", error);
+      setInjectStatus("failed");
+      setTimeout(() => setInjectStatus("idle"), 3000);
+    }
+  }, [activeRequestId, draft, setDraft]);
+
   /** Cancel the active streaming request when the user presses the stop control. */
   const handleStop = useCallback(() => {
     const cancelled = cancelActiveStreams({ conversationId: activeConversationId });
@@ -189,15 +211,26 @@ export function Composer() {
   const handleToggleMenu = useCallback(() => {
     setMenuOpen((prev) => !prev);
   }, []);
-  /** Support Enter to send and Shift+Enter for a newline. */
+  /** Support Enter to send and Shift+Enter for a newline.
+   *  During streaming (isSending), Enter injects to the active stream instead. */
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        void handleSend();
+
+        if (isSending) {
+          // Streaming: Enter = inject message into active stream
+          void handleBoundaryInject();
+        } else if (event.ctrlKey || event.metaKey) {
+          // Idle + Ctrl/Cmd+Enter: also inject (for when user wants explicit control)
+          void handleBoundaryInject();
+        } else {
+          // Idle: normal send
+          void handleSend();
+        }
       }
     },
-    [handleSend]
+    [handleSend, handleBoundaryInject, isSending]
   );
   /** Auto-resize the textarea while keeping the composer height under control.
    *  Also detect `/` at start for slash command menu. */
@@ -464,9 +497,14 @@ export function Composer() {
                 {t("composer.branchModeHint")}
               </span>
             ) : null}
-            {!disabledReason ? (
+            {!disabledReason && !isSending ? (
               <p className="text-xs leading-5 text-miro-text-secondary sm:ml-auto">
                 {t("composer.shortcutHint")}
+              </p>
+            ) : null}
+            {isSending ? (
+              <p className="text-xs leading-5 text-miro-text-secondary sm:ml-auto">
+                Enter = inject &middot; Shift+Enter = newline
               </p>
             ) : null}
           </div>
@@ -497,7 +535,7 @@ export function Composer() {
                 onChange={handleInput}
                 onWheel={handleWheel}
                 onKeyDown={handleKeyDown}
-                placeholder={disabledReason ?? t("composer.placeholder")}
+                placeholder={disabledReason ?? (isSending ? t("composer.injectPlaceholder", "Ctrl+Enter to inject during stream") : t("composer.placeholder"))}
                 rows={1}
                 className={`min-h-[34px] w-full resize-none border-none bg-transparent pl-3 pr-1 pt-2 pb-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-hidden focus:ring-0 ${
                   scrollable
@@ -506,18 +544,53 @@ export function Composer() {
                 }`}
               />
               </div>
+              {injectStatus === "sent" && (
+                <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] text-blue-400">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  Injected — will apply at next tool boundary
+                </div>
+              )}
+              {injectStatus === "failed" && (
+                <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] text-red-400">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M15 9l-6 6M9 9l6 6" />
+                  </svg>
+                  Inject failed — no active stream
+                </div>
+              )}
             </div>
             {isSending ? (
-              <button
-                type="button"
-                onClick={handleStop}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-miro-red text-white transition-colors hover:bg-miro-red/90"
-                title={t("composer.stop")}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void handleBoundaryInject()}
+                  disabled={!draft.trim()}
+                  className={
+                    "flex h-11 items-center justify-center rounded-[16px] pl-3 pr-2.5 transition-colors " +
+                    (draft.trim()
+                      ? "bg-blue-600 text-white hover:bg-blue-500"
+                      : "bg-miro-border/80 text-miro-text-secondary/40")
+                  }
+                  title="Inject message to active stream"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-miro-red text-white transition-colors hover:bg-miro-red/90"
+                  title={t("composer.stop")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              </div>
             ) : (
               <div ref={menuRef} className="relative flex shrink-0 items-center">
                 <button

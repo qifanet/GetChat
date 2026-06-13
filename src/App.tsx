@@ -23,6 +23,7 @@ import { WorkspaceBannerRegion } from "./components/workspace/WorkspaceBannerReg
 import { MessageList } from "./components/chat/MessageList";
 import { Composer } from "./components/composer/Composer";
 import { TodoStatusBar } from "./components/todo/TodoStatusBar";
+import { TaskQueuePanel } from "./components/taskQueue/TaskQueuePanel";
 import { CompareWorkspace } from "./components/compare/CompareWorkspace";
 import { ConversationListItem } from "./components/conversations/ConversationListItem";
 import { BrandLogo } from "./components/brand/BrandLogo";
@@ -677,6 +678,7 @@ function WorkspaceCenter({
         </div>
         <TodoStatusBar conversationId={activeSnapshot?.summary.id} />
         <Composer />
+        <TaskQueuePanel />
       </div>
       {fileExplorerOpen && (
         <div className="flex w-[260px] shrink-0 flex-col border-l border-miro-border/15 bg-miro-surface-low/50">

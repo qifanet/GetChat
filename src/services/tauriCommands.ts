@@ -770,3 +770,42 @@ export async function readFilePreview(
 export async function revealInFileManager(conversationId: string, path: string): Promise<void> {
   return executeCommand<void>("reveal_in_file_manager", { conversationId, path });
 }
+
+// ============================================================================
+// Task Queue Commands (v1.5.0)
+// ============================================================================
+
+export async function listTaskQueue(): Promise<import("../types/taskQueue").TaskQueueItemDto[]> {
+  return executeCommand("list_task_queue", {});
+}
+
+export async function cancelTask(taskId: string): Promise<void> {
+  return executeCommand<void>("cancel_task", { taskId });
+}
+
+// ============================================================================
+// Dual-Queue Injection (v1.5.0)
+// ============================================================================
+
+export async function injectUserMessageToStream(requestId: string, message: string): Promise<void> {
+  return executeCommand<void>("inject_user_message_to_stream", { requestId, message });
+}
+
+// ============================================================================
+// Proposal Commands (v1.5.0)
+// ============================================================================
+
+export async function getProposal(proposalId: string): Promise<import("./tauriTypes").ProposalDto | null> {
+  return executeCommand("get_proposal", { proposalId });
+}
+
+export async function listProposals(conversationId: string): Promise<import("./tauriTypes").ProposalDto[]> {
+  return executeCommand("list_proposals", { conversationId });
+}
+
+export async function executeParallelFork(
+  proposalId: string,
+  branches: import("./tauriTypes").ProposalBranchDto[]
+): Promise<string[]> {
+  return executeCommand("execute_parallel_fork", { proposalId, branches });
+}

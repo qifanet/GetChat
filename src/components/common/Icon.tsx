@@ -327,3 +327,64 @@ export function IconSettings({ size = 16, ...props }: IconBaseProps) {
     </svg>
   );
 }
+
+/**
+ * Clock icon — used for queued/pending tasks.
+ */
+export function IconClock({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
+/**
+ * Play icon — used for running tasks.
+ */
+export function IconPlay({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <path d="M5 3l14 9-14 9V3z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/**
+ * Pause icon — used for paused tasks.
+ */
+export function IconPause({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <rect x="6" y="4" width="4" height="16" fill="currentColor" stroke="none" />
+      <rect x="14" y="4" width="4" height="16" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/**
+ * X Circle icon — used for cancelled tasks.
+ */
+export function IconXCircle({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M15 9l-6 6" />
+      <path d="M9 9l6 6" />
+    </svg>
+  );
+}
+
+/**
+ * Alert Circle icon — used for failed tasks.
+ */
+export function IconAlertCircle({ size = 16, ...props }: IconBaseProps) {
+  return (
+    <svg width={size} height={size} {...iconDefaults} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4" />
+      <circle cx="12" cy="16" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}

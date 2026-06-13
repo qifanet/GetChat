@@ -45,7 +45,8 @@ import type { ToolCallInfo } from "./conversation";
 export type ContentBlock =
   | { type: "text"; content: string }
   | { type: "tool_call"; callId: string; functionName: string; args: string }
-  | { type: "tool_result"; callId: string; result: string; success: boolean };
+  | { type: "tool_result"; callId: string; result: string; success: boolean }
+  | { type: "user_injected"; content: string };
 
 /** Helper: create a text block */
 export function textBlock(content: string): ContentBlock {

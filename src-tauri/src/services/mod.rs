@@ -12,6 +12,7 @@
 pub mod helper_ai_service;
 pub mod importance_scorer;
 pub mod import_service;
+pub mod inject_queue;
 pub mod invariant_service;
 pub mod mcp_client;
 pub mod mcp_config_file;
@@ -22,5 +23,7 @@ pub mod prompt_service;
 pub mod snapshot_service;
 pub mod skill_fs;
 pub mod system_prompt_service;
+pub mod task_queue_service;
+pub mod task_worker;
 pub mod token_estimator;
 pub mod tool_executor;

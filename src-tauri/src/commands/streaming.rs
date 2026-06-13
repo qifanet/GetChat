@@ -1261,6 +1261,7 @@ async fn run_react_loop(
         skills_dir: state.app_handle.path().app_data_dir().ok().map(|p| {
             crate::services::skill_fs::skills_root_from_app_data(&p).to_string_lossy().to_string()
         }),
+        db_pool: Some(state.db.clone()),
     };
     let mut consecutive_tool_failures = 0u32;
 
@@ -1815,6 +1816,31 @@ async fn run_react_loop(
                             )
                             .await;
                         }
+                    }
+                }
+
+                // Drain inject queue and append as user messages (Dual-Queue injection)
+                let injected = crate::services::inject_queue::drain_inject_messages(&request_id);
+                if !injected.is_empty() {
+                    for msg in &injected {
+                        let _ = channel.send(ModelStreamEventDto::UserInjected {
+                            request_id: request_id.clone(),
+                            content: msg.clone(),
+                        });
+                        prompt_messages.push(ModelPromptMessageDto {
+                            source_message_id: None,
+                            role: "user".to_string(),
+                            content: format!("[User supplement] {}", msg),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                        tracing::info!(
+                            request_id = %request_id,
+                            content = %msg,
+                            "injected user message at tool boundary"
+                        );
                     }
                 }
 
@@ -3406,4 +3432,22 @@ fn is_expected_compression_noop(error: &AppError) -> bool {
                 | "Not enough messages to compress"
                 | "Branch has no messages"
         )
+}
+
+#[tauri::command]
+pub async fn inject_user_message_to_stream(
+    state: State<'_, AppState>,
+    request_id: String,
+    message: String,
+) -> Result<(), AppError> {
+    {
+        let active_streams = state.active_model_streams.lock().await;
+        if !active_streams.contains_key(&request_id) {
+            return Err(AppError::invalid_argument(&format!(
+                "No active stream found for request_id: {request_id}"
+            )));
+        }
+    }
+    crate::services::inject_queue::push_inject_message(&request_id, message);
+    Ok(())
 }

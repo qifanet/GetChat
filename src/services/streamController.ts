@@ -75,6 +75,27 @@ type ActiveStreamFilters = {
 const STREAM_START_LOCK_STALE_MS = 120_000;
 let activeStreamStartLock: { startedAt: number } | null = null;
 
+// Stream queue for parallel branch execution
+type QueuedStreamParams = {
+  conversationId: string;
+  branchId: string;
+  parentMessageId: MessageId;
+  providerId: string;
+  modelId: string;
+  promptMessages: Array<{ role: string; content: string }>;
+  generationParams?: Record<string, unknown>;
+  rendererMode?: "PRETEXT" | "DOM_TEXT";
+  tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
+  toolChoice?: string;
+  activatedSkill?: string;
+};
+type QueuedStream = {
+  params: QueuedStreamParams;
+  resolve: (result: { requestId: RequestId; assistantMessageId: MessageId }) => void;
+  reject: (error: Error) => void;
+};
+const streamQueue: QueuedStream[] = [];
+
 function isStreamStartLocked(): boolean {
   if (!activeStreamStartLock) {
     return false;
@@ -154,6 +175,16 @@ function syncComposerSendingStateToActiveStreams(): void {
   });
 }
 
+/** Process the next queued stream after current stream completes. */
+function processStreamQueue(): void {
+  if (streamQueue.length === 0) return;
+  const next = streamQueue.shift()!;
+  console.info(`[stream] Processing queued stream for branch=${next.params.branchId}`);
+  startAssistantStream(next.params)
+    .then(next.resolve)
+    .catch(next.reject);
+}
+
 // ============================================================================
 // Start Stream
 // ============================================================================
@@ -183,11 +214,11 @@ export async function startAssistantStream(params: {
 }): Promise<{ requestId: RequestId; assistantMessageId: MessageId }> {
   const existingStream = findActiveAssistantStream();
   if (existingStream) {
-    useAppStore.getState().setSendingState({
-      isSending: true,
-      activeRequestId: existingStream.requestId,
+    // Queue the stream instead of rejecting
+    console.info(`[stream] Queuing stream for branch=${params.branchId} (active stream running)`);
+    return new Promise<{ requestId: RequestId; assistantMessageId: MessageId }>((resolve, reject) => {
+      streamQueue.push({ params, resolve, reject });
     });
-    throw new Error("A model response is already running");
   }
   if (!tryAcquireStreamStartLock()) {
     throw new Error("A model response is already being prepared");
@@ -607,6 +638,35 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
       }, 4000);
       return;
     }
+    case "USER_INJECTED": {
+      const runtime = getRuntimeSession(event.requestId);
+      if (runtime) {
+        // Flush any pending text chunks into a text block first
+        if (runtime.currentTextChunks.length > 0) {
+          runtime.contentBlocks.push({
+            type: "text",
+            content: runtime.currentTextChunks.join(""),
+          });
+          runtime.currentTextChunks = [];
+        }
+        // Append user_injected block
+        runtime.contentBlocks.push({
+          type: "user_injected",
+          content: event.content,
+        });
+        // Force a React re-render
+        const session = useStreamStore.getState().sessionsByRequestId[event.requestId];
+        if (session) {
+          useStreamStore.getState().patchSession(event.requestId, {
+            visibleVersion: session.visibleVersion + 1,
+          });
+        }
+      }
+      console.info(
+        `[stream] user_injected request=${event.requestId} content=${event.content.slice(0, 50)}`
+      );
+      return;
+    }
     case "APPROVAL_REQUIRED": {
       console.info(
         `[stream] approval_required request=${event.requestId} approvalId=${event.approvalId} fn=${event.functionName}`
@@ -927,6 +987,9 @@ export async function completeStream(
   setTimeout(() => {
     useStreamStore.getState().removeSession(requestId);
   }, 1500);
+
+  // 9) Process queued stream
+  processStreamQueue();
 }
 
 // ============================================================================
@@ -1021,6 +1084,9 @@ export async function failStream(
   console.error(
     `[stream] fail request=${requestId} error=${error.code} partial_chars=${partialText.length}`
   );
+
+  // Process queued streams even on failure
+  processStreamQueue();
 }
 
 // ============================================================================

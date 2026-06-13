@@ -193,7 +193,7 @@ pub fn run() {
                 });
 
                 // Load MCP servers in background — do not block app startup.
-                let mcp_pool = pool;
+                let mcp_pool = pool.clone();
                 let mcp_app_handle = app_handle.clone();
                 tokio::spawn(async move {
                     let key_store = crate::state::SystemKeyStore::new();
@@ -204,6 +204,13 @@ pub fn run() {
                         &mcp_manager,
                     )
                     .await;
+                });
+
+                // Start TaskWorker in background
+                let worker_pool = pool.clone();
+                tokio::spawn(async move {
+                    let worker = Arc::new(crate::services::task_worker::TaskWorker::new(worker_pool));
+                    worker.start().await;
                 });
             });
 
@@ -342,6 +349,7 @@ pub fn run() {
             commands::streaming::update_tool_settings,
             commands::streaming::get_security_policy,
             commands::streaming::update_security_policy,
+            commands::streaming::inject_user_message_to_stream,
             // MCP Server management (4 + 2 file-based)
             commands::streaming::list_mcp_servers,
             commands::streaming::add_mcp_server,
@@ -375,6 +383,13 @@ pub fn run() {
             commands::filesystem::list_directory_entries,
             commands::filesystem::read_file_preview,
             commands::filesystem::reveal_in_file_manager,
+            // Task Queue (3)
+            commands::task_queue::list_task_queue,
+            commands::task_queue::cancel_task,
+            // Proposals (3)
+            commands::proposal::get_proposal,
+            commands::proposal::list_proposals,
+            commands::proposal::execute_parallel_fork,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

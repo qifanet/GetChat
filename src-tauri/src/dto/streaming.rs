@@ -246,6 +246,13 @@ pub enum ModelStreamEventDto {
         #[serde(rename = "messageCount")]
         message_count: u32,
     },
+    /// Emitted when a Dual-Queue user injection is applied at a tool boundary.
+    UserInjected {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        /// The user-supplied text that was injected.
+        content: String,
+    },
     /// Emitted after mid-loop context compression completes.
     ContextCompressed {
         #[serde(rename = "requestId")]

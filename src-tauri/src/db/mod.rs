@@ -144,6 +144,14 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0012: Branch diff summaries cache
     let sql_0012 = include_str!("migrations/0012_branch_diff_summaries.sql");
     execute_migration_sql(pool, sql_0012, "Migration 0012").await;
+
+    // 0013: Task queue for background task management
+    let sql_0013 = include_str!("migrations/0013_task_queue.sql");
+    execute_migration_sql(pool, sql_0013, "Migration 0013").await;
+
+    // 0014: Proposals table for parallel fork review
+    let sql_0014 = include_str!("migrations/0014_proposals.sql");
+    execute_migration_sql(pool, sql_0014, "Migration 0014").await;
 }
 
 /**

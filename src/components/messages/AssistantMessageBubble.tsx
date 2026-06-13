@@ -6,6 +6,7 @@
  * Secondary actions: Continue from here (more menu).
  */
 
+import { ParallelForkReviewPanel } from "../parallelFork";
 import { useTranslation } from "react-i18next";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { useAppStore } from "../../stores/useAppStoreSelector";
@@ -381,10 +382,112 @@ export const AssistantMessageBubble = memo(function AssistantMessageBubble({
     );
   }
 
+  // Check for pending parallel fork proposals
+  const parallelForkProposal = message.toolCalls?.find((tc) => {
+    if (tc.functionName !== 'parallel_branch_fork') return false;
+    if (!tc.resultJson) return false;
+    try {
+      const result = JSON.parse(tc.resultJson);
+      return result.status === 'PENDING_USER_REVIEW' && result.fork_proposal_id;
+    } catch {
+      return false;
+    }
+  });
+
+  const proposalPanel = parallelForkProposal ? (() => {
+    try {
+      const result = JSON.parse(parallelForkProposal.resultJson);
+      return (
+        <ParallelForkReviewPanel
+          proposalId={result.fork_proposal_id}
+          branches={result.branches || []}
+          onExecute={async (taskIds: string[]) => {
+            console.log('[ParallelFork] Tasks created:', taskIds);
+            // Wait for tasks to complete (they usually finish in ~2 seconds)
+            const maxAttempts = 20;
+            for (let i = 0; i < maxAttempts; i++) {
+              await new Promise(r => setTimeout(r, 500));
+              try {
+                const tasks = await import('../../services/tauriCommands').then(m => m.listTaskQueue());
+                const relevant = tasks.filter(t => taskIds.includes(t.id));
+                const allDone = relevant.every(t => t.status === 'COMPLETED' || t.status === 'FAILED');
+                if (allDone) {
+                  console.log('[ParallelFork] All tasks completed, reloading snapshot');
+                  const convId = useAppStore.getState().activeSnapshot?.summary.id;
+                  if (convId) {
+                    await useAppStore.getState().openConversation(convId);
+                  }
+
+                  // Auto-trigger AI response for each completed branch (sequentially for RPM)
+                  const snapshot = useAppStore.getState().activeSnapshot;
+                  if (snapshot) {
+                    const completedTaskConfigs = relevant
+                      .filter(t => t.status === 'COMPLETED')
+                      .map(t => t.config);
+                    
+                    for (const cfg of completedTaskConfigs) {
+                      const branchName = cfg.branch_name;
+                      const branchIdFromConfig = cfg.branch_id;
+                      const modelId = cfg.model_id || useAppStore.getState().composer.selectedModelId || useAppStore.getState().defaultModelId;
+                      if (!modelId || !branchName) continue;
+
+                      // Find the branch by name or ID in the updated snapshot
+                      const branchEntry = Object.entries(snapshot.entities.branches)
+                        .find(([id, b]) => id === branchIdFromConfig || b.name === branchName);
+                      if (!branchEntry) continue;
+                      
+                      const [branchId, branch] = branchEntry;
+                      const headMsgId = branch.headMessageId;
+                      if (!headMsgId) continue;
+
+                      const providerId = resolveProviderIdForModel(useAppStore.getState(), modelId);
+                      if (!providerId) continue;
+
+                      try {
+                        const promptMessages = await tauriCmd.buildPromptMessages({
+                          conversationId: convId!,
+                          upToMessageId: headMsgId,
+                        });
+
+                        const { startAssistantStream } = await import('../../services/streamController');
+                        await startAssistantStream({
+                          conversationId: convId!,
+                          branchId,
+                          parentMessageId: headMsgId,
+                          providerId,
+                          modelId,
+                          promptMessages,
+                        });
+                        console.log('[ParallelFork] AI stream started for branch:', branchName);
+                      } catch (streamErr) {
+                        console.error('[ParallelFork] Failed to start stream for branch:', branchName, streamErr);
+                      }
+                    }
+                  }
+                  break;
+                }
+              } catch (pollErr) {
+                console.error('[ParallelFork] Poll error:', pollErr);
+              }
+            }
+          }}
+          onError={(error: Error) => {
+            console.error('[ParallelFork] Execution failed:', error);
+            // TODO: Show error toast
+          }}
+        />
+      );
+    } catch (e) {
+      console.error('[ParallelFork] Failed to render panel:', e);
+      return null;
+    }
+  })() : null;
+
   return (
     <AssistantMessageFrame message={message} footer={footerActions}>
       {blockContent ?? <MarkdownRenderer content={message.content.text} />}
       {blockContent ? null : persistedToolCallSection}
+      {proposalPanel}
     </AssistantMessageFrame>
   );
 });

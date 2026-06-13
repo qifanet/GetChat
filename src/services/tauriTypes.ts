@@ -361,6 +361,13 @@ export interface ModelStreamRetryingEvent {
   errorSummary: string;
 }
 
+/** Dual-Queue injection applied at a tool boundary. */
+export interface ModelStreamUserInjectedEvent {
+  kind: "USER_INJECTED";
+  requestId: RequestId;
+  content: string;
+}
+
 /** Union of all runtime model stream events delivered through the channel. */
 export type ModelStreamEvent =
   | ModelStreamChunkEvent
@@ -370,6 +377,7 @@ export type ModelStreamEvent =
   | ModelStreamToolResultEvent
   | ModelStreamApprovalRequiredEvent
   | ModelStreamRetryingEvent
+  | ModelStreamUserInjectedEvent
   | ModelStreamContextCompressingEvent
   | ModelStreamContextCompressionSkippedEvent
   | ModelStreamContextStatusUpdatedEvent
@@ -508,4 +516,27 @@ export interface FilePreviewDto {
   language: string | null;
   isBinary: boolean;
   fileSize: number;
+}
+
+// ============================================================================
+// Proposal Commands (v1.5.0)
+// ============================================================================
+
+export type ProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+
+export interface ProposalBranchDto {
+  branchName: string;
+  initialMessage: string;
+  modelId: string;
+}
+
+export interface ProposalDto {
+  id: string;
+  conversationId: string;
+  forkPointMessageId: string;
+  proposalType: string;
+  status: ProposalStatus;
+  branches: ProposalBranchDto[];
+  createdAt: number;
+  executedAt: number | null;
 }

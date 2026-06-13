@@ -111,7 +111,13 @@ export type BrowserDebugCommandName =
   | "set_close_behavior"
   | "get_shell_path"
   | "set_shell_path"
-  | "detect_shell_path";
+  | "detect_shell_path"
+  | "list_task_queue"
+  | "cancel_task"
+  | "inject_user_message_to_stream"
+  | "get_proposal"
+  | "list_proposals"
+  | "execute_parallel_fork";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {

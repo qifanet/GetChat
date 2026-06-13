@@ -85,6 +85,19 @@ export const ContentBlockRenderer = memo(function ContentBlockRenderer({
           );
         }
 
+        // Dual-Queue injection — user message injected at a tool boundary
+        if (block.type === "user_injected") {
+          return (
+            <div
+              key={`inject-${index}`}
+              className="my-2 px-3 py-2 rounded-md border border-blue-500/30 bg-blue-500/10 text-sm text-blue-300 dark:text-blue-300"
+            >
+              <span className="font-medium text-blue-400 mr-1.5">▸ Injected:</span>
+              {block.content}
+            </div>
+          );
+        }
+
         return null;
       })}
     </>
