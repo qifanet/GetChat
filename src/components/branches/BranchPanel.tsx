@@ -428,7 +428,7 @@ function BranchRow({
 
   return (
     <div
-      className={`group flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors cursor-pointer ${bgClass}`}
+      className={`group flex items-center gap-1.5 rounded-lg px-2 py-1 cursor-pointer ${bgClass}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       role="button"
@@ -457,7 +457,7 @@ function BranchRow({
             return (
               <div
                 key={i}
-                className="absolute top-0 h-full w-px bg-miro-border/25"
+                className="absolute top-0 h-full w-px bg-miro-border/25 dark:bg-miro-blue/50"
                 style={{ left: i * INDENT_PX + 7 }}
               />
             );
@@ -466,7 +466,7 @@ function BranchRow({
           <Fragment>
             {/* Horizontal connector */}
             <div
-              className="absolute top-1/2 h-px bg-miro-border/25"
+              className="absolute top-1/2 h-px bg-miro-border/25 dark:bg-miro-blue/50"
               style={{
                 left: (depth - 1) * INDENT_PX + 7,
                 width: INDENT_PX - 4,
@@ -544,12 +544,12 @@ function BranchRow({
               {displayName}
             </span>
             {isMainline ? (
-              <span className="shrink-0 whitespace-nowrap app-status-pill border-miro-green/20 bg-miro-green-light/80 text-miro-green text-[9px]">
+              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap app-status-pill border-miro-green/20 bg-miro-green-light/80 text-miro-green text-[9px] leading-none h-4">
                 {t("common.mainline")}
               </span>
             ) : null}
             {isCurrent ? (
-              <span className="shrink-0 whitespace-nowrap app-status-pill border-miro-blue/15 bg-miro-blue-light text-miro-blue text-[9px]">
+              <span className="inline-flex shrink-0 items-center justify-center whitespace-nowrap app-status-pill border-miro-blue/15 bg-miro-blue-light text-miro-blue text-[9px] leading-none h-4">
                 {t("common.current")}
               </span>
             ) : null}

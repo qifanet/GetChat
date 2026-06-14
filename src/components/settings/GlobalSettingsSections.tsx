@@ -278,7 +278,7 @@ function BuiltinToolsSection() {
                 }`}
               >
                 <span
-                  className="block h-3.5 w-3.5 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-all duration-200"
+                  className="block h-3.5 w-3.5 rounded-full bg-miro-card shadow-xs ring-1 ring-miro-border/50 transition-all duration-200"
                   style={{
                     transform: tool.enabled
                       ? 'translate(20px, 3px)'
@@ -502,7 +502,7 @@ function McpServersSection() {
                     title={server.status === "disabled" ? t("settings.skillEnable", { defaultValue: "Enable" }) : t("settings.skillDisable", { defaultValue: "Disable" })}
                   >
                     <span
-                      className="block h-3.5 w-3.5 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-all duration-200"
+                      className="block h-3.5 w-3.5 rounded-full bg-miro-card shadow-xs ring-1 ring-miro-border/50 transition-all duration-200"
                       style={{
                         transform: server.status !== "disabled"
                           ? 'translate(20px, 3px)'

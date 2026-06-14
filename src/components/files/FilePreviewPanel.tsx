@@ -372,7 +372,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
                       isCurrentMatch
                         ? "bg-miro-blue-light/80"
                         : isMatch
-                          ? "bg-yellow-100/60"
+                          ? "bg-miro-amber-light/60"
                           : "hover:bg-miro-surface-low/50"
                     }`}
                   >

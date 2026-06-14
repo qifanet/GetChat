@@ -188,7 +188,7 @@ export function ImportDialog() {
               {result.errors.length > 0 && (
                 <div className="mt-2 max-h-32 overflow-y-auto">
                   {result.errors.map((err, i) => (
-                    <p key={i} className="text-xs text-red-500">{err}</p>
+                    <p key={i} className="text-xs text-miro-red">{err}</p>
                   ))}
                 </div>
               )}

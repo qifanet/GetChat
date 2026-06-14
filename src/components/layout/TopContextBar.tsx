@@ -196,7 +196,7 @@ export function TopContextBar() {
               <button
                 type="button"
                 onClick={() => setModelDropdownOpen((prev) => !prev)}
-                className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/40 bg-miro-card/88 px-2.5 py-1.5 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
+                className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-miro-border/15 bg-miro-card/88 px-2.5 py-1.5 text-left text-sm text-miro-text shadow-ring transition-colors hover:bg-miro-card/95 focus:outline-hidden focus:ring-0"
                 title={currentBranch?.preferredModelId ? currentModelLabel : undefined}
               >
                 <span className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary 2xl:inline">

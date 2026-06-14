@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/useAppStoreSelector";
 import { useThemeStore } from "../../stores/useThemeStore";
+import { isDarkThemeMode } from "../../utils/mediaQuery";
 import {
   selectGlobalView,
   type GlobalViewNode,
@@ -124,7 +125,8 @@ export function ConversationGlobalView({ onClose }: Props) {
     y: number;
   }>({ visible: false, text: "", branchName: "", x: 0, y: 0 });
 
-  const isDark = useThemeStore((s) => s.mode === "dark" || (s.mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches));
+  const themeMode = useThemeStore((s) => s.mode);
+  const isDark = isDarkThemeMode(themeMode);
 
   // Theme-aware SVG palette
   const svgPalette = useMemo(() => isDark ? {
