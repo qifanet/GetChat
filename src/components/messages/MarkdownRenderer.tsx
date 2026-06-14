@@ -49,6 +49,7 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 import { oneLight, oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTranslation } from "react-i18next";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import { isDarkThemeMode } from "../../utils/mediaQuery";
 import { FILE_LINK_PROTOCOL, parseFileLinkUrl, remarkFilePaths } from "../../utils/remarkFilePaths";
 import { MermaidBlock } from "./MermaidBlock";
 import { useAppStore } from "../../stores/useAppStore";
@@ -372,7 +373,7 @@ function normalizeMathDelimiters(text: string): string {
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, disableMermaid = false }: MarkdownRendererProps) {
   const { t } = useTranslation();
   const themeMode = useThemeStore((s) => s.mode);
-  const isDark = themeMode === "dark" || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const isDark = isDarkThemeMode(themeMode);
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents(

@@ -4,6 +4,8 @@
  * inline sidebars and overlay side panels.
  */
 import { useEffect, useState } from "react";
+import { getMediaQueryList } from "../utils/mediaQuery";
+
 const DEFAULT_BREAKPOINT_PX = 1480;
 /**
  * Return whether the app shell should use the compact layout.
@@ -25,7 +27,15 @@ export function useCompactAppShell(
     if (typeof window === "undefined") {
       return undefined;
     }
-    const mediaQuery = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
+    const mediaQuery = getMediaQueryList(`(max-width: ${breakpointPx - 1}px)`);
+
+    if (!mediaQuery) {
+      const syncWindowWidth = (): void => setIsCompact(getMatches());
+      syncWindowWidth();
+      window.addEventListener("resize", syncWindowWidth);
+      return () => window.removeEventListener("resize", syncWindowWidth);
+    }
+
     const syncMatches = (): void => setIsCompact(mediaQuery.matches);
     syncMatches();
     if (typeof mediaQuery.addEventListener === "function") {

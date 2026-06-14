@@ -10,6 +10,7 @@ import { useState, useEffect, useRef, memo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useThemeStore } from "../../stores/useThemeStore";
+import { isDarkThemeMode } from "../../utils/mediaQuery";
 
 interface MermaidBlockProps {
   code: string;
@@ -45,7 +46,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
       offscreenRef.current = offscreen;
 
       try {
-        const isDark = themeMode === "dark" || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        const isDark = isDarkThemeMode(themeMode);
         const mermaid = await import("mermaid");
         mermaid.default.initialize({
           startOnLoad: false,
