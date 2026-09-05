@@ -189,6 +189,7 @@ pub fn run() {
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
                     security_policy: Arc::new(tokio::sync::Mutex::new(security_policy)),
                     pending_approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    agent_sessions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     mcp_manager: mcp_manager.clone(),
                     app_handle: app_handle.clone(),
                 });

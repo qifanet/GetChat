@@ -79,6 +79,7 @@ async fn test_deps(scripted: Arc<ScriptedModel>, tool_names: &[&str]) -> ReactLo
         mcp: McpBackend::Unavailable,
         stream: StreamBackend::Scripted(scripted),
         compression: CompressionBackend::Disabled,
+        session: crate::agent::session::new_shared_session(),
     }
 }
 
@@ -533,8 +534,17 @@ async fn inject_queue_drained_at_tool_boundary() {
     let (channel, channel_events) = recording_channel();
     let (cancel_tx, cancel_rx) = watch::channel(false);
 
-    crate::services::inject_queue::push_inject_message("req_inject", "please also double it".to_string());
-    crate::services::inject_queue::push_inject_message("req_inject", "and use math".to_string());
+    // Injections are queued into THIS run's session (request-scoped, M1).
+    deps.session
+        .lock()
+        .await
+        .injections
+        .push("please also double it".to_string());
+    deps.session
+        .lock()
+        .await
+        .injections
+        .push("and use math".to_string());
 
     let request = test_request("req_inject", &deps.tool_definitions, None);
     let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
@@ -635,6 +645,34 @@ async fn cancel_before_first_iteration_returns_cancelled() {
 // ============================================================================
 // Scripted model unit behavior
 // ============================================================================
+
+/// M1 session isolation: two concurrent runs have independent injection
+/// queues — draining one must never see the other's messages (A3 regression
+/// guard for the removed global inject queue).
+#[tokio::test]
+async fn agent_sessions_isolate_injections() {
+    let session_a = crate::agent::session::new_shared_session();
+    let session_b = crate::agent::session::new_shared_session();
+
+    session_a
+        .lock()
+        .await
+        .injections
+        .push("for a only".to_string());
+    session_b
+        .lock()
+        .await
+        .injections
+        .push("for b only".to_string());
+
+    let drained_a = crate::agent::session::drain_injections(&session_a).await;
+    assert_eq!(drained_a, vec!["for a only".to_string()]);
+
+    // B keeps its own message; A is empty after its drain.
+    let drained_b = crate::agent::session::drain_injections(&session_b).await;
+    assert_eq!(drained_b, vec!["for b only".to_string()]);
+    assert!(crate::agent::session::drain_injections(&session_a).await.is_empty());
+}
 
 /// An exhausted script fails closed with a non-retriable error instead of
 /// looping forever — a test bug must look like a test bug.

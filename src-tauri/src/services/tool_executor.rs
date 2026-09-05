@@ -706,16 +706,6 @@ pub struct TodoItem {
 static TODO_STORE: Lazy<Mutex<HashMap<String, Vec<TodoItem>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-/** Current conversation context for todo operations. Set by streaming layer. */
-static TODO_CONVERSATION_ID: Lazy<Mutex<Option<String>>> =
-    Lazy::new(|| Mutex::new(None));
-
-/** Set the current conversation ID for todo tool context. */
-pub fn set_todo_conversation_id(id: Option<String>) {
-    let mut ctx = TODO_CONVERSATION_ID.lock().unwrap();
-    *ctx = id;
-}
-
 /** Read todos for a specific conversation (used by frontend polling). */
 pub fn read_todos_for_conversation(conversation_id: &str) -> Vec<TodoItem> {
     let store = TODO_STORE.lock().unwrap();
@@ -729,22 +719,11 @@ pub fn clear_todos_for_conversation(conversation_id: &str) {
     store.remove(conversation_id);
 }
 
-pub fn read_all_todos() -> Vec<TodoItem> {
-    let store = TODO_STORE.lock().unwrap();
-    let key = get_legacy_todo_key();
-    store.get(&key).cloned().unwrap_or_default()
-}
-
 fn get_todo_key(context: &ToolExecutionContext) -> String {
     context
         .conversation_id
         .clone()
         .unwrap_or_else(|| "default".to_string())
-}
-
-fn get_legacy_todo_key() -> String {
-    let ctx = TODO_CONVERSATION_ID.lock().unwrap();
-    ctx.clone().unwrap_or_else(|| "default".to_string())
 }
 
 // ============================================================================

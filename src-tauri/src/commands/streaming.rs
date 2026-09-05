@@ -228,7 +228,13 @@ pub async fn start_model_stream(
     };
 
     // Run the ReAct Loop
-    let deps = build_react_loop_deps(&state).await;
+    let session = crate::agent::session::new_shared_session();
+    state
+        .agent_sessions
+        .lock()
+        .await
+        .insert(request_id.clone(), session.clone());
+    let deps = build_react_loop_deps(&state, session).await;
     let tool_limits = state.tool_limits.lock().await.clone();
     let result = run_react_loop(
         &deps,
@@ -243,6 +249,7 @@ pub async fn start_model_stream(
     .await;
 
     state.active_model_streams.lock().await.remove(&request_id);
+    state.agent_sessions.lock().await.remove(&request_id);
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -1209,7 +1216,10 @@ async fn dispatch_stream(
  * Resolve the ReAct loop's dependencies from Tauri-managed application state.
  * Tests build an equivalent `ReactLoopDeps` fixture instead of calling this.
  */
-async fn build_react_loop_deps<'a>(state: &'a State<'a, AppState>) -> ReactLoopDeps<'a> {
+async fn build_react_loop_deps<'a>(
+    state: &'a State<'a, AppState>,
+    session: crate::agent::session::SharedAgentSession,
+) -> ReactLoopDeps<'a> {
     ReactLoopDeps {
         db: state.db.clone(),
         tool_executor: state.tool_executor.clone(),
@@ -1220,6 +1230,7 @@ async fn build_react_loop_deps<'a>(state: &'a State<'a, AppState>) -> ReactLoopD
         mcp: McpBackend::Real(state.mcp_manager.clone()),
         stream: StreamBackend::Real,
         compression: CompressionBackend::Real(state.clone()),
+        session,
     }
 }
 
@@ -1322,115 +1333,15 @@ pub(crate) async fn run_react_loop(
     };
     let mut consecutive_tool_failures = 0u32;
 
-    // Set todo conversation context for scoped storage
-    crate::services::tool_executor::set_todo_conversation_id(conversation_id.clone());
-
-    // Ensure todo context is cleared when the loop exits
-    let _todo_guard = scopeguard::guard((), |_| {
-        crate::services::tool_executor::set_todo_conversation_id(None);
-    });
-
-    // Inject tool usage guidance when tools are available
-    if !current_tools.is_empty() {
-        let tool_names: Vec<&str> = current_tools.iter().map(|t| t.function.name.as_str()).collect();
-        let mut guidance_parts: Vec<String> = Vec::new();
-
-        guidance_parts.push("You have access to tools. Use them proactively when they can help answer the user's request more accurately or efficiently.".to_string());
-
-        if tool_names.iter().any(|n| *n == "todo") {
-            guidance_parts.push("When the user's request involves multiple steps or a complex task, proactively use the todo tool (action=write) to create a todo list first, then work through each item and update statuses as you progress. This helps track progress and ensures nothing is missed.".to_string());
-        }
-
-        if tool_names.iter().any(|n| *n == "file") {
-            guidance_parts.push("When asked about files or code, use file tools to read actual file contents rather than guessing. Always verify information by reading the files first.".to_string());
-        }
-
-        if tool_names.iter().any(|n| *n == "terminal") {
-            let mut terminal_guidance = String::from(
-                "IMPORTANT: This is a local desktop environment, NOT a container or sandbox. ",
-            );
-            if let Some(ref ws) = initial_request.workspace_path {
-                terminal_guidance.push_str(&format!(
-                    "The current working directory is '{}'. ",
-                    ws.replace('\\', "/"),
-                ));
-            }
-            terminal_guidance.push_str(
-                "Do NOT use /workspace as a path — that is a container convention and does not exist here. \
-                 Always verify a directory exists before cd-ing into it (e.g., use 'ls DIR && cd DIR' or check with 'if exist DIR' on Windows). \
-                 If a cd command fails, list available directories first before trying another path.",
-            );
-            guidance_parts.push(terminal_guidance);
-        }
-
-        if !guidance_parts.is_empty() {
-            let guidance = guidance_parts.join(" ");
-            // Prepend as system message or append to existing system message
-            if let Some(first) = prompt_messages.first_mut() {
-                if first.role == "system" || first.role == "SYSTEM" {
-                    first.content.push_str("\n\n");
-                    first.content.push_str(&guidance);
-                } else {
-                    prompt_messages.insert(0, ModelPromptMessageDto {
-                        source_message_id: None,
-                        role: "system".to_string(),
-                        content: guidance,
-                        reasoning_content: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        name: None,
-                    });
-                }
-            } else {
-                prompt_messages.insert(0, ModelPromptMessageDto {
-                    source_message_id: None,
-                    role: "system".to_string(),
-                    content: guidance,
-                    reasoning_content: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                    name: None,
-                });
-            }
-        }
-
-        // Inject skill metadata (Tier 1) and activation hint (Tier 3)
-        if let Some(app_data) = deps.app_data_dir.as_ref() {
-            let skills_dir = crate::services::skill_fs::skills_root_from_app_data(app_data);
-            let skills = crate::services::skill_fs::discover_skills(&skills_dir);
-
-            if !skills.is_empty() {
-                let skill_metadata = crate::services::skill_fs::build_skill_metadata_prompt(&skills);
-                if let Some(first) = prompt_messages.first_mut() {
-                    if first.role == "system" || first.role == "SYSTEM" {
-                        first.content.push_str("\n\n");
-                        first.content.push_str(&skill_metadata);
-                    } else {
-                        prompt_messages.insert(0, ModelPromptMessageDto {
-                            source_message_id: None,
-                            role: "system".to_string(),
-                            content: skill_metadata,
-                            reasoning_content: None,
-                            tool_calls: None,
-                            tool_call_id: None,
-                            name: None,
-                        });
-                    }
-                }
-            }
-
-            // Tier 3: activation hint for slash command
-            if let Some(ref skill_name) = initial_request.activated_skill {
-                let hint = crate::services::skill_fs::build_skill_activation_hint(skill_name);
-                if let Some(first) = prompt_messages.first_mut() {
-                    if first.role == "system" || first.role == "SYSTEM" {
-                        first.content.push_str("\n\n");
-                        first.content.push_str(&hint);
-                    }
-                }
-            }
-        }
-    }
+    // Compose tool guidance, skill metadata, and the activation hint into the
+    // prompt (M1.4: relocated verbatim to agent/prompt.rs).
+    crate::agent::prompt::inject_prompt_context(
+        &mut prompt_messages,
+        &current_tools,
+        initial_request.workspace_path.as_deref(),
+        deps.app_data_dir.as_deref(),
+        initial_request.activated_skill.as_deref(),
+    );
 
     for iteration in 0..max_iterations {
         // Check cancellation
@@ -1871,8 +1782,9 @@ pub(crate) async fn run_react_loop(
                     }
                 }
 
-                // Drain inject queue and append as user messages (Dual-Queue injection)
-                let injected = crate::services::inject_queue::drain_inject_messages(&request_id);
+                // Drain this run's inject queue and append as user messages
+                // (Dual-Queue injection) — scoped to this session (M1).
+                let injected = crate::agent::session::drain_injections(&deps.session).await;
                 if !injected.is_empty() {
                     for msg in &injected {
                         let _ = channel.send(ModelStreamEventDto::UserInjected {
@@ -3495,6 +3407,15 @@ pub async fn inject_user_message_to_stream(
             )));
         }
     }
-    crate::services::inject_queue::push_inject_message(&request_id, message);
-    Ok(())
+    // Push into this run's AgentSession — scoped by request_id, never shared
+    // with other concurrent streams (M1 session-scoping).
+    match state.agent_sessions.lock().await.get(&request_id).cloned() {
+        Some(session) => {
+            session.lock().await.injections.push(message);
+            Ok(())
+        }
+        None => Err(AppError::invalid_argument(&format!(
+            "No agent session found for request_id: {request_id}"
+        ))),
+    }
 }

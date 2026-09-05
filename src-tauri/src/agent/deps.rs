@@ -28,6 +28,7 @@ use crate::services::tool_executor::ToolExecutor;
 use crate::state::{AppState, SecurityPolicy};
 
 use super::eval::mock_provider::ScriptedModel;
+use super::session::SharedAgentSession;
 
 /** Where model requests are served from. */
 #[derive(Clone, Default)]
@@ -87,4 +88,6 @@ pub(crate) struct ReactLoopDeps<'a> {
     pub mcp: McpBackend,
     pub stream: StreamBackend,
     pub compression: CompressionBackend<'a>,
+    /// This run's session handle (injections live here, scoped by request_id).
+    pub session: SharedAgentSession,
 }

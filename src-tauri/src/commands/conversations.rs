@@ -323,9 +323,12 @@ pub struct TodoItemDto {
 
 #[tauri::command]
 pub async fn read_todo_items(conversation_id: Option<String>) -> Vec<TodoItemDto> {
+    // Todos are scoped per conversation; without a conversation id there is
+    // nothing meaningful to show (the legacy global-lookup was removed with
+    // the M1 session-scoping work).
     let items = match conversation_id {
         Some(id) => crate::services::tool_executor::read_todos_for_conversation(&id),
-        None => crate::services::tool_executor::read_all_todos(),
+        None => Vec::new(),
     };
     items.into_iter().map(|t| TodoItemDto {
         id: t.id,

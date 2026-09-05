@@ -141,6 +141,8 @@ pub struct AppState {
     pub tool_limits: Arc<Mutex<ToolLimits>>,
     pub security_policy: Arc<Mutex<SecurityPolicy>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /** Per-request agent sessions (inject queue etc.), keyed by request_id. */
+    pub agent_sessions: Arc<Mutex<HashMap<String, crate::agent::session::SharedAgentSession>>>,
     pub mcp_manager: Arc<Mutex<crate::services::mcp_client::McpManager>>,
     pub app_handle: tauri::AppHandle,
 }

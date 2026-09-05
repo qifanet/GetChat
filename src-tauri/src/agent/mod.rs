@@ -18,3 +18,5 @@
 
 pub(crate) mod deps;
 pub(crate) mod eval;
+pub(crate) mod prompt;
+pub(crate) mod session;

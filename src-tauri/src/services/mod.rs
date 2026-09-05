@@ -12,7 +12,6 @@
 pub mod helper_ai_service;
 pub mod importance_scorer;
 pub mod import_service;
-pub mod inject_queue;
 pub mod invariant_service;
 pub mod mcp_client;
 pub mod mcp_config_file;
