@@ -41,6 +41,19 @@ pub(crate) struct ToolMeta {
     #[allow(dead_code)]
     pub max_output_chars: usize,
     /** Consumed by the parallel executor's per-tool deadline (M2.4). */
-    #[allow(dead_code)]
     pub timeout_secs: u64,
+}
+
+/**
+ * Default META for MCP tools (`mcp__<server>__<tool>`, M2.2). MCP tools run
+ * external code (High risk — the approval policy always gates them) but are
+ * parallel-friendly (Safe); transport details stay in `services/mcp_client.rs`.
+ */
+pub(crate) fn mcp_tool_meta() -> ToolMeta {
+    ToolMeta {
+        risk: ToolRisk::High,
+        concurrency: ToolConcurrency::Safe,
+        max_output_chars: 50_000,
+        timeout_secs: 60,
+    }
 }

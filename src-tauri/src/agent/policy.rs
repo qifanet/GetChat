@@ -15,7 +15,10 @@
  */
 
 use serde_json::Value;
+use tauri::ipc::Channel;
 
+use crate::agent::deps::ReactLoopDeps;
+use crate::dto::streaming::ModelStreamEventDto;
 use crate::state::{SecurityLevel, SecurityPolicy};
 
 /** Decision kind for one (tool, security level) cell of the rule table. */
@@ -155,6 +158,110 @@ pub(crate) fn build_approval_description(function_name: &str, arguments: &str) -
         }
         _ => format!("Execute destructive tool: {}", function_name),
     }
+}
+
+// ============================================================================
+// Approval round-trip (M2.5) — verbatim relocation of the runner's inline
+// approval-wait block: pending registration, frontend event, timed wait.
+// ============================================================================
+
+/** How an approval request resolved. */
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApprovalOutcome {
+    /** The user explicitly approved the operation. */
+    Approved,
+    /** The user rejected, or the approval channel closed without a response. */
+    Rejected,
+    /** The backend-side timeout elapsed without any user response. */
+    TimedOut,
+}
+
+/**
+ * Request user approval for a tool call and block until it resolves.
+ *
+ * Registers a oneshot sender in `pending_approvals`, emits `ApprovalRequired`
+ * to the frontend, and waits with a backend-side timeout. The pending entry is
+ * always removed before returning.
+ */
+pub(crate) async fn request_user_approval(
+    deps: &ReactLoopDeps<'_>,
+    channel: &Channel<ModelStreamEventDto>,
+    request_id: &str,
+    tool_call_id: &str,
+    function_name: &str,
+    arguments: &str,
+    approval_timeout_secs: u32,
+) -> ApprovalOutcome {
+    // Request user approval via oneshot channel
+    let approval_id = format!("{}_{}", request_id, tool_call_id);
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+
+    // Register the pending approval
+    {
+        let mut pending = deps.pending_approvals.lock().await;
+        pending.insert(approval_id.clone(), tx);
+    }
+
+    // Build description from arguments
+    let description = build_approval_description(function_name, arguments);
+
+    // Emit APPROVAL_REQUIRED event to frontend
+    let _ = channel.send(ModelStreamEventDto::ApprovalRequired {
+        request_id: request_id.to_string(),
+        approval_id: approval_id.clone(),
+        function_name: function_name.to_string(),
+        description,
+        timeout_secs: approval_timeout_secs,
+    });
+
+    tracing::info!(
+        request_id = %request_id,
+        approval_id = %approval_id,
+        tool = %function_name,
+        "react loop: waiting for user approval"
+    );
+
+    // Wait for user response with backend-side timeout
+    let outcome = match tokio::time::timeout(
+        std::time::Duration::from_secs(approval_timeout_secs as u64),
+        rx,
+    ).await {
+        Ok(Ok(approved)) => {
+            tracing::info!(
+                approval_id = %approval_id,
+                approved,
+                "react loop: approval received, resuming"
+            );
+            if approved {
+                ApprovalOutcome::Approved
+            } else {
+                ApprovalOutcome::Rejected
+            }
+        }
+        Ok(Err(_)) => {
+            tracing::warn!(
+                approval_id = %approval_id,
+                "approval channel closed, treating as rejected"
+            );
+            ApprovalOutcome::Rejected
+        }
+        Err(_) => {
+            tracing::warn!(
+                approval_id = %approval_id,
+                timeout_secs = approval_timeout_secs,
+                "approval timed out (backend)"
+            );
+            ApprovalOutcome::TimedOut
+        }
+    };
+
+    // Clean up the pending approval entry
+    {
+        let mut pending = deps.pending_approvals.lock().await;
+        pending.remove(&approval_id);
+    }
+
+    outcome
 }
 
 // ============================================================================

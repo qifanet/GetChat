@@ -233,6 +233,73 @@ async fn multiple_tool_calls_same_turn_all_results_appended() {
     assert!(tool_results[1].contains("4"));
 }
 
+/// M2.4: multiple consecutive Safe calls in one round run in parallel and
+/// their results are back-filled strictly in the original call order — every
+/// tool_call_id must stay paired with its own result content (provider
+/// contracts pair role=tool messages to assistant calls by id, not position).
+#[tokio::test]
+async fn parallel_batch_backfills_results_in_call_order() {
+    let scripted = ScriptedModel::new(vec![
+        ScriptedStep::ToolCalls {
+            calls: vec![
+                ScriptedToolCall::new("calculator", json!({"expression": "7*1"})),
+                ScriptedToolCall::new("calculator", json!({"expression": "7*2"})),
+                ScriptedToolCall::new("calculator", json!({"expression": "7*3"})),
+            ],
+            reasoning_content: None,
+        },
+        ScriptedStep::Text {
+            chunks: vec!["done".to_string()],
+            reasoning_content: None,
+        },
+    ]);
+    let deps = test_deps(scripted.clone(), &["calculator"]).await;
+    let (channel, _events) = recording_channel();
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_parallel_batch", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+    drop(cancel_tx);
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    let requests = scripted.recorded_requests();
+    assert_eq!(requests.len(), 2);
+
+    // The assistant tool_calls, in the order the model issued them — recorded
+    // in the SECOND request's prompt (the first is the initial system+user).
+    let assistant_calls = requests[1]
+        .prompt_messages
+        .iter()
+        .find(|m| m.role == "assistant" && m.tool_calls.is_some())
+        .expect("assistant tool_calls message must be recorded")
+        .tool_calls
+        .clone()
+        .expect("tool_calls present");
+    assert_eq!(assistant_calls.len(), 3);
+
+    // Distinct products let the pairing assertion catch both order corruption
+    // and id/content mis-pairing (7, 14, 21 — each unique).
+    let expected_products = ["7", "14", "21"];
+    let pairs = requests[1].tool_result_pairs();
+    assert_eq!(pairs.len(), 3, "every tool call must receive exactly one result");
+    for (call, expected) in assistant_calls.iter().zip(expected_products.iter()) {
+        let pair = pairs
+            .iter()
+            .find(|(id, _)| id == &call.id)
+            .unwrap_or_else(|| panic!("no tool result carries call id {}", call.id));
+        assert!(
+            pair.1.contains(expected),
+            "result for call {} must contain {expected}, got: {}",
+            call.id,
+            pair.1
+        );
+    }
+    // And the results must be appended in the original call order.
+    let issued_ids: Vec<&str> = assistant_calls.iter().map(|c| c.id.as_str()).collect();
+    let paired_ids: Vec<&str> = pairs.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(issued_ids, paired_ids, "results must follow call order");
+}
+
 /// Model reports tool_calls with an empty list: loop completes without
 /// executing anything and without another model call.
 #[tokio::test]

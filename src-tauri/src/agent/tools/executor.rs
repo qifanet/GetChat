@@ -80,6 +80,34 @@ pub trait ToolExecutor: Send + Sync {
     fn disabled_tool_names(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /** Concurrency class for a resolved tool name (default Safe for non-registry tools). */
+    fn tool_concurrency(&self, _name: &str) -> ToolConcurrency {
+        ToolConcurrency::Safe
+    }
+
+    /** Registry META for a tool name, if this executor knows it. Default `None`. */
+    fn tool_meta(&self, _name: &str) -> Option<ToolMeta> {
+        None
+    }
+}
+
+/**
+ * Registry META for a tool (M2.2): the builtin registry entry when registered,
+ * else the documented MCP default for `mcp__`-prefixed names, else `None` and
+ * the caller applies its own fallback. Takes the legacy-resolved name.
+ */
+pub(crate) fn lookup_tool_meta(
+    executor: &dyn ToolExecutor,
+    resolved_name: &str,
+) -> Option<ToolMeta> {
+    if let Some(meta) = executor.tool_meta(resolved_name) {
+        return Some(meta);
+    }
+    if resolved_name.starts_with("mcp__") {
+        return Some(crate::agent::tools::registry::mcp_tool_meta());
+    }
+    None
 }
 
 // ============================================================================
@@ -165,13 +193,15 @@ impl BuiltinToolExecutor {
     }
 
     /** Metadata for a registered tool, or `None` if unknown. */
-    #[allow(dead_code)] // consumed by the M2.4 parallel executor
     pub(crate) fn tool_meta(&self, name: &str) -> Option<ToolMeta> {
         self.tools.get(name).map(|e| e.meta)
     }
 
-    /** Concurrency class of a registered tool (defaults to Safe). */
-    #[allow(dead_code)] // consumed by the M2.4 parallel executor
+    /**
+     * Concurrency class of a registered tool. Unregistered names (e.g.
+     * `mcp__…`, handled by the MCP routing fallback) fall back to Safe —
+     * matching the registry's MCP default.
+     */
     pub(crate) fn tool_concurrency(&self, name: &str) -> ToolConcurrency {
         self.tools
             .get(name)
@@ -279,6 +309,14 @@ impl ToolExecutor for BuiltinToolExecutor {
             .filter(|e| !disabled.contains(&e.definition.function.name))
             .map(|e| e.definition.clone())
             .collect()
+    }
+
+    fn tool_meta(&self, name: &str) -> Option<ToolMeta> {
+        BuiltinToolExecutor::tool_meta(self, name)
+    }
+
+    fn tool_concurrency(&self, name: &str) -> ToolConcurrency {
+        BuiltinToolExecutor::tool_concurrency(self, name)
     }
 
     fn get_tool_states(&self) -> Vec<ToolStateDto> {

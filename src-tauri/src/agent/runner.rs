@@ -35,8 +35,14 @@ use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
 use crate::services::model_stream_service::{
     self, ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest,
 };
-use crate::agent::policy::{build_approval_description, requires_tool_approval, resolve_legacy_tool_name};
-use crate::agent::tools::{ToolExecutionContext, ToolExecutionResult};
+use futures::future::join_all;
+use crate::agent::policy::{ApprovalOutcome, request_user_approval, requires_tool_approval, resolve_legacy_tool_name};
+use crate::agent::tools::{lookup_tool_meta, ToolConcurrency, ToolExecutionContext, ToolExecutionResult};
+
+/// Global kill-switch for M2.4 parallel tool execution (risk-table mitigation:
+/// flip to `false` to restore fully serial execution without touching the
+/// batching logic).
+const PARALLEL_TOOL_EXECUTION_ENABLED: bool = true;
 
 pub(crate) const TOOL_EXECUTION_TIMEOUT_SECONDS: u64 = 60;
 
@@ -328,89 +334,137 @@ pub(crate) async fn run_react_loop(
                 };
                 prompt_messages.push(assistant_tool_call_message);
 
-                for (tool_index, tc) in tool_calls.iter().enumerate() {
-                    // Emit TOOL_CALL event to frontend
-                    let _ = channel.send(ModelStreamEventDto::ToolCall {
-                        request_id: request_id.clone(),
-                        call_id: tc.id.clone(),
-                        function_name: tc.function.name.clone(),
-                        arguments: tc.function.arguments.clone(),
-                    });
-
-                    let security_policy = deps.security_policy.lock().await.clone();
-                    let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
-                    drop(security_policy);
-
-                    let result = if requires_approval {
-                        // Request user approval via oneshot channel
-                        let approval_id = format!("{}_{}", request_id, tc.id);
-                        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-
-                        // Register the pending approval
-                        {
-                            let mut pending = deps.pending_approvals.lock().await;
-                            pending.insert(approval_id.clone(), tx);
+                // M2.4 batching: greedily group this round's tool calls into
+                // batches. A batch is a maximal run of consecutive calls that
+                // need no approval AND resolve to ToolConcurrency::Safe; those
+                // execute in parallel while their results are appended strictly
+                // in original order, so tool_call_id pairing and prompt
+                // ordering stay unchanged. Every other call (approval-gated,
+                // Isolated, Exclusive, or following a non-Safe call) runs
+                // alone exactly as before.
+                let security_policy = deps.security_policy.lock().await.clone();
+                let mut tool_index = 0usize;
+                while tool_index < tool_calls.len() {
+                    let mut batch_end = tool_index;
+                    while batch_end < tool_calls.len() {
+                        let candidate = &tool_calls[batch_end];
+                        if requires_tool_approval(&candidate.function.name, &candidate.function.arguments, &security_policy) {
+                            break;
                         }
+                        let resolved_name = resolve_legacy_tool_name(&candidate.function.name);
+                        if deps.tool_executor.tool_concurrency(&resolved_name) != ToolConcurrency::Safe {
+                            break;
+                        }
+                        batch_end += 1;
+                    }
+                    // A non-Safe or approval-gated call always runs alone: when
+                    // it is the scan's first candidate the loop above breaks
+                    // immediately, so the batch is exactly that one call.
+                    if batch_end == tool_index {
+                        batch_end = tool_index + 1;
+                    }
+                    let batch_calls = &tool_calls[tool_index..batch_end];
 
-                        // Build description from arguments
-                        let description = build_approval_description(
-                            &tc.function.name,
-                            &tc.function.arguments,
-                        );
-
-                        // Emit APPROVAL_REQUIRED event to frontend
-                        let _ = channel.send(ModelStreamEventDto::ApprovalRequired {
+                    // Emit TOOL_CALL events for the batch (in original order)
+                    for tc in batch_calls {
+                        let _ = channel.send(ModelStreamEventDto::ToolCall {
                             request_id: request_id.clone(),
-                            approval_id: approval_id.clone(),
+                            call_id: tc.id.clone(),
                             function_name: tc.function.name.clone(),
-                            description,
-                            timeout_secs: approval_timeout_secs,
+                            arguments: tc.function.arguments.clone(),
                         });
+                    }
 
-                        tracing::info!(
-                            request_id = %request_id,
-                            approval_id = %approval_id,
-                            tool = %tc.function.name,
-                            "react loop: waiting for user approval"
-                        );
-
-                        // Wait for user response with backend-side timeout
-                        let (approved, was_timeout) = match tokio::time::timeout(
-                            std::time::Duration::from_secs(approval_timeout_secs as u64),
-                            rx,
-                        ).await {
-                            Ok(Ok(approved)) => {
-                                tracing::info!(
-                                    approval_id = %approval_id,
-                                    approved,
-                                    "react loop: approval received, resuming"
-                                );
-                                (approved, false)
+                    // Execute the batch: parallel for multi-call Safe runs,
+                    // serial (with the approval flow) for a single call.
+                    let outcomes: Vec<Result<ToolExecutionResult, ReactLoopOutcome>> = if batch_calls.len() > 1 {
+                        if PARALLEL_TOOL_EXECUTION_ENABLED {
+                            let executions = batch_calls.iter().map(|tc| execute_tool_checked(
+                                deps,
+                                &allowed_tool_names,
+                                &tc.function.name,
+                                &tc.function.arguments,
+                                tool_context.clone(),
+                                &cancel_rx,
+                                tool_execution_timeout_secs,
+                            ));
+                            join_all(executions).await
+                        } else {
+                            // Kill-switch fallback (risk table): run the Safe
+                            // batch serially, preserving result order.
+                            let mut serial = Vec::with_capacity(batch_calls.len());
+                            for tc in batch_calls {
+                                serial.push(execute_tool_checked(
+                                    deps,
+                                    &allowed_tool_names,
+                                    &tc.function.name,
+                                    &tc.function.arguments,
+                                    tool_context.clone(),
+                                    &cancel_rx,
+                                    tool_execution_timeout_secs,
+                                ).await);
                             }
-                            Ok(Err(_)) => {
-                                tracing::warn!(
-                                    approval_id = %approval_id,
-                                    "approval channel closed, treating as rejected"
-                                );
-                                (false, false)
-                            }
-                            Err(_) => {
-                                tracing::warn!(
-                                    approval_id = %approval_id,
-                                    timeout_secs = approval_timeout_secs,
-                                    "approval timed out (backend)"
-                                );
-                                (false, true)
-                            }
-                        };
-
-                        // Clean up the pending approval entry
-                        {
-                            let mut pending = deps.pending_approvals.lock().await;
-                            pending.remove(&approval_id);
+                            serial
                         }
-
-                        if approved {
+                    } else {
+                        let tc = &batch_calls[0];
+                        let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
+                        vec![if requires_approval {
+                            match request_user_approval(
+                                deps,
+                                channel,
+                                &request_id,
+                                &tc.id,
+                                &tc.function.name,
+                                &tc.function.arguments,
+                                approval_timeout_secs,
+                            )
+                            .await
+                            {
+                                ApprovalOutcome::Approved => match execute_tool_checked(
+                                    deps,
+                                    &allowed_tool_names,
+                                    &tc.function.name,
+                                    &tc.function.arguments,
+                                    tool_context.clone(),
+                                    &cancel_rx,
+                                    tool_execution_timeout_secs,
+                                )
+                                .await
+                                {
+                                    Ok(result) => Ok(result),
+                                    Err(outcome) => return Ok(outcome),
+                                },
+                                ApprovalOutcome::TimedOut => {
+                                    tracing::info!(
+                                        request_id = %request_id,
+                                        approval_id = format!("{}_{}", request_id, tc.id),
+                                        timeout_secs = approval_timeout_secs,
+                                        "tool approval timed out"
+                                    );
+                                    Ok(crate::agent::tools::ToolExecutionResult {
+                                        success: false,
+                                        output: format!(
+                                            "Approval timed out after {} seconds — user did not respond in time. \
+                                             This is NOT a user rejection. The user may have stepped away or is busy. \
+                                             You may retry this tool call if appropriate.",
+                                            approval_timeout_secs
+                                        ),
+                                    })
+                                }
+                                ApprovalOutcome::Rejected => {
+                                    tracing::info!(
+                                        request_id = %request_id,
+                                        "user rejected tool execution"
+                                    );
+                                    Ok(crate::agent::tools::ToolExecutionResult {
+                                        success: false,
+                                        output: "User explicitly rejected this operation.".to_string(),
+                                    })
+                                }
+                            }
+                        } else {
+                            // Normal tool — execute directly (with MCP routing)
                             match execute_tool_checked(
                                 deps,
                                 &allowed_tool_names,
@@ -420,201 +474,175 @@ pub(crate) async fn run_react_loop(
                                 &cancel_rx,
                                 tool_execution_timeout_secs,
                             )
-                            .await {
-                                Ok(result) => result,
+                            .await
+                            {
+                                Ok(result) => Ok(result),
                                 Err(outcome) => return Ok(outcome),
                             }
-                        } else if was_timeout {
-                            tracing::info!(
-                                approval_id = %approval_id,
-                                timeout_secs = approval_timeout_secs,
-                                "tool approval timed out"
-                            );
-                            crate::agent::tools::ToolExecutionResult {
-                                success: false,
-                                output: format!(
-                                    "Approval timed out after {} seconds — user did not respond in time. \
-                                     This is NOT a user rejection. The user may have stepped away or is busy. \
-                                     You may retry this tool call if appropriate.",
-                                    approval_timeout_secs
-                                ),
-                            }
-                        } else {
-                            tracing::info!(
-                                approval_id = %approval_id,
-                                "user rejected tool execution"
-                            );
-                            crate::agent::tools::ToolExecutionResult {
-                                success: false,
-                                output: "User explicitly rejected this operation.".to_string(),
-                            }
-                        }
-                    } else {
-                        // Normal tool — execute directly (with MCP routing)
-                        match execute_tool_checked(
-                            deps,
-                            &allowed_tool_names,
-                            &tc.function.name,
-                            &tc.function.arguments,
-                            tool_context.clone(),
-                            &cancel_rx,
-                            tool_execution_timeout_secs,
-                        )
-                        .await {
+                        }]
+                    };
+
+                    // Process the batch's results strictly in original order so
+                    // each tool_call_id still pairs with its assistant call.
+                    for (offset, execution_outcome) in outcomes.into_iter().enumerate() {
+                        let tc = &tool_calls[tool_index + offset];
+                        let result = match execution_outcome {
                             Ok(result) => result,
                             Err(outcome) => return Ok(outcome),
-                        }
-                    };
+                        };
 
-                    tracing::info!(
-                        request_id = %request_id,
-                        tool = %tc.function.name,
-                        success = result.success,
-                        output_len = result.output.len(),
-                        "react loop: tool executed"
-                    );
-
-                    // Emit TOOL_RESULT event to frontend
-                    let _ = channel.send(ModelStreamEventDto::ToolResult {
-                        request_id: request_id.clone(),
-                        call_id: tc.id.clone(),
-                        result: result.output.clone(),
-                        success: result.success,
-                    });
-
-                    // Add tool result to prompt messages — immediately truncate
-                    // if the output is excessively large to prevent prompt overflow.
-                    const MAX_INLINE_TOOL_CHARS: usize = 8_000;
-                    let tool_content = if result.output.len() > MAX_INLINE_TOOL_CHARS {
-                        let truncated: String = result.output.chars().take(MAX_INLINE_TOOL_CHARS).collect();
-                        format!(
-                            "{}\n\n[... output truncated ({} chars total) ...]",
-                            truncated,
-                            result.output.len()
-                        )
-                    } else {
-                        result.output.clone()
-                    };
-
-                    let tool_result_message = ModelPromptMessageDto {
-                        source_message_id: None,
-                        role: "tool".to_string(),
-                        content: tool_content.clone(),
-                        reasoning_content: None,
-                        tool_calls: None,
-                        tool_call_id: Some(tc.id.clone()),
-                        name: Some(tc.function.name.clone()),
-                    };
-
-                    // Pre-append compression: predict whether adding this result
-                    // would push the prompt over the danger threshold.  If so,
-                    // compress the CURRENT prompt (without the new result) first
-                    // to create room.  This prevents overflow before it happens.
-                    let result_tokens = crate::services::token_estimator::estimate_dto_message_tokens(
-                        &tool_result_message,
-                    );
-                    let pre_append_tokens = crate::services::token_estimator::estimate_model_request_tokens(
-                        &prompt_messages,
-                        &current_tools,
-                    );
-                    let projected_tokens = pre_append_tokens.saturating_add(result_tokens);
-                    let danger_threshold = (effective_input_budget as f32 * 0.96) as u32;
-
-                    if projected_tokens > danger_threshold && effective_input_budget > 0 {
                         tracing::info!(
                             request_id = %request_id,
-                            iteration,
-                            pre_append_tokens,
-                            result_tokens,
-                            projected_tokens,
-                            danger_threshold,
-                            "react loop: pre-append compression triggered (tool result would exceed 96%)"
+                            tool = %tc.function.name,
+                            success = result.success,
+                            output_len = result.output.len(),
+                            "react loop: tool executed"
                         );
-                        maybe_compress_react_prompt(
-                            deps,
-                            &request_id,
-                            iteration,
-                            &model_id,
-                            &conversation_id,
-                            &branch_id,
-                            &mut prompt_messages,
+
+                        // Emit TOOL_RESULT event to frontend
+                        let _ = channel.send(ModelStreamEventDto::ToolResult {
+                            request_id: request_id.clone(),
+                            call_id: tc.id.clone(),
+                            result: result.output.clone(),
+                            success: result.success,
+                        });
+
+                        // Add tool result to prompt messages — immediately truncate
+                        // if the output is excessively large to prevent prompt overflow.
+                        const MAX_INLINE_TOOL_CHARS: usize = 8_000;
+                        let tool_content = if result.output.len() > MAX_INLINE_TOOL_CHARS {
+                            let truncated: String = result.output.chars().take(MAX_INLINE_TOOL_CHARS).collect();
+                            format!(
+                                "{}\n\n[... output truncated ({} chars total) ...]",
+                                truncated,
+                                result.output.len()
+                            )
+                        } else {
+                            result.output.clone()
+                        };
+
+                        let tool_result_message = ModelPromptMessageDto {
+                            source_message_id: None,
+                            role: "tool".to_string(),
+                            content: tool_content.clone(),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: Some(tc.id.clone()),
+                            name: Some(tc.function.name.clone()),
+                        };
+
+                        // Pre-append compression: predict whether adding this result
+                        // would push the prompt over the danger threshold.  If so,
+                        // compress the CURRENT prompt (without the new result) first
+                        // to create room.  This prevents overflow before it happens.
+                        let result_tokens = crate::services::token_estimator::estimate_dto_message_tokens(
+                            &tool_result_message,
+                        );
+                        let pre_append_tokens = crate::services::token_estimator::estimate_model_request_tokens(
+                            &prompt_messages,
                             &current_tools,
-                            context_budget_tokens,
-                            effective_input_budget,
-                            compression_trigger_tokens,
-                            channel,
-                        )
-                        .await;
-                    }
+                        );
+                        let projected_tokens = pre_append_tokens.saturating_add(result_tokens);
+                        let danger_threshold = (effective_input_budget as f32 * 0.96) as u32;
 
-                    prompt_messages.push(tool_result_message);
-
-                    if result.success {
-                        consecutive_tool_failures = 0;
-                    } else {
-                        consecutive_tool_failures = consecutive_tool_failures.saturating_add(1);
-                        if consecutive_tool_failures >= max_consecutive_failures {
-                            tracing::warn!(
+                        if projected_tokens > danger_threshold && effective_input_budget > 0 {
+                            tracing::info!(
                                 request_id = %request_id,
-                                max_consecutive_failures,
-                                last_tool = %tc.function.name,
-                                "react loop: consecutive tool failure limit reached, forcing final text response"
+                                iteration,
+                                pre_append_tokens,
+                                result_tokens,
+                                projected_tokens,
+                                danger_threshold,
+                                "react loop: pre-append compression triggered (tool result would exceed 96%)"
                             );
-
-                            // The preceding assistant message may contain multiple tool calls.
-                            // Strict providers require every call id to receive a matching
-                            // role=tool result before any final no-tools request.
-                            for skipped_tc in tool_calls.iter().skip(tool_index + 1) {
-                                let skipped_output = format!(
-                                    "Skipped {} because the consecutive tool failure limit ({}) was reached before this tool could run.",
-                                    skipped_tc.function.name, max_consecutive_failures
-                                );
-                                let _ = channel.send(ModelStreamEventDto::ToolCall {
-                                    request_id: request_id.clone(),
-                                    call_id: skipped_tc.id.clone(),
-                                    function_name: skipped_tc.function.name.clone(),
-                                    arguments: skipped_tc.function.arguments.clone(),
-                                });
-                                let _ = channel.send(ModelStreamEventDto::ToolResult {
-                                    request_id: request_id.clone(),
-                                    call_id: skipped_tc.id.clone(),
-                                    result: skipped_output.clone(),
-                                    success: false,
-                                });
-                                prompt_messages.push(ModelPromptMessageDto {
-                                    source_message_id: None,
-                                    role: "tool".to_string(),
-                                    content: skipped_output,
-                                    reasoning_content: None,
-                                    tool_calls: None,
-                                    tool_call_id: Some(skipped_tc.id.clone()),
-                                    name: Some(skipped_tc.function.name.clone()),
-                                });
-                            }
-
-                            prompt_messages.push(ModelPromptMessageDto {
-                                source_message_id: None,
-                                role: "system".to_string(),
-                                content: format!(
-                                    "Tool execution has failed {} consecutive times. You cannot call any more tools in this response. \
-                                    Explain the limitation clearly, summarize what is already known, and provide the best direct answer or next steps without using tools.",
-                                    max_consecutive_failures
-                                ),
-                                reasoning_content: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                                name: None,
-                            });
-                            return stream_final_response_without_tools(
+                            maybe_compress_react_prompt(
                                 deps,
-                                &initial_request,
-                                prompt_messages,
+                                &request_id,
+                                iteration,
+                                &model_id,
+                                &conversation_id,
+                                &branch_id,
+                                &mut prompt_messages,
+                                &current_tools,
+                                context_budget_tokens,
+                                effective_input_budget,
+                                compression_trigger_tokens,
                                 channel,
-                                cancel_rx,
                             )
                             .await;
                         }
+
+                        prompt_messages.push(tool_result_message);
+
+                        if result.success {
+                            consecutive_tool_failures = 0;
+                        } else {
+                            consecutive_tool_failures = consecutive_tool_failures.saturating_add(1);
+                            if consecutive_tool_failures >= max_consecutive_failures {
+                                tracing::warn!(
+                                    request_id = %request_id,
+                                    max_consecutive_failures,
+                                    last_tool = %tc.function.name,
+                                    "react loop: consecutive tool failure limit reached, forcing final text response"
+                                );
+
+                                // The preceding assistant message may contain multiple tool calls.
+                                // Strict providers require every call id to receive a matching
+                                // role=tool result before any final no-tools request.
+                                for skipped_tc in tool_calls.iter().skip(tool_index + offset + 1) {
+                                    let skipped_output = format!(
+                                        "Skipped {} because the consecutive tool failure limit ({}) was reached before this tool could run.",
+                                        skipped_tc.function.name, max_consecutive_failures
+                                    );
+                                    let _ = channel.send(ModelStreamEventDto::ToolCall {
+                                        request_id: request_id.clone(),
+                                        call_id: skipped_tc.id.clone(),
+                                        function_name: skipped_tc.function.name.clone(),
+                                        arguments: skipped_tc.function.arguments.clone(),
+                                    });
+                                    let _ = channel.send(ModelStreamEventDto::ToolResult {
+                                        request_id: request_id.clone(),
+                                        call_id: skipped_tc.id.clone(),
+                                        result: skipped_output.clone(),
+                                        success: false,
+                                    });
+                                    prompt_messages.push(ModelPromptMessageDto {
+                                        source_message_id: None,
+                                        role: "tool".to_string(),
+                                        content: skipped_output,
+                                        reasoning_content: None,
+                                        tool_calls: None,
+                                        tool_call_id: Some(skipped_tc.id.clone()),
+                                        name: Some(skipped_tc.function.name.clone()),
+                                    });
+                                }
+
+                                prompt_messages.push(ModelPromptMessageDto {
+                                    source_message_id: None,
+                                    role: "system".to_string(),
+                                    content: format!(
+                                        "Tool execution has failed {} consecutive times. You cannot call any more tools in this response. \
+                                        Explain the limitation clearly, summarize what is already known, and provide the best direct answer or next steps without using tools.",
+                                        max_consecutive_failures
+                                    ),
+                                    reasoning_content: None,
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                    name: None,
+                                });
+                                return stream_final_response_without_tools(
+                                    deps,
+                                    &initial_request,
+                                    prompt_messages,
+                                    channel,
+                                    cancel_rx,
+                                )
+                                .await;
+                            }
+                        }
                     }
+
+                    tool_index = batch_end;
                 }
 
                 // Drain this run's inject queue and append as user messages
@@ -849,12 +877,17 @@ async fn execute_tool_checked(
         });
     }
 
-    // Extract per-call timeout from tool arguments if provided; otherwise use the
-    // configured default. Models can pass {"timeout": 120} to request a longer
+    // Extract per-call timeout from tool arguments if provided; otherwise use
+    // the registry META deadline (M2.2: builtins carry their own, `mcp__`
+    // tools the documented 60s MCP default), then the configured default.
+    // Models can pass {"timeout": 120} to request a longer
     // execution window for commands that are known to take time.
+    let registry_default = lookup_tool_meta(&*deps.tool_executor, &resolved_name)
+        .map(|m| m.timeout_secs);
     let per_call_timeout: u64 = serde_json::from_str::<Value>(arguments)
         .ok()
         .and_then(|v| v.get("timeout").and_then(Value::as_u64))
+        .or(registry_default)
         .unwrap_or(default_timeout_secs)
         .max(10)           // at least 10 seconds
         .min(600);         // hard ceiling of 10 minutes

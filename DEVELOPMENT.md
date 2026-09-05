@@ -101,10 +101,10 @@
 ### M2 — 工具系统 + PolicyEngine
 
 - [x] M2.1（2026-09-06）`agent/tools/` 落地：`registry.rs` 定义 `ToolMeta { risk, concurrency, max_output_chars, timeout_secs }`（MCP 默认 High/Safe/60s 待 M2.2 接线）；7 个内置工具拆为 `builtin/{calculator,file,todo,terminal,web_search,load_skill,parallel_branch_fork}.rs` 一工具一模块，calculator 手写解析器整体搬家；框架（trait/registry/上下文/状态 DTO/单测）在 `executor.rs`，注册即携带 META。`services/tool_executor.rs` 已删除（2028 行 → 11 个职责单一文件），全部逐字搬迁并经排序行多重集 diff 验证（old-only 仅旧签名/分节横幅）。注：本机 mingw ld 对 tauri cdylib 报 export ordinal too large，`cargo test` 需用 `cargo test --lib`（clean HEAD 同样复现，与本次重构无关）。
-- [ ] M2.2 MCP 工具并入 Registry：命名空间 `mcp__<server>__<tool>`，审批/超时/结果规范化与内置工具同路径（保留 rmcp 传输细节在 `services/mcp_client.rs`）。
+- [x] M2.2（2026-09-06）MCP 工具并入 Registry：`registry.rs::mcp_tool_meta()` 落定 MCP 默认元数据（High/Safe/50k 字符/60s），`executor.rs::lookup_tool_meta()` 统一解析（内置注册表 → `mcp__` 前缀走 MCP 默认）；`execute_tool_checked` 的默认超时改为 META 优先（模型显式 `timeout` 参数 > META > 配置默认，钳位 [10,600] 不变——内置工具自此获得 per-tool 默认截止：file/web_search 30s、load_skill/todo/calculator 触底 10s、terminal 600s）。审批自 M2.3 起即同路径（`mcp__` 恒审批）；结果规范化同路径（统一 `ToolExecutionResult` + 8K 内联截断）；rmcp 传输细节保留在 `services/mcp_client.rs`。`ToolExecutor` trait 新增 `tool_meta`/`tool_concurrency` 默认方法供 dyn 调用。
 - [x] M2.3（2026-09-06）`agent/policy.rs`：`requires_tool_approval`/`matches_blacklist`/`resolve_legacy_tool_name`/`build_approval_description` 从 runner.rs 迁出；决策矩阵数据化为 `APPROVAL_RULES`（tool × action-filter × 三级 SecurityLevel），黑名单选择器拆为 `blacklist_for`/`blacklist_input`。语义逐位保留（MCP 恒审批、解析失败 fail-safe 且先于 action 过滤——顺序经失败测试纠正过一次）。新增审批矩阵 5 用例，81/81 全绿（76 金测 + 5 矩阵）。
-- [ ] M2.4 并行执行器：同一轮内 `concurrency=Safe` 的工具并行、`Exclusive` 串行；结果按原顺序回填（保持 tool_call_id 配对正确）；连败计数语义不变。
-- [ ] M2.5 审批等待逻辑从循环内联改为 runner 调用 policy 的独立单元。
+- [x] M2.4（2026-09-06）并行执行器：循环改为 while 批遍历——批 = 连续"免审批 + `ToolConcurrency::Safe`"调用段（legacy 名先归一再查并发级），多调用批用 `futures::join_all` 并行执行，结果严格按原顺序回填（tool_call_id 配对与 prompt 顺序不变）；非 Safe/需审批调用自成一批单独走原路径（首个候选即非 Safe 的空批边界由金测抓出后修复）。连败计数的 skip 补位索引改为绝对位置 `tool_index + offset + 1`。风险表要求的串行回退开关落地为 `PARALLEL_TOOL_EXECUTION_ENABLED` 常量（false 时 Safe 批内也串行、顺序不变）。取消语义备注：并行批内所有成员执行完毕后才处理取消（批内无法中断兄弟调用）。新增金测 `parallel_batch_backfills_results_in_call_order`（3 调用配对+顺序断言）+ harness 访问器 `tool_result_pairs`，82/82 全绿。
+- [x] M2.5（2026-09-06）审批等待独立单元：`ApprovalOutcome { Approved, Rejected, TimedOut }` + `request_user_approval()`（pending 注册 → `ApprovalRequired` 事件 → 带超时等待 → pending 清理）迁入 `agent/policy.rs`；runner 仅映射结果（Approved→执行、TimedOut/Rejected 文案与 tracing 原样保留）。多重集 diff 验证：差异仅签名/参数化/枚举返回，行为行逐一对齐。
 
 **验收门禁 M2**：工具矩阵单测（每工具 happy/参数错/超时/取消）；审批矩阵 5 用例；并行执行用例（含 tool_call_id 配对完整性）；`tool_executor.rs` 拆分后删除原文件。
 

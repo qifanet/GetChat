@@ -15,4 +15,6 @@ pub mod executor;
 pub use executor::{
     BuiltinToolExecutor, ToolExecutionContext, ToolExecutionResult, ToolExecutor, ToolStateDto,
 };
+pub(crate) use executor::lookup_tool_meta;
+pub(crate) use registry::ToolConcurrency;
 pub use builtin::todo::read_todos_for_conversation;

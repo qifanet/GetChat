@@ -118,6 +118,21 @@ impl RecordedRequest {
             .map(|m| m.content.clone())
             .collect()
     }
+
+    /** (tool_call_id, content) of every tool-result message, in prompt order —
+     * used to assert tool_call_id pairing after parallel execution (M2.4). */
+    pub fn tool_result_pairs(&self) -> Vec<(String, String)> {
+        self.prompt_messages
+            .iter()
+            .filter(|m| m.role == "tool")
+            .map(|m| {
+                (
+                    m.tool_call_id.clone().unwrap_or_default(),
+                    m.content.clone(),
+                )
+            })
+            .collect()
+    }
 }
 
 /** Scripted model shared between the test and the loop under test. */
