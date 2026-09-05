@@ -269,8 +269,8 @@ describe("startAssistantStream", () => {
     );
   });
 
-  it("rejects a second stream while the first is active", async () => {
-    await startAssistantStream({
+  it("queues a second stream while the first is active and starts it after completion", async () => {
+    const first = await startAssistantStream({
       conversationId: "conv_1",
       branchId: "branch_1",
       parentMessageId: "msg_parent",
@@ -280,18 +280,25 @@ describe("startAssistantStream", () => {
     });
     mockTauriCommands.createAssistantPlaceholderForBranch.mockClear();
 
-    await expect(
-      startAssistantStream({
-        conversationId: "conv_1",
-        branchId: "branch_1",
-        parentMessageId: "msg_parent_2",
-        providerId: "prov_1",
-        modelId: "model_1",
-        promptMessages: [],
-      })
-    ).rejects.toThrow("already running");
+    // Second stream is queued (v1.5 behavior) instead of rejected.
+    const second = startAssistantStream({
+      conversationId: "conv_1",
+      branchId: "branch_1",
+      parentMessageId: "msg_parent_2",
+      providerId: "prov_1",
+      modelId: "model_1",
+      promptMessages: [],
+    });
 
+    // Queued: still no placeholder even after a macrotask tick.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mockTauriCommands.createAssistantPlaceholderForBranch).not.toHaveBeenCalled();
+
+    // Completing the first stream drains the queue and starts the second.
+    await completeStream(first.requestId);
+    const secondResult = await second;
+    expect(secondResult.requestId).toBeDefined();
+    expect(mockTauriCommands.createAssistantPlaceholderForBranch).toHaveBeenCalledTimes(1);
   });
 });
 
