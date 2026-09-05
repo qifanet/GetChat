@@ -137,7 +137,7 @@ pub struct AppState {
     pub key_store: Box<dyn SecureKeyStore>,
     pub active_model_streams: ActiveModelStreamRegistry,
     pub pending_model_stream: PendingModelStreamGate,
-    pub tool_executor: Box<dyn crate::services::tool_executor::ToolExecutor>,
+    pub tool_executor: Arc<dyn crate::services::tool_executor::ToolExecutor>,
     pub tool_limits: Arc<Mutex<ToolLimits>>,
     pub security_policy: Arc<Mutex<SecurityPolicy>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,

@@ -16,6 +16,7 @@
  *   - debug (1): check_db_invariants
  */
 
+mod agent;
 mod commands;
 mod db;
 mod dto;
@@ -172,7 +173,7 @@ pub fn run() {
                 let tool_limits = load_persisted_tool_limits(&pool).await;
                 let disabled_builtin_tools = load_persisted_builtin_disabled_tools(&pool).await;
                 let security_policy = load_persisted_security_policy(&pool).await;
-                let tool_executor = Box::new(BuiltinToolExecutor::new_with_disabled(
+                let tool_executor = Arc::new(BuiltinToolExecutor::new_with_disabled(
                     disabled_builtin_tools,
                 ));
                 let mcp_manager = Arc::new(tokio::sync::Mutex::new(

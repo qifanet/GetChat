@@ -1,0 +1,4 @@
+// Resource script embedding the Common-Controls v6 manifest into TEST
+// binaries on windows-gnu. See build.rs::link_test_manifest_for_gnu().
+#include <windows.h>
+1 RT_MANIFEST "test-manifest.xml"

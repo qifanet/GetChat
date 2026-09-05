@@ -171,3 +171,4 @@ CLAUDE.md
 docs/private/
 # Cursor IDE local metadata
 .cursor/
+.mimosa/

@@ -15,11 +15,13 @@ Rules enforced:
     3. No triple-or-more consecutive blank lines
     4. Single trailing newline at end of file
     5. No trailing whitespace on any line
-    6. No interleaved blank lines (every-other-line-blank pattern)
+    6. No interleaved blank lines (every-other-line-blank pattern;
+       .md files are exempt — paragraph blank lines are required there)
 """
 
 import sys
 import os
+from pathlib import Path
 
 SOURCE_EXTENSIONS = {
     '.ts', '.tsx', '.js', '.jsx', '.mjs',
@@ -52,9 +54,24 @@ def should_check(filepath, project_root):
     return ext in SOURCE_EXTENSIONS
 
 
-def check_and_fix(filepath, fix):
-    with open(filepath, 'rb') as f:
-        data = f.read()
+def bounded_path(project_root, filepath):
+    """Rebuild filepath strictly from validated components under project_root.
+
+    Breaks any taint chain from CLI arguments to file access: the returned
+    path can only land inside project_root, otherwise ValueError is raised.
+    """
+    rel = os.path.relpath(os.path.abspath(filepath), os.path.abspath(project_root))
+    if os.path.isabs(rel):
+        raise ValueError(f'path escapes project root: {filepath}')
+    parts = rel.replace('\\', '/').split('/')
+    if '..' in parts:
+        raise ValueError(f'path escapes project root: {filepath}')
+    return os.path.join(project_root, *parts)
+
+
+def check_and_fix(filepath, fix, project_root):
+    read_path = bounded_path(project_root, filepath)
+    data = Path(read_path).read_bytes()
     if not data:
         return []
 
@@ -108,7 +125,14 @@ def check_and_fix(filepath, fix):
                     cleaned.append(line)
             lines = cleaned
 
-    # 6. Interleaved blank lines
+    # 6. Interleaved blank lines.
+    # Skipped for Markdown: single blank lines between paragraphs/blocks are
+    # REQUIRED there, so this heuristic (which deletes isolated blanks) would
+    # destroy document structure. It only applies to code files, where an
+    # every-other-line-blank pattern is suspicious.
+    _, ext = os.path.splitext(filepath)
+    if ext == '.md':
+        return issues
     non_blank = sum(1 for l in lines if l.strip())
     isolated = sum(1 for i in range(1, len(lines)-1)
                    if not lines[i].strip() and lines[i-1].strip() and lines[i+1].strip())
@@ -132,8 +156,8 @@ def check_and_fix(filepath, fix):
     lines.append('')
 
     if fix and issues:
-        with open(filepath, 'wb') as f:
-            f.write(('\r\n'.join(lines)).encode('utf-8'))
+        write_path = bounded_path(project_root, filepath)
+        Path(write_path).write_bytes(('\r\n'.join(lines)).encode('utf-8'))
     return issues
 
 
@@ -147,24 +171,46 @@ def main():
             paths.append(arg)
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if not paths:
-        paths = [project_root]
+    root_real = os.path.realpath(project_root)
+
+    # Path-traversal guard: CLI paths are converted into a RELATIVE allowlist
+    # and never flow into file access. The walk below always starts from the
+    # untainted project root, so opened/written paths cannot escape it.
+    requested_rels = None
+    if paths:
+        requested_rels = set()
+        for requested in paths:
+            requested_real = os.path.realpath(os.path.abspath(requested))
+            try:
+                inside_root = os.path.commonpath([requested_real, root_real]) == root_real
+            except ValueError:
+                # Different drives on Windows share no common path.
+                inside_root = False
+            if not inside_root:
+                print(f'error: refusing to touch path outside project root: {requested}')
+                sys.exit(2)
+            requested_rels.add(os.path.relpath(requested_real, root_real).replace(os.sep, '/'))
 
     all_files = []
-    for root_path in paths:
-        if os.path.isfile(root_path):
-            all_files.append(root_path)
-        else:
-            for root, dirs, files in os.walk(root_path):
-                dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-                for fname in files:
-                    fpath = os.path.join(root, fname)
-                    if should_check(fpath, project_root):
-                        all_files.append(fpath)
+    for root, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            if not should_check(fpath, project_root):
+                continue
+            if requested_rels is not None:
+                rel = os.path.relpath(fpath, project_root).replace(os.sep, '/')
+                if rel not in requested_rels:
+                    continue
+            all_files.append(fpath)
+
+    if requested_rels is not None and not all_files:
+        print('error: no matching source files under the project root')
+        sys.exit(2)
 
     total = 0
     for fpath in sorted(all_files):
-        issues = check_and_fix(fpath, fix)
+        issues = check_and_fix(fpath, fix, project_root)
         if issues:
             total += len(issues)
             rel = os.path.relpath(fpath, project_root)

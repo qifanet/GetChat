@@ -46,6 +46,10 @@ rmcp = { version = "1.7", default-features = false, features = [
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_System_Console"] }
 
+# Golden-harness tests (agent/eval) use tokio's paused clock for retry backoff.
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+
 # Patch rmcp v1.7.0 to tolerate MCP servers that return responses without
 # Content-Type header (e.g. ZhiPu zread).  Remove this patch when upstream
 # releases a fix.  Ref: modelcontextprotocol/rust-sdk#237, #688

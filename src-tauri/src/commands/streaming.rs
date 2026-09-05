@@ -24,11 +24,12 @@ use serde_json::{json, Value};
 use tauri::{ipc::Channel, Manager, State};
 use tokio::sync::watch;
 
+use crate::agent::deps::{CompressionBackend, McpBackend, ReactLoopDeps, StreamBackend};
 use crate::dto::common::{ToolCallDto, ToolDefinitionDto};
 use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto, StartModelStreamInput};
 use crate::error::AppError;
 use crate::services::model_stream_service::{
-    self, ModelStreamOutcome, ResolvedModelStreamRequest,
+    self, ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest,
 };
 use crate::services::tool_executor::{ToolExecutionContext, ToolExecutionResult};
 use crate::state::{AppState, BUILTIN_DISABLED_TOOLS_KV_KEY, TOOL_LIMITS_KV_KEY};
@@ -227,9 +228,10 @@ pub async fn start_model_stream(
     };
 
     // Run the ReAct Loop
+    let deps = build_react_loop_deps(&state).await;
     let tool_limits = state.tool_limits.lock().await.clone();
     let result = run_react_loop(
-        &state,
+        &deps,
         resolved,
         &channel,
         cancel_rx,
@@ -328,15 +330,14 @@ async fn release_pending_model_stream_gate(state: &State<'_, AppState>, request_
 // ============================================================================
 
 /** Terminal outcome of the ReAct Loop. */
-enum ReactLoopOutcome {
+#[derive(Debug)]
+pub(crate) enum ReactLoopOutcome {
     Completed {
         usage: Option<crate::dto::common::TokenUsageDto>,
         reasoning_content: Option<String>,
     },
     Cancelled,
 }
-
-use crate::services::model_stream_service::ModelStreamFailure;
 
 /**
  * Execute the ReAct Loop: stream → tool_calls → execute → stream → ...
@@ -355,7 +356,7 @@ use crate::services::model_stream_service::ModelStreamFailure;
 
 /** Execute a tool by name, routing to MCP if it has the `mcp__` prefix. */
 async fn execute_tool_with_mcp(
-    state: &State<'_, AppState>,
+    deps: &ReactLoopDeps<'_>,
     tool_name: &str,
     arguments: &str,
     context: ToolExecutionContext,
@@ -388,7 +389,7 @@ async fn execute_tool_with_mcp(
     };
 
     // Try built-in executor first
-    let result = state
+    let result = deps
         .tool_executor
         .execute_with_context(&resolved_name, &rewritten_args, context)
         .await;
@@ -403,7 +404,7 @@ async fn execute_tool_with_mcp(
         if parts.len() == 2 {
             let server_name = parts[0];
             let mcp_tool_name = parts[1];
-            let enabled = crate::repositories::mcp_servers::list_all(&state.db)
+            let enabled = crate::repositories::mcp_servers::list_all(&deps.db)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -416,6 +417,15 @@ async fn execute_tool_with_mcp(
                     output: format!("MCP server is disabled or unknown: {}", server_name),
                 };
             }
+            let McpBackend::Real(manager) = &deps.mcp else {
+                return ToolExecutionResult {
+                    success: false,
+                    output: format!(
+                        "MCP routing is unavailable in this context: {}",
+                        tool_name
+                    ),
+                };
+            };
             tracing::info!(
                 server = server_name,
                 tool = mcp_tool_name,
@@ -423,7 +433,7 @@ async fn execute_tool_with_mcp(
             );
             let args: serde_json::Value =
                 serde_json::from_str(arguments).unwrap_or(serde_json::json!({}));
-            let mut manager = state.mcp_manager.lock().await;
+            let mut manager = manager.lock().await;
             match tokio::time::timeout(
                 Duration::from_secs(TOOL_EXECUTION_TIMEOUT_SECONDS),
                 manager.call_tool(server_name, mcp_tool_name, args),
@@ -543,7 +553,7 @@ fn resolve_legacy_tool_name(tool_name: &str) -> String {
 }
 
 async fn execute_tool_checked(
-    state: &State<'_, AppState>,
+    deps: &ReactLoopDeps<'_>,
     allowed_tool_names: &HashSet<String>,
     tool_name: &str,
     arguments: &str,
@@ -573,7 +583,7 @@ async fn execute_tool_checked(
 
     let mut cancel_rx = cancel_rx.clone();
     tokio::select! {
-        result = execute_tool_with_mcp(state, tool_name, arguments, context) => Ok(result),
+        result = execute_tool_with_mcp(deps, tool_name, arguments, context) => Ok(result),
         _ = tokio::time::sleep(Duration::from_secs(per_call_timeout)) => Ok(ToolExecutionResult {
             success: false,
             output: format!("Tool execution timed out after {} seconds: {}", per_call_timeout, tool_name),
@@ -877,7 +887,7 @@ fn apply_compressed_context_to_runtime_prompt(
  * with the correct compressed context summary.
  */
 async fn mid_loop_compress(
-    state: &State<'_, AppState>,
+    deps: &ReactLoopDeps<'_>,
     conversation_id: &str,
     branch_id: &str,
     model_id: &str,
@@ -888,18 +898,27 @@ async fn mid_loop_compress(
 ) -> Result<Option<MidLoopCompressInfo>, AppError> {
     // Try the full AI-powered compression via helper_ai_service. The summary is
     // persisted for the active branch and then applied to this in-flight prompt.
-    let compress_result = crate::services::helper_ai_service::compress_context(
-        state,
-        conversation_id,
-        branch_id,
-        model_id,
-    )
-    .await;
+    // Golden-test backends carry no compression hook and skip this pass.
+    let compress_result = match &deps.compression {
+        CompressionBackend::Real(state) => {
+            crate::services::helper_ai_service::compress_context(
+                state,
+                conversation_id,
+                branch_id,
+                model_id,
+            )
+            .await
+        }
+        CompressionBackend::Disabled => {
+            tracing::debug!("mid_loop_compress: compression disabled, skipping AI pass");
+            return Ok(None);
+        }
+    };
 
     match compress_result {
         Ok(result) => {
             let compressed_source_ids: HashSet<String> = crate::repositories::compressed_contexts::find_latest_by_branch(
-                &state.db,
+                &deps.db,
                 conversation_id,
                 branch_id,
             )
@@ -1009,7 +1028,7 @@ async fn mid_loop_compress(
 }
 
 async fn maybe_compress_react_prompt(
-    state: &State<'_, AppState>,
+    deps: &ReactLoopDeps<'_>,
     request_id: &str,
     iteration: u32,
     model_id: &str,
@@ -1110,7 +1129,7 @@ async fn maybe_compress_react_prompt(
     });
 
     match mid_loop_compress(
-        state,
+        deps,
         conv_id,
         branch_id,
         model_id,
@@ -1167,7 +1186,45 @@ async fn maybe_compress_react_prompt(
     }
 }
 
+/**
+ * Route one model request to the configured backend: the real provider HTTP
+ * stack in production, or the scripted golden-harness model in tests.
+ * Introduced in M0 so the loop body has a single seam for all model calls.
+ */
+async fn dispatch_stream(
+    deps: &ReactLoopDeps<'_>,
+    request: &ResolvedModelStreamRequest,
+    channel: &Channel<ModelStreamEventDto>,
+    cancel_rx: watch::Receiver<bool>,
+) -> Result<ModelStreamOutcome, ModelStreamFailure> {
+    match &deps.stream {
+        StreamBackend::Real => {
+            model_stream_service::stream_model_response(request, channel, cancel_rx).await
+        }
+        StreamBackend::Scripted(model) => model.respond(request, channel, cancel_rx).await,
+    }
+}
+
+/**
+ * Resolve the ReAct loop's dependencies from Tauri-managed application state.
+ * Tests build an equivalent `ReactLoopDeps` fixture instead of calling this.
+ */
+async fn build_react_loop_deps<'a>(state: &'a State<'a, AppState>) -> ReactLoopDeps<'a> {
+    ReactLoopDeps {
+        db: state.db.clone(),
+        tool_executor: state.tool_executor.clone(),
+        tool_definitions: build_backend_enabled_tool_definitions(state).await,
+        security_policy: state.security_policy.clone(),
+        pending_approvals: state.pending_approvals.clone(),
+        app_data_dir: state.app_handle.path().app_data_dir().ok(),
+        mcp: McpBackend::Real(state.mcp_manager.clone()),
+        stream: StreamBackend::Real,
+        compression: CompressionBackend::Real(state.clone()),
+    }
+}
+
 async fn stream_final_response_without_tools(
+    deps: &ReactLoopDeps<'_>,
     initial_request: &ResolvedModelStreamRequest,
     prompt_messages: Vec<ModelPromptMessageDto>,
     channel: &Channel<ModelStreamEventDto>,
@@ -1191,7 +1248,7 @@ async fn stream_final_response_without_tools(
         activated_skill: initial_request.activated_skill.clone(),
     };
 
-    match model_stream_service::stream_model_response(&final_request, channel, cancel_rx).await {
+    match dispatch_stream(deps, &final_request, channel, cancel_rx).await {
         Ok(ModelStreamOutcome::Completed {
             usage,
             reasoning_content,
@@ -1212,8 +1269,8 @@ async fn stream_final_response_without_tools(
     }
 }
 
-async fn run_react_loop(
-    state: &State<'_, AppState>,
+pub(crate) async fn run_react_loop(
+    deps: &ReactLoopDeps<'_>,
     initial_request: ResolvedModelStreamRequest,
     channel: &Channel<ModelStreamEventDto>,
     mut cancel_rx: watch::Receiver<bool>,
@@ -1227,7 +1284,7 @@ async fn run_react_loop(
     let branch_id = initial_request.branch_id.clone();
     let model_id = initial_request.model_id.clone();
     let mut prompt_messages = initial_request.prompt_messages.clone();
-    let current_tools = build_backend_enabled_tool_definitions(state).await;
+    let current_tools = deps.tool_definitions.clone();
     let allowed_tool_names: HashSet<String> = current_tools
         .iter()
         .map(|tool| tool.function.name.clone())
@@ -1235,7 +1292,7 @@ async fn run_react_loop(
     let current_tool_choice = initial_request.tool_choice.clone();
 
     // Resolve context window size for mid-loop compression checks.
-    let context_window_kb: i32 = crate::repositories::provider_models::find_by_id(&state.db, &model_id)
+    let context_window_kb: i32 = crate::repositories::provider_models::find_by_id(&deps.db, &model_id)
         .await
         .ok()
         .flatten()
@@ -1248,7 +1305,7 @@ async fn run_react_loop(
     // Compression trigger threshold: 60% of effective budget
     let compression_trigger_tokens = (effective_input_budget as f32 * 0.60) as u32;
 
-    let shell_path = crate::repositories::app_kv::get(&state.db, "shell_path")
+    let shell_path = crate::repositories::app_kv::get(&deps.db, "shell_path")
         .await
         .ok()
         .flatten()
@@ -1258,10 +1315,10 @@ async fn run_react_loop(
         conversation_id: conversation_id.clone(),
         workspace_path: initial_request.workspace_path.clone(),
         shell_path,
-        skills_dir: state.app_handle.path().app_data_dir().ok().map(|p| {
-            crate::services::skill_fs::skills_root_from_app_data(&p).to_string_lossy().to_string()
+        skills_dir: deps.app_data_dir.as_ref().map(|p| {
+            crate::services::skill_fs::skills_root_from_app_data(p).to_string_lossy().to_string()
         }),
-        db_pool: Some(state.db.clone()),
+        db_pool: Some(deps.db.clone()),
     };
     let mut consecutive_tool_failures = 0u32;
 
@@ -1338,8 +1395,8 @@ async fn run_react_loop(
         }
 
         // Inject skill metadata (Tier 1) and activation hint (Tier 3)
-        if let Some(app_data) = state.app_handle.path().app_data_dir().ok() {
-            let skills_dir = crate::services::skill_fs::skills_root_from_app_data(&app_data);
+        if let Some(app_data) = deps.app_data_dir.as_ref() {
+            let skills_dir = crate::services::skill_fs::skills_root_from_app_data(app_data);
             let skills = crate::services::skill_fs::discover_skills(&skills_dir);
 
             if !skills.is_empty() {
@@ -1382,7 +1439,7 @@ async fn run_react_loop(
         }
 
         maybe_compress_react_prompt(
-            state,
+            deps,
             &request_id,
             iteration,
             &model_id,
@@ -1450,13 +1507,7 @@ async fn run_react_loop(
                 }
             }
 
-            match model_stream_service::stream_model_response(
-                &request,
-                channel,
-                cancel_rx.clone(),
-            )
-            .await
-            {
+            match dispatch_stream(deps, &request, channel, cancel_rx.clone()).await {
                 Ok(result) => {
                     outcome = Some(result);
                     break;
@@ -1540,7 +1591,7 @@ async fn run_react_loop(
                         arguments: tc.function.arguments.clone(),
                     });
 
-                    let security_policy = state.security_policy.lock().await.clone();
+                    let security_policy = deps.security_policy.lock().await.clone();
                     let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
                     drop(security_policy);
 
@@ -1551,7 +1602,7 @@ async fn run_react_loop(
 
                         // Register the pending approval
                         {
-                            let mut pending = state.pending_approvals.lock().await;
+                            let mut pending = deps.pending_approvals.lock().await;
                             pending.insert(approval_id.clone(), tx);
                         }
 
@@ -1609,13 +1660,13 @@ async fn run_react_loop(
 
                         // Clean up the pending approval entry
                         {
-                            let mut pending = state.pending_approvals.lock().await;
+                            let mut pending = deps.pending_approvals.lock().await;
                             pending.remove(&approval_id);
                         }
 
                         if approved {
                             match execute_tool_checked(
-                                state,
+                                deps,
                                 &allowed_tool_names,
                                 &tc.function.name,
                                 &tc.function.arguments,
@@ -1655,7 +1706,7 @@ async fn run_react_loop(
                     } else {
                         // Normal tool — execute directly (with MCP routing)
                         match execute_tool_checked(
-                            state,
+                            deps,
                             &allowed_tool_names,
                             &tc.function.name,
                             &tc.function.arguments,
@@ -1734,7 +1785,7 @@ async fn run_react_loop(
                             "react loop: pre-append compression triggered (tool result would exceed 96%)"
                         );
                         maybe_compress_react_prompt(
-                            state,
+                            deps,
                             &request_id,
                             iteration,
                             &model_id,
@@ -1809,6 +1860,7 @@ async fn run_react_loop(
                                 name: None,
                             });
                             return stream_final_response_without_tools(
+                                deps,
                                 &initial_request,
                                 prompt_messages,
                                 channel,
@@ -1895,12 +1947,7 @@ async fn run_react_loop(
         activated_skill: initial_request.activated_skill.clone(),
     };
 
-    match model_stream_service::stream_model_response(
-        &final_request,
-        channel,
-        cancel_rx,
-    )
-    .await
+    match dispatch_stream(deps, &final_request, channel, cancel_rx).await
     {
         Ok(ModelStreamOutcome::Completed {
             usage,
