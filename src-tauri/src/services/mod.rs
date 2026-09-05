@@ -25,4 +25,3 @@ pub mod system_prompt_service;
 pub mod task_queue_service;
 pub mod task_worker;
 pub mod token_estimator;
-pub mod tool_executor;

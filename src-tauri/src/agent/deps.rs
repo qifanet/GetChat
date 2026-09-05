@@ -24,7 +24,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::dto::common::ToolDefinitionDto;
 use crate::services::mcp_client::McpManager;
-use crate::services::tool_executor::ToolExecutor;
+use crate::agent::tools::ToolExecutor;
 use crate::state::{AppState, SecurityPolicy};
 
 use super::eval::mock_provider::ScriptedModel;

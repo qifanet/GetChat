@@ -35,7 +35,7 @@ use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
 use crate::services::model_stream_service::{
     self, ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest,
 };
-use crate::services::tool_executor::{ToolExecutionContext, ToolExecutionResult};
+use crate::agent::tools::{ToolExecutionContext, ToolExecutionResult};
 
 pub(crate) const TOOL_EXECUTION_TIMEOUT_SECONDS: u64 = 60;
 
@@ -429,7 +429,7 @@ pub(crate) async fn run_react_loop(
                                 timeout_secs = approval_timeout_secs,
                                 "tool approval timed out"
                             );
-                            crate::services::tool_executor::ToolExecutionResult {
+                            crate::agent::tools::ToolExecutionResult {
                                 success: false,
                                 output: format!(
                                     "Approval timed out after {} seconds — user did not respond in time. \
@@ -443,7 +443,7 @@ pub(crate) async fn run_react_loop(
                                 approval_id = %approval_id,
                                 "user rejected tool execution"
                             );
-                            crate::services::tool_executor::ToolExecutionResult {
+                            crate::agent::tools::ToolExecutionResult {
                                 success: false,
                                 output: "User explicitly rejected this operation.".to_string(),
                             }

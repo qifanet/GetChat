@@ -100,7 +100,7 @@
 
 ### M2 — 工具系统 + PolicyEngine
 
-- [ ] M2.1 `agent/tools/registry.rs`：`ToolMeta { risk: Low/Medium/High, concurrency: Safe/Isolated/Exclusive, max_output_chars, timeout }`；7 个内置工具拆为 `builtin/*.rs` 一工具一模块（calculator 含手写解析器整体搬家）。
+- [x] M2.1（2026-09-06）`agent/tools/` 落地：`registry.rs` 定义 `ToolMeta { risk, concurrency, max_output_chars, timeout_secs }`（MCP 默认 High/Safe/60s 待 M2.2 接线）；7 个内置工具拆为 `builtin/{calculator,file,todo,terminal,web_search,load_skill,parallel_branch_fork}.rs` 一工具一模块，calculator 手写解析器整体搬家；框架（trait/registry/上下文/状态 DTO/单测）在 `executor.rs`，注册即携带 META。`services/tool_executor.rs` 已删除（2028 行 → 11 个职责单一文件），全部逐字搬迁并经排序行多重集 diff 验证（old-only 仅旧签名/分节横幅）。注：本机 mingw ld 对 tauri cdylib 报 export ordinal too large，`cargo test` 需用 `cargo test --lib`（clean HEAD 同样复现，与本次重构无关）。
 - [ ] M2.2 MCP 工具并入 Registry：命名空间 `mcp__<server>__<tool>`，审批/超时/结果规范化与内置工具同路径（保留 rmcp 传输细节在 `services/mcp_client.rs`）。
 - [ ] M2.3 `policy.rs`：审批规则表数据化（现黑名单/策略语义逐条迁移）；破坏性操作（rm/写文件/terminal 写命令）强制审批；`build_approval_description` 随迁。
 - [ ] M2.4 并行执行器：同一轮内 `concurrency=Safe` 的工具并行、`Exclusive` 串行；结果按原顺序回填（保持 tool_call_id 配对正确）；连败计数语义不变。

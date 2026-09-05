@@ -27,7 +27,7 @@ mod state;
 #[cfg(test)]
 mod test_support;
 
-use services::tool_executor::BuiltinToolExecutor;
+use agent::tools::BuiltinToolExecutor;
 use state::{
     AppState, SystemKeyStore, ToolLimits, SecurityPolicy, BUILTIN_DISABLED_TOOLS_KV_KEY,
     SECURITY_POLICY_KV_KEY, TOOL_LIMITS_KV_KEY,

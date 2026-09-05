@@ -327,7 +327,7 @@ pub async fn read_todo_items(conversation_id: Option<String>) -> Vec<TodoItemDto
     // nothing meaningful to show (the legacy global-lookup was removed with
     // the M1 session-scoping work).
     let items = match conversation_id {
-        Some(id) => crate::services::tool_executor::read_todos_for_conversation(&id),
+        Some(id) => crate::agent::tools::read_todos_for_conversation(&id),
         None => Vec::new(),
     };
     items.into_iter().map(|t| TodoItemDto {

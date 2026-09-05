@@ -24,3 +24,4 @@ pub(crate) mod eval;
 pub(crate) mod prompt;
 pub(crate) mod runner;
 pub(crate) mod session;
+pub(crate) mod tools;

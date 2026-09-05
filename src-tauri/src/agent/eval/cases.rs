@@ -28,7 +28,7 @@ use crate::dto::common::ToolDefinitionDto;
 use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
 use crate::services::model_stream_service::{ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest};
 use crate::services::provider_profiles::ProviderProfile;
-use crate::services::tool_executor::{BuiltinToolExecutor, ToolExecutor};
+use crate::agent::tools::{BuiltinToolExecutor, ToolExecutor};
 use crate::state::SecurityPolicy;
 
 // ============================================================================

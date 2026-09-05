@@ -94,7 +94,7 @@ pub(crate) async fn build_backend_enabled_tool_definitions(state: &State<'_, App
 #[tauri::command]
 pub async fn get_builtin_tool_states(
     state: State<'_, AppState>,
-) -> Result<Vec<crate::services::tool_executor::ToolStateDto>, AppError> {
+) -> Result<Vec<crate::agent::tools::ToolStateDto>, AppError> {
     Ok(state.tool_executor.get_tool_states())
 }
 

@@ -4,7 +4,7 @@
  *
  * Replaces the global statics the loop used to reach for (the inject queue in
  * `services/inject_queue.rs` and the todo conversation id in
- * `tool_executor.rs`): everything request-scoped now lives in an
+ * `agent::tools`): everything request-scoped now lives in an
  * `AgentSession` stored in `AppState::agent_sessions`, keyed by `request_id`.
  *
  * Two concurrent streams therefore cannot observe each other's injections or
