@@ -60,11 +60,11 @@
   --shadow-float: var(--c-shadow-float);
   --shadow-focus: var(--c-shadow-focus);
 
-  --radius: 14px;
-  --radius-panel: 20px;
-  --radius-shell: 28px;
+  --radius: 8px;
+  --radius-panel: 10px;
+  --radius-shell: 12px;
 
-  --backdrop-blur-chrome: 24px;
+  --backdrop-blur-chrome: 12px;
 }
 
 /*
@@ -117,11 +117,11 @@
 }
 
 @utility app-section-label {
-  @apply font-display text-[10px] font-semibold uppercase tracking-[0.22em] text-miro-text-secondary;
+  @apply font-display text-[10px] font-semibold uppercase tracking-[0.08em] text-miro-text-secondary;
 }
 
 @utility app-nav-link {
-  @apply inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-miro-text-secondary transition-colors hover:bg-miro-surface-low hover:text-miro-text;
+  @apply inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-miro-text-secondary transition-colors hover:bg-miro-surface-low hover:text-miro-text;
 }
 
 @utility app-nav-link-active {
@@ -129,7 +129,7 @@
 }
 
 @utility app-sidebar-item {
-  @apply flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-miro-text-secondary transition-colors hover:bg-miro-surface hover:text-miro-text;
+  @apply flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-miro-text-secondary transition-colors hover:bg-miro-surface hover:text-miro-text;
 }
 
 @utility app-sidebar-item-active {
@@ -137,31 +137,31 @@
 }
 
 @utility app-status-pill {
-  @apply inline-flex items-center gap-2 rounded-full border bg-miro-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-miro-text-secondary;
+  @apply inline-flex items-center gap-1.5 rounded-full border bg-miro-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-miro-text-secondary;
   border-color: rgba(152, 177, 242, 0.2);
 }
 
 @utility app-icon-button {
-  @apply inline-flex items-center justify-center rounded-xl border border-transparent text-miro-text-secondary transition-colors duration-150 hover:bg-miro-surface-low hover:text-miro-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent;
+  @apply inline-flex items-center justify-center rounded-md border border-transparent text-miro-text-secondary transition-colors duration-150 hover:bg-miro-surface-low hover:text-miro-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent;
 }
 
 @utility app-primary-button {
-  @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5 font-display text-sm font-semibold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:bg-miro-ring disabled:text-miro-text-secondary;
-  background-image: var(--app-primary-gradient);
-  box-shadow: 0 14px 24px -18px rgba(55, 85, 195, 0.85);
+  @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-semibold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:bg-miro-ring disabled:text-miro-text-secondary;
+  background-color: var(--c-blue);
+  box-shadow: 0 1px 2px rgba(55, 85, 195, 0.35);
 
   &:hover:not(:disabled) {
-    filter: brightness(1.03);
+    filter: brightness(1.05);
   }
 }
 
 @utility app-secondary-button {
-  @apply inline-flex items-center justify-center rounded-xl border bg-miro-surface-high px-4 py-2.5 font-display text-sm font-semibold text-miro-text transition-colors duration-150 hover:bg-miro-surface-highest disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-miro-surface-high;
+  @apply inline-flex items-center justify-center rounded-md border bg-miro-surface-high px-3 py-1.5 text-sm font-semibold text-miro-text transition-colors duration-150 hover:bg-miro-surface-highest disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-miro-surface-high;
   border-color: color-mix(in srgb, var(--c-border) 20%, transparent);
 }
 
 @utility app-tertiary-button {
-  @apply inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold text-miro-blue transition-colors duration-150;
+  @apply inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-sm font-semibold text-miro-blue transition-colors duration-150;
 
   &:hover {
     background-color: rgba(221, 225, 255, 0.7);
@@ -169,7 +169,7 @@
 }
 
 @utility app-input {
-  @apply w-full rounded-2xl border border-transparent bg-miro-surface-low px-4 py-3 text-sm text-miro-text outline-hidden transition duration-150 placeholder:text-miro-placeholder focus:bg-miro-card focus:ring-4;
+  @apply w-full rounded-lg border border-transparent bg-miro-surface-low px-3 py-2 text-sm text-miro-text outline-hidden transition duration-150 placeholder:text-miro-placeholder focus:bg-miro-card focus:ring-2;
   --tw-ring-color: color-mix(in srgb, var(--c-blue) 10%, transparent);
   box-shadow: inset 0 0 0 1px rgba(152, 177, 242, 0.12);
 }
@@ -188,7 +188,7 @@
 }
 
 @utility app-thread-card {
-  @apply rounded-[22px] bg-miro-card px-5 py-4;
+  @apply rounded-lg bg-miro-card px-4 py-3;
   box-shadow: var(--app-panel-shadow);
 }
 
@@ -199,7 +199,7 @@
 }
 
 @utility app-message-avatar {
-  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold uppercase tracking-[0.12em];
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold uppercase tracking-[0.08em];
 }
 
 @utility app-message-avatar-user {
@@ -232,7 +232,7 @@
 }
 
 @utility assistant-message-bubble {
-  @apply rounded-[22px] bg-miro-card px-5 py-4 text-sm text-miro-text;
+  @apply rounded-lg bg-miro-card px-4 py-3 text-sm text-miro-text;
   box-shadow: var(--app-panel-shadow);
 
   &.streaming {
@@ -291,12 +291,12 @@
 }
 
 @utility assistant-message-callout {
-  @apply rounded-2xl border px-4 py-3 text-sm leading-6;
+  @apply rounded-lg border px-3.5 py-2.5 text-sm leading-6;
   box-shadow: inset 0 0 0 1px rgba(159, 64, 61, 0.08);
 }
 
 @utility streaming-surface {
-  @apply whitespace-pre-wrap wrap-break-word font-body text-[15px] leading-7 text-miro-text;
+  @apply whitespace-pre-wrap wrap-break-word font-body text-[14px] leading-[1.65] text-miro-text;
 }
 
 @utility streaming-caret {
@@ -380,7 +380,7 @@
 
   /* Fenced code blocks — wrapper produced by react-markdown <pre><code> */
   & pre {
-    @apply overflow-x-auto rounded-2xl my-4;
+    @apply overflow-x-auto rounded-lg my-3;
     padding: 0;
     background: transparent;
     border: none;
@@ -424,7 +424,7 @@
 
   /* Blockquotes */
   & blockquote {
-    @apply rounded-r-2xl text-miro-text-secondary;
+    @apply rounded-r-lg text-miro-text-secondary;
     border-left: 3px solid var(--c-blockquote-border);
     background-color: var(--c-blockquote-bg);
     margin: 0 0 1rem;
@@ -449,7 +449,7 @@
 
   /* Images */
   & img {
-    @apply max-w-full rounded-2xl;
+    @apply max-w-full rounded-lg;
     margin: 0.5rem 0 1rem;
   }
 

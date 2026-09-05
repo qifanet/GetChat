@@ -415,8 +415,8 @@ export function Composer() {
   return (
     <div className="shrink-0 border-t border-miro-border/10 bg-miro-card/88 px-3 py-3 sm:px-4">
       <div className="mx-auto max-w-5xl">
-        <div className="app-panel relative rounded-[24px] bg-miro-card/96 px-3 py-3 sm:px-4 sm:py-3.5">
-          <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-miro-border/10 pb-2">
+        <div className="app-panel relative rounded-xl bg-miro-card/96 px-3 py-2.5 sm:px-3.5 sm:py-3">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 border-b border-miro-border/10 pb-1.5">
             <span className="app-status-pill px-2.5 py-1 text-[10px]">
               {hasEnabledProvider
                 ? t("shell.connectedCount", { count: enabledProviderCount })

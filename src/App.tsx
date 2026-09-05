@@ -202,7 +202,7 @@ function ShellHeader({
   );
   return (
     <header
-      className="app-shell-header fixed top-0 right-0 z-20 flex h-16 items-center justify-between px-4 sm:px-6"
+      className="app-shell-header fixed top-0 right-0 z-20 flex h-12 items-center justify-between px-4 sm:px-5"
       style={{ left: desktopLeftInset }}
     >
       <div className="flex min-w-0 items-center gap-4">
@@ -211,9 +211,9 @@ function ShellHeader({
           size={28}
           subtitle={t("shell.productTagline")}
           className="min-w-0"
-          iconWrapperClassName="h-10 w-10 rounded-2xl bg-miro-card/76 shadow-ring"
-          iconClassName="h-7 w-7"
-          titleClassName="text-base sm:text-lg"
+          iconWrapperClassName="h-8 w-8 rounded-lg bg-miro-card/76 shadow-ring"
+          iconClassName="h-6 w-6"
+          titleClassName="text-sm sm:text-[15px]"
           subtitleClassName="hidden lg:block"
         />
         <nav className="hidden items-center gap-2 md:flex">

@@ -115,8 +115,8 @@ export function MessageList() {
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         // Briefly highlight the target message
-        el.classList.add("ring-2", "ring-miro-blue/40", "rounded-2xl");
-        setTimeout(() => el.classList.remove("ring-2", "ring-miro-blue/40", "rounded-2xl"), 2000);
+        el.classList.add("ring-2", "ring-miro-blue/40", "rounded-lg");
+        setTimeout(() => el.classList.remove("ring-2", "ring-miro-blue/40", "rounded-lg"), 2000);
       }
       // Clear the scroll target
       useAppStore.setState((s) => { s.ui.scrollToMessageId = null; });
@@ -149,12 +149,12 @@ export function MessageList() {
     );
   }
   return (
-    <div className="mx-auto flex max-w-5xl flex-col px-5 py-6 sm:px-6">
+    <div className="mx-auto flex max-w-5xl flex-col px-4 py-4 sm:px-5">
       <div className="mb-6 flex items-center gap-3">
         <span className="app-section-label">{t("branch.currentPath")}</span>
         <span className="h-px flex-1 bg-miro-border/15" />
       </div>
-      <div className="space-y-7">
+      <div className="space-y-4">
         {messages.map((message, index) => {
           if (message.role === "USER") {
             const nextMessage = messages[index + 1];

@@ -141,7 +141,7 @@ export function ConversationListItem({
   }
   return (
     <div
-      className={`group rounded-[18px] px-3 py-2.5 text-sm transition-colors ${
+      className={`group rounded-lg px-2.5 py-1.5 text-[13px] transition-colors ${
         isActive
           ? "bg-miro-blue-light/85 text-miro-blue shadow-ring"
           : "bg-miro-card/82 text-miro-text hover:bg-miro-card"
