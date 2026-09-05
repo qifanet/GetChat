@@ -19,10 +19,10 @@
 | C07 | MCP 集成 | 🟡 | 含密钥 keyring、stdio/http；工具与内置工具双轨 |
 | C08 | Skills（Tier1 元数据 / Tier3 slash） | 🟡 | 热插拔可用；Tier2 语义未分层 |
 | C09 | 工具审批（安全策略/黑名单/超时） | 🟡 | 机制可用，策略硬编码在循环里 |
-| C10 | Agent 循环（ReAct） | 🟡 | 功能可用但长在 command 层，不可测不可换；M0 已建立依赖缝合与回放护栏 |
+| C10 | Agent 循环（ReAct） | 🟡 | 循环本体已迁 `agent/runner.rs` 并受 76 项金测护栏（M1）；可测性达成，范式可插拔（paradigms/）待 M2+ |
 | C11 | 任务队列（Task Queue） | 🟡 | 骨架可用：1s 忙轮询、无恢复、无 429、双实现并存 |
 | C12 | 并行分支分叉（Parallel Fork） | ❌ | 只建空分支不产 AI 输出，端到端断裂 |
-| C13 | Dual-Queue 中途注入 | 🟡 | 注入机制后端可用；无持久化、并发会话有污染风险 |
+| C13 | Dual-Queue 中途注入 | 🟡 | 后端注入已会话作用域化（M1 `agent/session.rs`，并发污染消除）；无持久化 |
 | C14 | Agent 可观测性（run 审计/轨迹） | ❌ | 仅 tracing 日志 |
 | C15 | Agent 评估（golden 用例/scripted provider） | 🟡 | M0 已落地 scripted model + 13 个 golden 回放用例进 `cargo test`；BFCL 式用例与 CI eval job 待 M5 |
 | C16 | 记忆系统（核心硬编码层/情景/语义） | 📐 | 仅压缩摘要雏形（compressed_contexts） |

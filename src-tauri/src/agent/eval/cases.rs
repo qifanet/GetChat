@@ -2,7 +2,7 @@
  * @file agent/eval/cases.rs
  * @description Golden replay cases for the ReAct loop (v1.5.0 M0).
  *
- * Each case drives the REAL loop (`commands::streaming::run_react_loop`) with
+ * Each case drives the REAL loop (`agent::runner::run_react_loop`) with
  * the scripted model backend and real built-in tools where they are safe
  * (calculator; file writes into a temp workspace). Assertions target:
  *   - the loop outcome (Completed / Cancelled)
@@ -23,7 +23,7 @@ use tokio::sync::watch;
 
 use super::mock_provider::{ScriptedModel, ScriptedStep, ScriptedToolCall};
 use crate::agent::deps::{CompressionBackend, McpBackend, ReactLoopDeps, StreamBackend};
-use crate::commands::streaming::{run_react_loop, ReactLoopOutcome};
+use crate::agent::runner::{run_react_loop, ReactLoopOutcome};
 use crate::dto::common::ToolDefinitionDto;
 use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
 use crate::services::model_stream_service::{ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest};

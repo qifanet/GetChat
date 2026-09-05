@@ -199,7 +199,7 @@ pub fn run() {
                 let mcp_app_handle = app_handle.clone();
                 tokio::spawn(async move {
                     let key_store = crate::state::SystemKeyStore::new();
-                    crate::commands::streaming::reload_mcp_servers_from_file(
+                    crate::commands::mcp::reload_mcp_servers_from_file(
                         &mcp_app_handle,
                         &mcp_pool,
                         &key_store,
@@ -353,19 +353,19 @@ pub fn run() {
             commands::streaming::update_security_policy,
             commands::streaming::inject_user_message_to_stream,
             // MCP Server management (4 + 2 file-based)
-            commands::streaming::list_mcp_servers,
-            commands::streaming::add_mcp_server,
-            commands::streaming::remove_mcp_server,
-            commands::streaming::get_mcp_tool_definitions,
-            commands::streaming::set_mcp_server_enabled,
-            commands::streaming::get_mcp_config_json,
-            commands::streaming::save_mcp_config_json,
+            commands::mcp::list_mcp_servers,
+            commands::mcp::add_mcp_server,
+            commands::mcp::remove_mcp_server,
+            commands::mcp::get_mcp_tool_definitions,
+            commands::mcp::set_mcp_server_enabled,
+            commands::mcp::get_mcp_config_json,
+            commands::mcp::save_mcp_config_json,
             commands::streaming::get_context_status,
             commands::streaming::compress_context,
             // Skills & Slash Commands (3)
-            commands::streaming::list_slash_items,
-            commands::streaming::execute_mcp_prompt,
-            commands::streaming::get_skills_directory,
+            commands::skills::list_slash_items,
+            commands::skills::execute_mcp_prompt,
+            commands::skills::get_skills_directory,
             // Settings (4)
             commands::settings::list_providers,
             commands::settings::get_system_prompt,

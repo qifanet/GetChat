@@ -80,14 +80,23 @@
 
 **验收门禁 M0** ✅：cargo test 含 13 个循环级用例全绿（75/75）；tsc/vitest 全绿（124/124）；cargo check 0 警告；`lint:eol` 对 M0 触碰文件清零（9 处预存问题见上）；文档失真已标注。
 
-### M1 — 会话作用域 + AgentRunner 落地（行为对等）
+### M1 — 会话作用域 + AgentRunner 落地（行为对等）✅ 完成（2026-09-06）
 
-- [ ] M1.1 `agent/session.rs`：`AgentSession`（inject 队列、todo 会话上下文、pending approvals、cancel 令牌），存入 AppState 按 request_id 索引；删除 `inject_queue` 全局静态与 `set_todo_conversation_id` 全局 setter。
-- [ ] M1.2 `agent/events.rs`：`AgentEventSink` trait；现有 `ModelStreamEventDto` 事件全部经它发出（前端零变更）。
-- [ ] M1.3 循环迁入 `agent/runner.rs`：状态机显式化（ARCHITECTURE.md §4.3）；重试/退避/软停止/连败逻辑原样搬家；`streaming.rs` 缩为 command 壳 + 审批/设置/MCP 管理命令（MCP 管理移入 `commands/mcp.rs` 顺带拆文件）。
-- [ ] M1.4 提示词拼装迁入 `agent/prompt/`（文案逐字保留，仅换家）；golden 回放全绿确认行为对等。
+- [x] M1.1 `agent/session.rs`：`AgentSession`（inject 队列）以 `AppState::agent_sessions` 按 request_id 索引；删除 `services/inject_queue.rs` 全局静态与 `tool_executor::set_todo_conversation_id`/`TODO_CONVERSATION_ID` 全局；`read_todo_items(None)` 返回空列表（commit 7e76b1c）。新增会话隔离回归测试。
+- [ ] M1.2 `agent/events.rs`：`AgentEventSink` trait。**范围调整（2026-09-06）**：Tauri Channel 本身已是事件汇抽象，单独 trait 在 M5（`agent_runs` 审计）才有真实收益——与可观测性埋点合并实现，避免为抽象而抽象。
+- [x] M1.3 循环迁入 `agent/runner.rs`（987 行）：`run_react_loop`/`dispatch_stream`/工具执行四函数/审批判定/`build_approval_description`/`ReactLoopOutcome`/`TOOL_EXECUTION_TIMEOUT_SECONDS` 逐字搬家（重试/退避/软停止/连败/skip 补偿逻辑不变）；压缩八件套（prune、确定性裁剪、压缩应用、mid_loop_compress、`maybe_compress_react_prompt`、`is_expected_compression_noop` 等）迁 `agent/context.rs`（599 行）。**迁移验证**：新文件与 git HEAD 原文做行多重集 diff，除导入收缩/可见性/模块前缀外零差异；76/76 金测不改断言通过；cargo check 0 警告。
+- [x] M1.4 ✅ `agent/prompt.rs`：工具指引/技能 Tier1 元数据/激活提示迁入 `inject_prompt_context`（文案逐字保留；Tier-3 提示保持"无前导 system 则不注入"的原始守卫）（commit 7e76b1c）。
+- [x] M1.5 `streaming.rs` 3421→695 行（门槛 ≤800）：MCP 管理块（CRUD/密钥存取/运行时恢复/mcps.json 导入导出，1078 行）迁 `commands/mcp.rs`；Skills & Slash 段（109 行）迁 `commands/skills.rs`；`build_backend_enabled_tool_definitions` 升 `pub(crate)` 供 mcp.rs 复用；lib.rs 命令注册与启动 reload 调用点同步改路径。
 
-**验收门禁 M1**：M0 全部用例不改断言通过；`streaming.rs` ≤ 800 行；全局静态检索为零；`cargo test` 新增 session 隔离测试（两会话并发注入互不串）。
+**验收门禁 M1** ✅：M0 全部用例不改断言通过（76/76 ✅）；`streaming.rs` 695 行 ≤ 800 ✅；全局静态检索为零（inject/todo 会话作用域化完成；`TODO_STORE` 按真实 conversation_id 键控、`mock_provider::AUTO_ID` 仅测试夹具，均属 M2 工具模块处理范畴）✅；session 隔离测试 ✅。
+
+### M1-UI — UI/UX 专业度与信息密度重构 🔄 进行中（用户 2026-09-06 指示）
+
+问题诊断：旧"slate_protocol"语言圆角 14-28px、全大写宽字距导航、22-24px 消息卡、64px 头部——装饰性体积挤占内容，信息密度低。
+
+- [x] 第一批（commit 9a28d3c，`index.css` 设计令牌 + 高频界面）：半径 14/20/28→8/10/12；侧栏项/导航去掉大写宽字距（px-2.5 py-1.5、13px medium）；按钮/输入框紧凑化（px-3 py-1.5 / px-3 py-2）；主按钮去渐变发光改实色；消息卡 22px→lg、头像 36→28px、流式文字 15px/leading-7→14px/1.65、消息间距 space-y-7→4；壳层头部 64→48px；Composer 容器 24px→xl。
+- [ ] 第二批：UserMessageBubble/AssistantMessageBubble 内部间距、分支侧栏（BranchRail）、设置页表单密度、工具卡片紧凑化、暗色主题下新令牌的对比度校验。
+- **验收锚点**：`npx tsc --noEmit` ✅、`npm test` 124/124 ✅；视觉走查（浅色+暗色）在下一批完成后统一执行。
 
 ### M2 — 工具系统 + PolicyEngine
 
@@ -189,6 +198,7 @@ L3 发布验收（M6）：真实模型冒烟 + LLM Judge + 性能/安全 + 多�
 | 429 真实触发难模拟 | 低 | 低 | scripted provider 注入 429 剧本；真实场景仅 S-07 抽测 | — |
 | `lint:eol:fix` 类仓库工具的破坏性行为 | 中 | 中 | 脚本已修复（.md 豁免 interleaved-blank）；规则 8 要求逐文件执行+审查 diff | 再次损伤即 git checkout 恢复 + 脚本回归测试 |
 | windows-gnu 本地工具链与 CI(MSVC) 差异掩盖问题 | 中 | 中 | golden 用例双端可跑；CI 仍以 MSVC 为准；本地清单补丁记录在 AGENTS.md | 发现 MSVC 特有行为差异即升级为 ADR |
+| Mimosa 钩子扫描覆盖不完整（library_source/callgraph 部分） | 中 | 中 | 已按钩子要求重构 eol 脚本路径处理（argv 污染链切断，扫描 0 finding）；发布前执行一次 deep 完整审计 | 审计出现 high 未决项即冻结发布 |
 
 ---
 

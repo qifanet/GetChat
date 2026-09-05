@@ -11,12 +11,16 @@
  * runtime dependencies. The golden cases themselves (`eval::cases`) are
  * test-only.
  *
- * The loop body itself still lives in `commands/streaming.rs`; it moves into
- * `agent::runner` in milestone M1 (see ARCHITECTURE.md §5 migration path).
+ * M1 scope: the loop body itself now lives in `agent::runner`, mid-loop and
+ * pre-append context compression in `agent::context`, prompt composition in
+ * `agent::prompt`, and per-run session state in `agent::session`.
+ * `commands/streaming.rs` is a thin command shell over these.
  * M2 adds `agent::tools`, M4 adds `agent::taskqueue` per the same plan.
  */
 
+pub(crate) mod context;
 pub(crate) mod deps;
 pub(crate) mod eval;
 pub(crate) mod prompt;
+pub(crate) mod runner;
 pub(crate) mod session;

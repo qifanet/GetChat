@@ -65,7 +65,7 @@
  → 完成后一次性提交 appStore + SQLite → MarkdownRenderer 接管
 ```
 
-> M0 更新：循环已改为 `run_react_loop(deps: &ReactLoopDeps)`，模型调用经 `dispatch_stream`（`StreamBackend::Real|Scripted`）注入；全局单流检查、注入队列、压缩编排仍在原位，分别由 M1/S5、S1、M3 处理。
+> M1 更新：循环迁入 `agent/runner.rs`、压缩编排迁入 `agent/context.rs`、注入队列会话作用域化（`agent/session.rs`）；`commands/streaming.rs` 缩为 command 壳（695 行），MCP 管理/Skills 拆至 `commands/mcp.rs`、`commands/skills.rs`。全局单流检查仍在 `start_model_stream`（M4/S5 引入 per-conversation 流锁）；`TODO_STORE` 按 conversation_id 键控的全局静态留待 M2 工具模块落库。
 
 ### 2.3 数据所有权（继续有效的核心不变量）
 
@@ -153,7 +153,7 @@ src-tauri/src/
 └─ （repositories/db/dto 不变）
 ```
 
-> M0 已落地：`agent/deps.rs`（依赖缝合 + StreamBackend/McpBackend/CompressionBackend 注入）与 `agent/eval/`（mock_provider + 13 个 golden 用例）。循环本体在 M1 迁入 `agent/runner.rs`。
+> M1 已落地：`agent/deps.rs`（依赖缝合 + StreamBackend/McpBackend/CompressionBackend 注入）、`agent/runner.rs`（循环/工具执行/审批判定本体，逐字迁移）、`agent/context.rs`（mid-loop + pre-append 压缩编排）、`agent/prompt.rs`（提示词组合）、`agent/session.rs`（request_id 作用域 inject 队列）、`agent/eval/`（mock_provider + golden 用例）。后续里程碑继续填充 tools/、paradigms/、taskqueue/；`AgentEventSink` 并入 M5 可观测性（见 DEVELOPMENT.md M1.2）。
 
 ### 4.3 AgentRunner 状态机（对齐既有 harness 指导文档）
 
@@ -225,8 +225,8 @@ start_model_stream (command 壳，<50 行)
 | 步骤 | 动作 | 消灭的债务 | 状态 |
 |---|---|---|---|
 | S0 | 搭建 `agent/eval`：scripted provider + 现有行为的黄金回放用例（正常轮/审批拒/审批超时/注入/压缩触发/连败停止/软停止） | 为后续每一步提供回归护栏 | ✅ M0 |
-| S1 | 抽 `AgentSession`，注入队列与 todo 上下文改为会话作用域；`streaming.rs` 调用点替换 | A3 | M1 |
-| S2 | 循环整体迁入 `agent::runner`，事件改走 `AgentEventSink`；`streaming.rs` 变 command 壳 | B1 | M1 |
+| S1 | 抽 `AgentSession`，注入队列与 todo 上下文改为会话作用域；`streaming.rs` 调用点替换 | A3 | ✅ M1 |
+| S2 | 循环整体迁入 `agent::runner`，压缩编排迁 `agent::context`；`streaming.rs` 变 command 壳（`AgentEventSink` 并入 M5 可观测性，见 DEVELOPMENT.md M1.2 范围调整） | B1 | ✅ M1 |
 | S3 | PromptBuilder 抽取（先原样搬家，不改文案）；`tools/` 拆分与 PolicyEngine | B2、B4、B5 | M2 |
 | S4 | ContextManager 归一三套策略 + 预算台账；工具结果落盘引用 | B3、🟡截断 | M3 |
 | S5 | per-conversation 流锁 + 任务队列重写（Notify/恢复/429）+ 并行分叉端到端 | A1、A2、A4 | M4 |
