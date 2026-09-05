@@ -258,7 +258,7 @@ export function TaskQueuePanel() {
                           ));
                           setEditingTaskId(null);
                         }}
-                        className="rounded-md bg-miro-blue px-2.5 py-1 text-[11px] font-medium text-white hover:bg-miro-blue-pressed transition-colors"
+                        className="rounded-md bg-miro-accent-fill px-2.5 py-1 text-[11px] font-medium text-white hover:brightness-110 transition-[filter]"
                       >
                         Save
                       </button>

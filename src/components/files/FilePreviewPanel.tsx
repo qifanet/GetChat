@@ -317,7 +317,7 @@ export function FilePreviewPanel({ filePath, onClose }: FilePreviewPanelProps) {
 
         {preview?.isBinary && !loading && !error && (
           <div className="flex flex-col items-center justify-center gap-4 px-6 py-16 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-miro-surface-low">
+            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-miro-surface-low">
               <IconFile size={28} className="text-miro-text-secondary" />
             </div>
             <div className="space-y-1">

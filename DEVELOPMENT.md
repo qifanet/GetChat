@@ -95,7 +95,7 @@
 问题诊断：旧"slate_protocol"语言圆角 14-28px、全大写宽字距导航、22-24px 消息卡、64px 头部——装饰性体积挤占内容，信息密度低。
 
 - [x] 第一批（commit 9a28d3c，`index.css` 设计令牌 + 高频界面）：半径 14/20/28→8/10/12；侧栏项/导航去掉大写宽字距（px-2.5 py-1.5、13px medium）；按钮/输入框紧凑化（px-3 py-1.5 / px-3 py-2）；主按钮去渐变发光改实色；消息卡 22px→lg、头像 36→28px、流式文字 15px/leading-7→14px/1.65、消息间距 space-y-7→4；壳层头部 64→48px；Composer 容器 24px→xl。
-- [ ] 第二批：UserMessageBubble/AssistantMessageBubble 内部间距、分支侧栏（BranchRail）、设置页表单密度、工具卡片紧凑化、暗色主题下新令牌的对比度校验。
+- [x] 第二批（本地 commit，radius 体系 + 暗色对比度）：43 处超大/魔法数圆角归一到 token 尺度（设置页选项按钮、Provider 模型卡、Composer 弹层与发送钮、App 壳、分支列表、导入导出对话框 rounded-[12px]→md 等）；新增 `--c-accent-fill/-green-fill/-red-fill` 实色令牌（浅色 #3755c3/#006b62/#9f403d，暗色 #4f46e5/#238636/#da3633，白字标签 ≥4.5:1），`app-primary-button`、助手头像与 8 处白字实色按钮（确认弹窗、停止/注入、审批通过/拒绝、批量删除、任务面板）切换到 `-fill` + `hover:brightness-110`；文字用途继续用原文本令牌（`text-miro-red`/浅底 `bg-miro-red-light`）不动。
 - **验收锚点**：`npx tsc --noEmit` ✅、`npm test` 124/124 ✅；视觉走查（浅色+暗色）在下一批完成后统一执行。
 
 ### M2 — 工具系统 + PolicyEngine

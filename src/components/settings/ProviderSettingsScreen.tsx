@@ -692,7 +692,7 @@ export function ProviderSettingsScreen({
                 {t("settings.backToWorkspace")}
               </button>
               <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-miro-blue-light text-miro-blue shadow-ring mt-1">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-miro-blue-light text-miro-blue shadow-ring mt-1">
                   {activeTab === "providers" ? <IconSettings size={18} /> : (
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
@@ -779,7 +779,7 @@ export function ProviderSettingsScreen({
                             setSelectedProviderId(provider.id);
                             setError(null);
                           }}
-                          className={`w-full rounded-[22px] px-4 py-4 text-left transition-colors ${
+                          className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
                             isSelected
                               ? "bg-miro-blue-light/70 shadow-ring"
                               : "bg-miro-card/84 hover:bg-miro-card"
@@ -828,7 +828,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-default-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.defaultModelTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">
@@ -838,7 +838,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-helper-model")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.helperModelTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">
@@ -850,7 +850,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-system-prompt")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.systemPromptTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary line-clamp-2">
@@ -860,7 +860,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-tool-settings")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.toolSettingsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.toolSettingsHelp")}</div>
@@ -868,7 +868,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-security-policy")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.securityPolicyTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.securityPolicyHelp")}</div>
@@ -876,7 +876,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-builtin-tools")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.builtinToolsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.builtinToolsHelp")}</div>
@@ -884,7 +884,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-mcp-servers")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.mcpServersTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.mcpServersHelp")}</div>
@@ -892,7 +892,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-skills")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.skillsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.skillsHelp")}</div>
@@ -900,7 +900,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-language")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.languageTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{i18n.language}</div>
@@ -908,7 +908,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-close-behavior")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.closeBehaviorTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.closeBehaviorHelp")}</div>
@@ -916,7 +916,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shell-path")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.shellPathTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shellPathHelp")}</div>
@@ -924,7 +924,7 @@ export function ProviderSettingsScreen({
                   <button
                     type="button"
                     onClick={() => { setActiveTab("app"); setTimeout(() => document.getElementById("section-shortcuts")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
-                    className="w-full rounded-[16px] bg-miro-card/84 px-3 py-3 text-left hover:bg-miro-card"
+                    className="w-full rounded-lg bg-miro-card/84 px-3 py-2.5 text-left hover:bg-miro-card"
                   >
                     <div className="text-xs font-semibold text-miro-text">{t("settings.shortcutsTitle")}</div>
                     <div className="mt-0.5 text-[11px] text-miro-text-secondary">{t("settings.shortcutsHelp")}</div>
@@ -1106,7 +1106,7 @@ export function ProviderSettingsScreen({
                       return (
                         <article
                           key={model.id}
-                          className="min-w-0 rounded-[24px] border border-miro-border/70 bg-miro-card/90 p-4 shadow-panel"
+                          className="min-w-0 rounded-xl border border-miro-border/70 bg-miro-card/90 p-3.5 shadow-panel"
                         >
                           <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                             <div className="min-w-0">
@@ -1138,7 +1138,7 @@ export function ProviderSettingsScreen({
                                 type="button"
                                 onClick={() => handleRemoveModel(model.id)}
                                 disabled={form.models.length <= 1}
-                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-miro-red-light text-miro-red transition-colors hover:bg-miro-red-light disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
+                                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-miro-red-light text-miro-red transition-colors hover:bg-miro-red-light disabled:cursor-not-allowed disabled:border-miro-border disabled:text-miro-text-secondary"
                                 title={t("settings.deleteProvider")}
                               >
                                 <IconTrash size={14} />
@@ -1233,12 +1233,12 @@ export function ProviderSettingsScreen({
                     : t("settings.connectionHelp")}
                 </div>
                 {error ? (
-                  <div className="rounded-2xl border border-miro-red-light bg-miro-red-light px-4 py-3 text-sm text-miro-red">
+                  <div className="rounded-lg border border-miro-red-light bg-miro-red-light px-3.5 py-2.5 text-sm text-miro-red">
                     {error}
                   </div>
                 ) : null}
                 {feedback ? (
-                  <div className={`rounded-2xl border px-4 py-3 text-sm ${feedbackClassName}`}>
+                  <div className={`rounded-lg border px-3.5 py-2.5 text-sm ${feedbackClassName}`}>
                     {feedback.message}
                   </div>
                 ) : null}

@@ -141,7 +141,7 @@ export function ImportDialog() {
                   type="button"
                   onClick={() => { setFormat(key); resetState(); }}
                   className={
-                    "rounded-[12px] border px-4 py-2 text-sm font-medium transition-colors " +
+                    "rounded-md border px-4 py-2 text-sm font-medium transition-colors " +
                     (format === key
                       ? "border-miro-blue/30 bg-miro-blue-light/65 text-miro-blue"
                       : "border-miro-border/30 bg-miro-card text-miro-text-secondary hover:border-miro-border")

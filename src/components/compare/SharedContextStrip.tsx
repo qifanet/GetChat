@@ -39,7 +39,7 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
         onClick={() => setExpanded((value) => !value)}
       >
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-miro-card text-miro-teal shadow-ring">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-miro-card text-miro-teal shadow-ring">
             <IconInfoCircle size={14} />
           </span>
           <div className="min-w-0">
@@ -63,7 +63,7 @@ export function SharedContextStrip({ messages }: SharedContextStripProps) {
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`rounded-2xl px-3 py-3 text-sm shadow-ring ${
+                className={`rounded-lg px-3 py-2.5 text-sm shadow-ring ${
                   message.role === "USER"
                     ? "bg-miro-card text-miro-text"
                     : "bg-miro-card/90 text-miro-text-secondary"

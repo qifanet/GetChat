@@ -150,7 +150,7 @@ export function BranchListItem({ branch, isCurrent }: BranchListItemProps) {
   }
   return (
     <div
-      className={`group rounded-[22px] px-3 py-3 transition-colors ${
+      className={`group rounded-lg px-3 py-2.5 transition-colors ${
         isCurrent ? "bg-miro-card shadow-ring" : "bg-miro-card/72 hover:bg-miro-card"
       }`}
       role="button"

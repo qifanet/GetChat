@@ -124,7 +124,7 @@ function BootScreen() {
         <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
           <BrandLogo
             size={40}
-            iconWrapperClassName="h-16 w-16 rounded-[24px] bg-miro-card shadow-panel"
+            iconWrapperClassName="h-16 w-16 rounded-xl bg-miro-card shadow-panel"
           />
           <div className="space-y-3">
             <span className="app-section-label">GetChat</span>
@@ -150,7 +150,7 @@ function BootError({ error, onRetry }: { error: string; onRetry: () => void }) {
     <div className="app-shell flex h-full items-center justify-center px-6 py-8">
       <div className="app-panel w-full max-w-xl rounded-shell bg-miro-card/96 px-10 py-12 text-center">
         <div className="mx-auto flex max-w-sm flex-col items-center gap-5">
-          <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-miro-red-light text-2xl font-black text-miro-red">
+          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-miro-red-light text-2xl font-black text-miro-red">
             !
           </div>
           <div className="space-y-3">
@@ -446,7 +446,7 @@ function ConversationSidebar({
             size={32}
             subtitle={t("shell.productTagline")}
             className="min-w-0"
-            iconWrapperClassName="h-11 w-11 rounded-2xl bg-miro-card shadow-panel"
+            iconWrapperClassName="h-11 w-11 rounded-lg bg-miro-card shadow-panel"
             iconClassName="h-8 w-8"
             subtitleClassName="text-[11px] tracking-[0.18em]"
           />
@@ -464,7 +464,7 @@ function ConversationSidebar({
         <button
           type="button"
           onClick={() => void onCreateConversation()}
-          className="app-primary-button w-full justify-center gap-2 rounded-2xl py-3"
+          className="app-primary-button w-full justify-center gap-2 rounded-lg py-2"
           title={t("conversation.newConversation")}
         >
           <span>{t("conversation.newConversation")}</span>
@@ -542,13 +542,13 @@ function ConversationSidebar({
               collapseSidebar(true);
             }
           }}
-          className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition-colors ${
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
             activePage === "SETTINGS"
               ? "app-sidebar-item app-sidebar-item-active"
               : "app-sidebar-item bg-miro-card/72 shadow-ring"
           }`}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-miro-card text-miro-blue shadow-ring">
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-miro-card text-miro-blue shadow-ring">
             <IconSettings size={14} />
           </span>
           <div className="min-w-0">

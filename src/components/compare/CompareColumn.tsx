@@ -76,7 +76,7 @@ function CompareMessageItem({ message }: { message: MessageNode }) {
 
   return (
     <div
-      className={`rounded-[24px] px-4 py-4 shadow-ring ${
+      className={`rounded-lg px-4 py-3 shadow-ring ${
         isUser
           ? "bg-miro-blue-light text-miro-text"
           : "bg-miro-card text-miro-text"

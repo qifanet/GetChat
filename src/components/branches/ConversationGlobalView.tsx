@@ -413,7 +413,7 @@ export function ConversationGlobalView({ onClose }: Props) {
             }}
             className={`px-3 py-1.5 text-xs font-medium transition-colors ${
               managementMode
-                ? "bg-miro-red text-white hover:bg-miro-red"
+                ? "bg-miro-red-fill text-white hover:brightness-110"
                 : "app-secondary-button"
             }`}
           >
@@ -424,7 +424,7 @@ export function ConversationGlobalView({ onClose }: Props) {
               type="button"
               disabled={deleting}
               onClick={() => void handleDeleteSelected()}
-              className="rounded-md bg-miro-red px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-miro-red disabled:opacity-50"
+              className="rounded-md bg-miro-red-fill px-3 py-1.5 text-xs font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
             >
               {deleting
                 ? t("globalView.deleting")

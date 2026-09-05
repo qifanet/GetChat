@@ -569,7 +569,7 @@ export function Composer() {
                   onClick={() => void handleBoundaryInject()}
                   disabled={!draft.trim()}
                   className={
-                    "flex h-11 items-center justify-center rounded-[16px] pl-3 pr-2.5 transition-colors " +
+                    "flex h-11 items-center justify-center rounded-lg pl-3 pr-2.5 transition-colors " +
                     (draft.trim()
                       ? "bg-blue-600 text-white hover:bg-blue-500"
                       : "bg-miro-border/80 text-miro-text-secondary/40")
@@ -583,7 +583,7 @@ export function Composer() {
                 <button
                   type="button"
                   onClick={handleStop}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-miro-red text-white transition-colors hover:bg-miro-red/90"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-miro-red-fill text-white transition-colors hover:brightness-110"
                   title={t("composer.stop")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -598,9 +598,9 @@ export function Composer() {
                   onClick={() => void handleSend()}
                   disabled={!canSend}
                   className={
-                    "flex h-11 items-center justify-center rounded-l-[16px] pl-3.5 pr-2 transition-colors " +
+                    "flex h-11 items-center justify-center rounded-l-lg pl-3.5 pr-2 transition-colors " +
                     (canSend
-                      ? "bg-miro-blue text-white hover:bg-miro-blue-pressed"
+                      ? "bg-miro-accent-fill text-white hover:brightness-110"
                       : "bg-miro-border/80 text-miro-text-secondary/40")
                   }
                   title={isBranchMode ? t("composer.sendAsNewBranch") : t("composer.send")}
@@ -623,9 +623,9 @@ export function Composer() {
                   onClick={handleToggleMenu}
                   disabled={!canSend}
                   className={
-                    "flex h-11 items-center justify-center rounded-r-[16px] border-l pl-1 pr-2 transition-colors " +
+                    "flex h-11 items-center justify-center rounded-r-lg border-l pl-1 pr-2 transition-colors " +
                     (canSend
-                      ? "border-white/20 bg-miro-blue text-white hover:bg-miro-blue-pressed"
+                      ? "border-white/20 bg-miro-accent-fill text-white hover:brightness-110"
                       : "border-transparent bg-miro-border/80 text-miro-text-secondary/40")
                   }
                   title={t("composer.send")}
@@ -648,7 +648,7 @@ export function Composer() {
                 {menuOpen && canSend ? (
                   <div
                     role="listbox"
-                    className="absolute bottom-full right-0 mb-2 w-52 rounded-[16px] border border-miro-border/30 bg-miro-card p-1.5 shadow-panel"
+                    className="absolute bottom-full right-0 mb-2 w-52 rounded-lg border border-miro-border/30 bg-miro-card p-1.5 shadow-panel"
                   >
                     <button
                       role="option"
@@ -656,7 +656,7 @@ export function Composer() {
                       aria-selected={sendMode === "APPEND"}
                       onClick={() => handleSelectMode("APPEND")}
                       className={
-                        "flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-sm transition-colors " +
+                        "flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors " +
                         (sendMode === "APPEND"
                           ? "bg-miro-blue-light/65 text-miro-blue"
                           : "text-miro-text hover:bg-miro-surface-high")
@@ -695,7 +695,7 @@ export function Composer() {
                       aria-selected={sendMode === "NEW_BRANCH"}
                       onClick={() => handleSelectMode("NEW_BRANCH")}
                       className={
-                        "flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-sm transition-colors " +
+                        "flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors " +
                         (sendMode === "NEW_BRANCH"
                           ? "bg-miro-blue-light/65 text-miro-blue"
                           : "text-miro-text hover:bg-miro-surface-high")
@@ -738,7 +738,7 @@ export function Composer() {
 
           {/* Slash command popup */}
           {showSlashMenu && slashItems.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-[16px] border border-miro-border/30 bg-miro-card p-1.5 shadow-panel">
+            <div className="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-lg border border-miro-border/30 bg-miro-card p-1.5 shadow-panel">
               {slashItems
                 .filter(
                   (item) =>
@@ -752,7 +752,7 @@ export function Composer() {
                     key={`${item.itemType}-${item.name}${item.serverName ?? ""}`}
                     type="button"
                     onClick={() => void handleSelectSlashItem(item)}
-                    className="flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-left text-sm transition-colors hover:bg-miro-surface-high"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-miro-surface-high"
                   >
                     <span className="font-mono text-xs text-miro-blue">/{item.name}</span>
                     <span className="flex-1 truncate text-xs text-miro-text-secondary">

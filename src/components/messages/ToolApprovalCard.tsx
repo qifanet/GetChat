@@ -105,14 +105,14 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded-md bg-miro-green px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-miro-green"
+            className="rounded-md bg-miro-green-fill px-3 py-1 text-xs font-medium text-white transition-[filter] hover:brightness-110"
             onClick={() => void handleApprove()}
           >
             {t("toolCall.approve")}
           </button>
           <button
             type="button"
-            className="rounded-md bg-miro-red/80 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-miro-red"
+            className="rounded-md bg-miro-red-fill px-3 py-1 text-xs font-medium text-white transition-[filter] hover:brightness-110"
             onClick={() => void handleReject()}
           >
             {t("toolCall.reject")}

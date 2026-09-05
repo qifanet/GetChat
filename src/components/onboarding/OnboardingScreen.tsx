@@ -232,7 +232,7 @@ export function OnboardingScreen() {
               {t("onboarding.connectionNotice")}
             </div>
             {error ? (
-              <div className="rounded-2xl border border-miro-red-light bg-miro-red-light px-4 py-3 text-sm text-miro-red">
+              <div className="rounded-lg border border-miro-red-light bg-miro-red-light px-3.5 py-2.5 text-sm text-miro-red">
                 {error}
               </div>
             ) : null}

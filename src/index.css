@@ -32,10 +32,12 @@
   --color-miro-blue: var(--c-blue);
   --color-miro-blue-pressed: var(--c-blue-pressed);
   --color-miro-blue-light: var(--c-blue-light);
+  --color-miro-accent-fill: var(--c-accent-fill);
   --color-miro-violet: var(--c-violet);
   --color-miro-violet-light: var(--c-violet-light);
   --color-miro-green: var(--c-green);
   --color-miro-green-light: var(--c-green-light);
+  --color-miro-green-fill: var(--c-green-fill);
   --color-miro-teal: var(--c-teal);
   --color-miro-teal-light: var(--c-teal-light);
   --color-miro-coral: var(--c-coral);
@@ -46,6 +48,7 @@
   --color-miro-pink-light: var(--c-pink-light);
   --color-miro-red: var(--c-red);
   --color-miro-red-light: var(--c-red-light);
+  --color-miro-red-fill: var(--c-red-fill);
 
   --font-sans:
     Inter, PingFang SC, Microsoft YaHei, Segoe UI, system-ui, sans-serif;
@@ -147,8 +150,7 @@
 
 @utility app-primary-button {
   @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-semibold text-white transition-all duration-150 disabled:cursor-not-allowed disabled:bg-miro-ring disabled:text-miro-text-secondary;
-  background-color: var(--c-blue);
-  box-shadow: 0 1px 2px rgba(55, 85, 195, 0.35);
+  background-color: var(--c-accent-fill);
 
   &:hover:not(:disabled) {
     filter: brightness(1.05);
@@ -207,7 +209,8 @@
 }
 
 @utility app-message-avatar-assistant {
-  @apply bg-miro-blue text-white;
+  background-color: var(--c-accent-fill);
+  color: #ffffff;
 }
 
 @utility app-thread-rail {
@@ -564,10 +567,14 @@
     --c-blue: #3755c3;
     --c-blue-pressed: #2848b7;
     --c-blue-light: #dde1ff;
+    /* Solid fill for primary controls — stays dark enough for white labels */
+    --c-accent-fill: #3755c3;
     --c-violet: #6079b7;
     --c-violet-light: #d5e3fc;
     --c-green: #006b62;
     --c-green-light: #e2fff9;
+    /* Solid semantic fills for white-label controls */
+    --c-green-fill: #006b62;
     --c-teal: #006d64;
     --c-teal-light: #d8faf5;
     --c-coral: #9f403d;
@@ -578,6 +585,7 @@
     --c-pink-light: #f6ebff;
     --c-red: #9f403d;
     --c-red-light: #fff1f0;
+    --c-red-fill: #9f403d;
 
     --c-glass-bg: rgba(255, 255, 255, 0.88);
     --c-shell-header-bg: rgba(250, 248, 255, 0.8);
@@ -627,6 +635,8 @@
     --c-blue: #818cf8;
     --c-blue-pressed: #a5b4fc;
     --c-blue-light: rgba(99, 102, 241, 0.18);
+    /* Filled controls keep a deep indigo so white labels hold AA contrast */
+    --c-accent-fill: #4f46e5;
     --c-violet: #a78bfa;
     --c-violet-light: rgba(167, 139, 250, 0.18);
     /* Semantic — desaturated for dark comfort */
@@ -642,6 +652,9 @@
     --c-pink-light: rgba(236, 72, 153, 0.15);
     --c-red: #f85149;
     --c-red-light: rgba(248, 81, 73, 0.15);
+    /* Solid semantic fills for white-label controls */
+    --c-green-fill: #238636;
+    --c-red-fill: #da3633;
 
     --c-glass-bg: rgba(22, 27, 34, 0.92);
     --c-shell-header-bg: rgba(13, 17, 23, 0.88);

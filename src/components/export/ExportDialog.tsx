@@ -359,7 +359,7 @@ export function ExportDialog() {
                 type="button"
                 onClick={() => setScope("CURRENT_PATH")}
                 className={
-                  "rounded-[12px] border px-4 py-2 text-sm font-medium transition-colors " +
+                  "rounded-md border px-4 py-2 text-sm font-medium transition-colors " +
                   (scope === "CURRENT_PATH"
                     ? "border-miro-blue/30 bg-miro-blue-light/65 text-miro-blue"
                     : "border-miro-border/30 bg-miro-card text-miro-text-secondary hover:border-miro-border")
@@ -371,7 +371,7 @@ export function ExportDialog() {
                 type="button"
                 onClick={() => setScope("WHOLE_TREE")}
                 className={
-                  "rounded-[12px] border px-4 py-2 text-sm font-medium transition-colors " +
+                  "rounded-md border px-4 py-2 text-sm font-medium transition-colors " +
                   (scope === "WHOLE_TREE"
                     ? "border-miro-blue/30 bg-miro-blue-light/65 text-miro-blue"
                     : "border-miro-border/30 bg-miro-card text-miro-text-secondary hover:border-miro-border")
@@ -390,7 +390,7 @@ export function ExportDialog() {
                   type="button"
                   onClick={() => setFormat(key)}
                   className={
-                    "rounded-[12px] border px-4 py-2 text-sm font-medium transition-colors " +
+                    "rounded-md border px-4 py-2 text-sm font-medium transition-colors " +
                     (format === key
                       ? "border-miro-blue/30 bg-miro-blue-light/65 text-miro-blue"
                       : "border-miro-border/30 bg-miro-card text-miro-text-secondary hover:border-miro-border")

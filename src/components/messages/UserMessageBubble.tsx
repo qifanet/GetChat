@@ -81,7 +81,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
             {t("common.user").slice(0, 1)}
           </span>
         </div>
-        <div className="rounded-[26px] rounded-tr-[10px] border border-miro-blue/12 bg-miro-blue-light px-5 py-4 text-[15px] leading-7 text-miro-text shadow-ring [&_.markdown-content]:text-[15px] [&_.markdown-content_p:last-child]:mb-0">
+        <div className="rounded-lg rounded-tr-[4px] border border-miro-blue/12 bg-miro-blue-light px-4 py-3 text-sm text-miro-text shadow-ring [&_.markdown-content_p:last-child]:mb-0">
           <MarkdownRenderer content={message.content.text} disableMermaid />
         </div>
       </div>

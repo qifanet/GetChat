@@ -224,7 +224,7 @@ function buildMarkdownComponents(
     // For unregistered languages, render as plain text with proper whitespace
     if (language) {
       return (
-        <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
+        <div className="my-3 overflow-hidden rounded-lg border border-miro-border/20 bg-miro-surface-low">
           <CodeBlockHeader
             language={language}
             rawCode={rawCode}
@@ -247,7 +247,7 @@ function buildMarkdownComponents(
     })();
 
     return (
-      <div className="my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
+      <div className="my-3 overflow-hidden rounded-lg border border-miro-border/20 bg-miro-surface-low">
         <CodeBlockHeader
           language={displayLang}
           rawCode={rawCode}

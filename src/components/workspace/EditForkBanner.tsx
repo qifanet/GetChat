@@ -40,7 +40,7 @@ export function EditForkBanner() {
     ].join(" ");
 
   return (
-    <div className="mx-4 mb-3 flex flex-col gap-3 rounded-[22px] border border-miro-violet/25 bg-miro-violet-light/75 px-4 py-3 shadow-ring lg:flex-row lg:items-center lg:justify-between">
+    <div className="mx-4 mb-3 flex flex-col gap-3 rounded-lg border border-miro-violet/25 bg-miro-violet-light/75 px-4 py-3 shadow-ring lg:flex-row lg:items-center lg:justify-between">
       <div className="flex min-w-0 items-start gap-2">
         <IconPencilSquare size={14} className="mt-1 shrink-0 text-miro-violet" />
         <div className="min-w-0 text-xs leading-6 text-miro-violet">
@@ -60,7 +60,7 @@ export function EditForkBanner() {
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <div className="flex rounded-2xl border border-miro-violet/20 bg-miro-card/35 p-1">
+        <div className="flex rounded-lg border border-miro-violet/20 bg-miro-card/35 p-1">
           <button
             type="button"
             className={buttonClass(!isDirectOverwrite)}

@@ -86,7 +86,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
 
   if (loading) {
     return (
-      <div className="my-4 flex items-center gap-2 rounded-2xl border border-miro-border/20 bg-miro-surface-low px-4 py-6">
+      <div className="my-3 flex items-center gap-2 rounded-lg border border-miro-border/20 bg-miro-surface-low px-4 py-4">
         <svg className="h-4 w-4 animate-spin text-miro-blue" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -98,7 +98,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
 
   if (error) {
     return (
-      <div className="my-4 overflow-hidden rounded-2xl border border-miro-red/20 bg-miro-red-light/40">
+      <div className="my-3 overflow-hidden rounded-lg border border-miro-red/20 bg-miro-red-light/40">
         <div className="flex items-center gap-2 border-b border-miro-red/10 px-4 py-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-miro-red">
             <circle cx="12" cy="12" r="10" />
@@ -120,7 +120,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: MermaidBlockPro
   return (
     <>
       {/* Inline preview — no zoom/pan, just a fullscreen button */}
-      <div className="group/diagram my-4 overflow-hidden rounded-2xl border border-miro-border/20 bg-miro-surface-low">
+      <div className="group/diagram my-3 overflow-hidden rounded-lg border border-miro-border/20 bg-miro-surface-low">
         <div className="flex items-center justify-end border-b border-miro-border/10 px-3 py-1.5 opacity-0 transition-opacity group-hover/diagram:opacity-100">
           <button
             onClick={openFullscreen}

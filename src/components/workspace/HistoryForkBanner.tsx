@@ -28,7 +28,7 @@ export function HistoryForkBanner() {
   const clearForkIntent = useAppStore(_sel_clearForkIntent);
   if (!forkIntent) return null;
   return (
-    <div className="mx-4 mb-3 flex items-center justify-between rounded-[22px] border border-miro-blue/25 bg-miro-blue-light/80 px-4 py-3 shadow-ring">
+    <div className="mx-4 mb-3 flex items-center justify-between rounded-lg border border-miro-blue/25 bg-miro-blue-light/80 px-4 py-3 shadow-ring">
       <div className="flex items-center gap-2">
         <IconInfoCircle size={14} className="shrink-0 text-miro-blue" />
         <p className="text-xs leading-6 text-miro-blue">
