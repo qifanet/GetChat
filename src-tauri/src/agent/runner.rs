@@ -35,6 +35,7 @@ use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
 use crate::services::model_stream_service::{
     self, ModelStreamFailure, ModelStreamOutcome, ResolvedModelStreamRequest,
 };
+use crate::agent::policy::{build_approval_description, requires_tool_approval, resolve_legacy_tool_name};
 use crate::agent::tools::{ToolExecutionContext, ToolExecutionResult};
 
 pub(crate) const TOOL_EXECUTION_TIMEOUT_SECONDS: u64 = 60;
@@ -829,91 +830,6 @@ async fn execute_tool_with_mcp(
     }
 }
 
-fn requires_tool_approval(
-    function_name: &str,
-    arguments: &str,
-    policy: &crate::state::SecurityPolicy,
-) -> bool {
-    use crate::state::SecurityLevel;
-
-    // MCP tools always require approval
-    if function_name.starts_with("mcp__") {
-        return true;
-    }
-
-    // Resolve legacy tool names so approval checks work for old names too
-    let resolved_name = resolve_legacy_tool_name(function_name);
-
-    match resolved_name.as_str() {
-        "file" => {
-            let args: Value = match serde_json::from_str(arguments) {
-                Ok(v) => v,
-                Err(_) => return true, // Fail-safe: require approval on parse failure
-            };
-            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("");
-            if action != "write" {
-                return false;
-            }
-            // File write — check level and blacklist
-            match policy.level {
-                SecurityLevel::Permissive => {
-                    matches_blacklist(args.get("path").and_then(|p| p.as_str()).unwrap_or(""), &policy.file_write_blacklist)
-                }
-                SecurityLevel::Standard => true, // All file writes require approval in Standard
-                SecurityLevel::Strict => true,
-            }
-        }
-        "terminal" => {
-            let args: Value = match serde_json::from_str(arguments) {
-                Ok(v) => v,
-                Err(_) => return true, // Fail-safe: require approval on parse failure
-            };
-            let command = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
-            match policy.level {
-                SecurityLevel::Permissive => {
-                    matches_blacklist(command, &policy.terminal_blacklist)
-                }
-                SecurityLevel::Standard => {
-                    matches_blacklist(command, &policy.terminal_blacklist)
-                }
-                SecurityLevel::Strict => true,
-            }
-        }
-        _ => false,
-    }
-}
-
-fn matches_blacklist(text: &str, patterns: &[String]) -> bool {
-    for pattern in patterns {
-        match regex::Regex::new(pattern) {
-            Ok(re) => {
-                if re.is_match(text) {
-                    return true;
-                }
-            }
-            Err(err) => {
-                // Fail-closed: invalid regex pattern treated as match for safety
-                tracing::warn!(
-                    pattern = %pattern,
-                    error = %err,
-                    "invalid regex in blacklist, treating as match for safety"
-                );
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/** Resolve legacy tool names to their current unified equivalents. */
-fn resolve_legacy_tool_name(tool_name: &str) -> String {
-    match tool_name {
-        "file_read" | "file_write" | "file_list" | "grep" => "file".to_string(),
-        "todo_read" | "todo_write" => "todo".to_string(),
-        _ => tool_name.to_string(),
-    }
-}
-
 async fn execute_tool_checked(
     deps: &ReactLoopDeps<'_>,
     allowed_tool_names: &HashSet<String>,
@@ -963,25 +879,3 @@ async fn execute_tool_checked(
     }
 }
 
-/**
- * Build a human-readable description of a tool action for the approval dialog.
- */
-fn build_approval_description(function_name: &str, arguments: &str) -> String {
-    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-    match function_name {
-        "rm" => {
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
-            if recursive {
-                format!("Delete directory '{}' and all its contents recursively", path)
-            } else {
-                format!("Delete file '{}'", path)
-            }
-        }
-        "file_write" => {
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("unknown");
-            format!("Write/overwrite file '{}'", path)
-        }
-        _ => format!("Execute destructive tool: {}", function_name),
-    }
-}

@@ -21,6 +21,7 @@
 pub(crate) mod context;
 pub(crate) mod deps;
 pub(crate) mod eval;
+pub(crate) mod policy;
 pub(crate) mod prompt;
 pub(crate) mod runner;
 pub(crate) mod session;
