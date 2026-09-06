@@ -139,11 +139,12 @@
 
 ### M6 — 硬化与发布验收
 
-- [ ] M6.1 LLM Judge 质量冒烟（人工门禁，手册 §10.2）：10 个典型任务（含中文），G-Eval 简化维度（正确性/完整性/简洁性），与 v1.4 基线对比无回退。
-- [ ] M6.2 性能验收：流式首 token 延迟、工具并行轮耗时对比（记录基线）；内存：并发 3 流无泄漏（任务管理器观察基线记录）。
-- [ ] M6.3 安全验收：审批矩阵复测；keyring 密钥不出现在任何日志/事件/轨迹导出（grep 审计）；MCP 恶意工具名注入测试（命名空间转义）。
-- [ ] M6.4 文档收口：三件套状态更新、`docs/private/README.md` 登记、CHANGELOG、版本号统一（package.json 1.5.0 / tauri.conf / Cargo.toml 对齐——当前 Cargo.toml 仍是 1.4.0，需修复）。
-- [ ] M6.5 多平台冒烟：Windows（主）、macOS/Linux `cargo check` 通过。
+- [ ] M6.1 LLM Judge 质量冒烟（人工门禁，手册 §10.2）：10 个典型任务（含中文），G-Eval 简化维度（正确性/完整性/简洁性），与 v1.4 基线对比无回退。（需真实模型，随 §4.2 清单执行）
+- [ ] M6.2 性能验收：流式首 token 延迟、工具并行轮耗时对比（记录基线）；内存：并发 3 流无泄漏（任务管理器观察基线记录）。（需真机，随 §4.2 清单执行）
+- [x] M6.3（2026-09-06）安全验收（代码级三项全部落地）：① 审批矩阵复测——审批三态 golden 全绿（granted/rejected/timeout）；② keyring 密钥泄漏 grep 审计——`agent_runs` 全链路（audit/repository/dto/command）与流事件 DTO 均无 api_key/secret 字段，日志仅 `has_api_key: bool`；③ MCP 恶意工具名注入测试——新增 golden `malicious_tool_names_rejected_by_allowlist_gate`（伪造 `mcp__` 未知服务器/控制字符走私名/未启用内建工具），并落地硬化修复：允许列表门禁前移至审批流之前，幻觉/禁用工具名不再触发审批弹窗，直接合成 "not enabled" 失败结果（id 配对不变）。
+- [x] M6.3+（2026-09-06）发布前 Mimosa deep 完整审计（风险表承诺项）：密封结论 **0 findings**（scanId `scan-2026-09-06T09-34-26.896Z-a34691eb004a`，seal `sha256:cddcb6ab…f11`，深度 deep）；运行状态 inconclusive 系披露的工具覆盖缺口（callgraph 对动态派发部分不完整——Rust trait 对象缝的固有限制），非未决高危项，不触发冻结条款；依赖离线告警匹配 15 条为信息级（未立案 findings）。风险表"审计出现 high 未决项即冻结发布"不适用。
+- [x] M6.4（2026-09-06）文档收口：版本号三处统一（package.json / tauri.conf.json / Cargo.toml+Cargo.lock → 1.5.0）；新建 `CHANGELOG.md`（v1.5.0 条目 + 历史版本回填）；三件套状态更新（ARCHITECTURE B6/S6 ✅、CAPABILITIES C14/C15 ✅、DEVELOPMENT M5 全勾）；`docs/private/README.md` 无新增需登记文档（M1–M6 未新增私有文档，三件套已在册）。
+- [ ] M6.5 多平台冒烟：Windows（主）、macOS/Linux `cargo check` 通过。（CI 现为 windows-latest；macOS/Linux 检查待真机或后续 CI 扩展）
 
 ---
 

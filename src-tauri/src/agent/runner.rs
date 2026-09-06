@@ -502,7 +502,17 @@ async fn run_react_loop_inner(
                         }
                     } else {
                         let tc = &batch_calls[0];
-                        let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
+                        // M6.3 hardening: the allow-list gate runs BEFORE the
+                        // approval flow — a hallucinated, disabled, or
+                        // namespace-smuggled tool name must fail fast with a
+                        // synthetic "not enabled" result (execute_tool_checked
+                        // re-checks and answers it) instead of raising an
+                        // approval prompt for a tool the user never enabled.
+                        let gate_resolved = resolve_legacy_tool_name(&tc.function.name);
+                        let gate_allows = allowed_tool_names.contains(&gate_resolved)
+                            || allowed_tool_names.contains(&tc.function.name);
+                        let requires_approval = gate_allows
+                            && requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
                         vec![if requires_approval {
                             // M5.1: the approval itself is part of the trail.
                             if let Some(auditor) = &deps.auditor {
