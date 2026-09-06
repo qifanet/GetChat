@@ -82,4 +82,10 @@ pub struct TaskQueueItemDto {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
+    /** Restart recoveries + 429 backoff cycles (M4.1). */
+    #[serde(default)]
+    pub attempts: i64,
+    /** Scheduled wake-up for PAUSED tasks (epoch seconds); NULL = immediately due. */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run_at: Option<i64>,
 }

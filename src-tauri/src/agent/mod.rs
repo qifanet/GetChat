@@ -26,4 +26,5 @@ pub(crate) mod policy;
 pub(crate) mod prompt;
 pub(crate) mod runner;
 pub(crate) mod session;
+pub(crate) mod taskqueue;
 pub(crate) mod tools;

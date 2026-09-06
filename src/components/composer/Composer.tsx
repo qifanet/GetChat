@@ -173,15 +173,22 @@ export function Composer() {
 
   /** Inject message to active stream (Dual-Queue v1.5.0) */
   const [injectStatus, setInjectStatus] = useState<"idle" | "sent" | "failed">("idle");
+  /** Queued injections not yet drained by the ReAct loop; removable until consumed. */
+  const [pendingInjections, setPendingInjections] = useState<string[]>([]);
+  /** Set briefly when a cancel arrives after the loop already consumed the entry. */
+  const [cancelLate, setCancelLate] = useState(false);
 
   const handleBoundaryInject = useCallback(async () => {
     if (!activeRequestId || draft.trim().length === 0) {
       return;
     }
 
+    const content = draft.trim();
     try {
-      await tauriCmd.injectUserMessageToStream(activeRequestId, draft.trim());
+      await tauriCmd.injectUserMessageToStream(activeRequestId, content);
       setDraft("");
+      setPendingInjections((prev) => (prev.includes(content) ? prev : [...prev, content]));
+      setCancelLate(false);
       setInjectStatus("sent");
       console.info("[composer] Message injected to stream:", activeRequestId);
       setTimeout(() => setInjectStatus("idle"), 2500);
@@ -191,6 +198,32 @@ export function Composer() {
       setTimeout(() => setInjectStatus("idle"), 3000);
     }
   }, [activeRequestId, draft, setDraft]);
+
+  /** Withdraw a queued injection before the ReAct loop drains it. */
+  const handleCancelInjection = useCallback(
+    async (content: string) => {
+      if (!activeRequestId) return;
+      try {
+        const removed = await tauriCmd.cancelInjectedMessage(activeRequestId, content);
+        setPendingInjections((prev) => prev.filter((entry) => entry !== content));
+        setCancelLate(!removed);
+        if (!removed) {
+          setTimeout(() => setCancelLate(false), 3000);
+        }
+      } catch (error) {
+        console.error("[composer] Cancel injection failed:", error);
+      }
+    },
+    [activeRequestId]
+  );
+
+  /** Queue entries die with the stream: drop them when sending state clears. */
+  useEffect(() => {
+    if (!isSending) {
+      setPendingInjections([]);
+      setCancelLate(false);
+    }
+  }, [isSending]);
 
   /** Cancel the active streaming request when the user presses the stop control. */
   const handleStop = useCallback(() => {
@@ -504,7 +537,7 @@ export function Composer() {
             ) : null}
             {isSending ? (
               <p className="text-xs leading-5 text-miro-text-secondary sm:ml-auto">
-                Enter = inject &middot; Shift+Enter = newline
+                {t("composer.injectHint")}
               </p>
             ) : null}
           </div>
@@ -535,7 +568,7 @@ export function Composer() {
                 onChange={handleInput}
                 onWheel={handleWheel}
                 onKeyDown={handleKeyDown}
-                placeholder={disabledReason ?? (isSending ? t("composer.injectPlaceholder", "Ctrl+Enter to inject during stream") : t("composer.placeholder"))}
+                placeholder={disabledReason ?? (isSending ? t("composer.injectPlaceholder") : t("composer.placeholder"))}
                 rows={1}
                 className={`min-h-[34px] w-full resize-none border-none bg-transparent pl-3 pr-1 pt-2 pb-1 font-body text-[15px] leading-6 text-miro-text placeholder:text-miro-placeholder focus:outline-hidden focus:ring-0 ${
                   scrollable
@@ -549,7 +582,7 @@ export function Composer() {
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
-                  Injected — will apply at next tool boundary
+                  {t("composer.injectedNotice")}
                 </div>
               )}
               {injectStatus === "failed" && (
@@ -558,7 +591,41 @@ export function Composer() {
                     <circle cx="12" cy="12" r="10" />
                     <path d="M15 9l-6 6M9 9l6 6" />
                   </svg>
-                  Inject failed — no active stream
+                  {t("composer.injectFailedNotice")}
+                </div>
+              )}
+              {cancelLate && (
+                <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] text-miro-amber">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4M12 16h.01" />
+                  </svg>
+                  {t("composer.cancelInjectionLate")}
+                </div>
+              )}
+              {pendingInjections.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5 pt-0.5">
+                  <span className="text-[10px] uppercase tracking-wide text-miro-text-secondary">
+                    {t("composer.pendingInjectionTitle")}
+                  </span>
+                  {pendingInjections.map((content) => (
+                    <span
+                      key={content}
+                      className="inline-flex max-w-64 items-center gap-1 rounded-full border border-blue-400/30 bg-blue-400/10 px-2.5 py-1 text-[11px] text-blue-400"
+                    >
+                      <span className="truncate">{content}</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelInjection(content)}
+                        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-blue-400/20"
+                        title={t("composer.cancelInjection")}
+                      >
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round">
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -574,7 +641,7 @@ export function Composer() {
                       ? "bg-blue-600 text-white hover:bg-blue-500"
                       : "bg-miro-border/80 text-miro-text-secondary/40")
                   }
-                  title="Inject message to active stream"
+                  title={t("composer.injectTitle")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 5v14M5 12h14" />

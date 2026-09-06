@@ -154,8 +154,12 @@ export interface StreamSessionMeta {
   /** Total visible character count (approximate) */
   visibleCharCount: number;
 
-  /** How completion should update workspace state after persistence succeeds. */
-  completionMode?: "BRANCH_HEAD" | "VARIANT_PREVIEW";
+  /**
+   * How completion should update workspace state after persistence succeeds.
+   * TASK_WORKER: the backend task worker persists the outcome itself; the
+   * frontend only reflects state (no client-side complete/fail calls).
+   */
+  completionMode?: "BRANCH_HEAD" | "VARIANT_PREVIEW" | "TASK_WORKER";
 
   /** Parent user message for variant preview flows. */
   previewUserMessageId?: MessageId;

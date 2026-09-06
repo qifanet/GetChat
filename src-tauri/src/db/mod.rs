@@ -156,6 +156,14 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0015: Tool-result overflow store (JIT retrieval of truncated outputs)
     let sql_0015 = include_str!("migrations/0015_tool_result_overflow.sql");
     execute_migration_sql(pool, sql_0015, "Migration 0015").await;
+
+    // 0016: Task queue resilience — attempts + next_run_at (retry scheduling)
+    let sql_0016 = include_str!("migrations/0016_task_queue_resilience.sql");
+    execute_migration_sql(pool, sql_0016, "Migration 0016").await;
+
+    // 0017: Message provenance — messages.source for dual-queue inject persistence
+    let sql_0017 = include_str!("migrations/0017_message_source.sql");
+    execute_migration_sql(pool, sql_0017, "Migration 0017").await;
 }
 
 /**

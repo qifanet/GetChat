@@ -66,6 +66,8 @@
 ```
 
 > M1 更新：循环迁入 `agent/runner.rs`、压缩编排迁入 `agent/context.rs`、注入队列会话作用域化（`agent/session.rs`）；`commands/streaming.rs` 缩为 command 壳（695 行），MCP 管理/Skills 拆至 `commands/mcp.rs`、`commands/skills.rs`。全局单流检查仍在 `start_model_stream`（M4/S5 引入 per-conversation 流锁）；`TODO_STORE` 按 conversation_id 键控的全局静态留待 M2 工具模块落库。
+>
+> M4 更新：per-conversation 流锁落地（A1 ✅）；任务队列收口为 `agent/taskqueue/mod.rs::TaskQueueScheduler` 单实现（A4 ✅，`services/task_worker.rs`/`task_queue_service.rs` 删除），并行分叉经 `execute_parallel_fork` → 入队 → 服务端 `drive_task_stream` 驱动完整 ReAct 循环（A2 ✅），事件经 `task_stream_event`/`task_queue_changed` 桥接前端（`services/taskStreamBridge.ts`，worker 会话 `completionMode: TASK_WORKER` 全服务端持久化）；注入撤回 `cancel_injected_message`（M4.6）。
 
 ### 2.3 数据所有权（继续有效的核心不变量）
 
@@ -88,10 +90,10 @@
 
 | # | 问题 | 证据 | 影响 |
 |---|---|---|---|
-| A1 | **全局单流锁堵死并行分叉**：`start_model_stream` 在全局 `active_model_streams` 上检查"已有任意流活动即拒绝"，而 v1.5.0 的核心卖点就是并行分支流 | `streaming.rs:169-186` | PRD Feature A 端到端不可实现；任务队列串行执行也会与用户主动对话互相顶掉 |
-| A2 | **并行分叉不产生任何 AI 输出**：`execute_parallel_fork` 中创建分支是 TODO，只入队任务；`TaskWorker::execute_parallel_fork` 只建 branch+user message，从不调用 `start_model_stream` | `commands/proposal.rs:57-58`（字面 TODO）、`services/task_worker.rs:76-178` | "100% 完成"与实际不符；分支创建后是空壳，无 assistant placeholder、无流 |
-| A3 | **全局可变静态状态导致并发会话互相污染**：`inject_queue` 用 `Lazy<Mutex<HashMap>>` 全局静态；todo 工具的会话上下文用 `set_todo_conversation_id` 全局变量（仅 scopeguard 兜底清理） | `services/inject_queue.rs:14`、`services/tool_executor.rs`（全局 setter）、`streaming.rs:1269` | 两个并发流同时运行时 todo 写串、注入串会话；A1 暂时掩盖了此问题，解锁并发后立即爆发 |
-| A4 | **TaskWorker 与 TaskQueueService 双实现并存**：后者整体 `#[allow(dead_code)]` 是死代码；真实 worker 用 1s 忙轮询，无事件唤醒、无重启恢复（RUNNING 任务永久卡死）、无 429 处理 | `services/task_queue_service.rs:19`、`services/task_worker.rs:20-29` | 队列语义碎片化；重启后任务永远 RUNNING；PRD 承诺的 429 暂停/重试不存在 |
+| A1 | ~~**全局单流锁堵死并行分叉**：`start_model_stream` 在全局 `active_model_streams` 上检查"已有任意流活动即拒绝"，而 v1.5.0 的核心卖点就是并行分支流~~ ✅ M4.3 落地：per-conversation 流锁（同 conversation 独占、跨会话/分支放行，`STREAM_ALREADY_ACTIVE` 语义保留；worker 流与主动流共用该锁） | `commands/streaming.rs`（`agent_sessions` 按 conversation_id 索引） | ~~PRD Feature A 端到端不可实现；任务队列串行执行也会与用户主动对话互相顶掉~~ 并行分叉端到端可达成 |
+| A2 | ~~**并行分叉不产生任何 AI 输出**：`execute_parallel_fork` 中创建分支是 TODO，只入队任务；`TaskWorker::execute_parallel_fork` 只建 branch+user message，从不调用 `start_model_stream`~~ ✅ M4.4 落地：`execute_parallel_fork` 走 `snapshot_service::create_parallel_fork_branch`（assistant placeholder + sibling_index max+1），执行由 `agent/taskqueue` 调度器 `drive_task_stream` 服务端驱动完整 ReAct 循环，事件经 `task_stream_event` 前端渲染 | `commands/proposal.rs`、`agent/taskqueue/mod.rs` | ~~分支创建后是空壳，无 assistant placeholder、无流~~ 分支创建即入队即执行 |
+| A3 | ~~**全局可变静态状态导致并发会话互相污染**：inject_queue 全局静态；todo 工具的会话上下文全局变量~~ ✅ M1/M2 落地：inject 队列会话作用域化（`agent/session.rs`，随 agent session 生命周期）；TODO_STORE 按 conversation_id 键控（`ToolExecutionContext.conversation_id`，全局 setter 已删除） | `agent/session.rs`、`agent/tools/builtin/todo.rs` | ~~两个并发流同时运行时 todo 写串、注入串会话~~ 并发流互不污染 |
+| A4 | ~~**TaskWorker 与 TaskQueueService 双实现并存**：后者整体 `#[allow(dead_code)]` 是死代码；真实 worker 用 1s 忙轮询，无事件唤醒、无重启恢复（RUNNING 任务永久卡死）、无 429 处理~~ ✅ M4.1 落地：双实现删除，`agent/taskqueue/mod.rs::TaskQueueScheduler` 单实现——`Notify` 事件驱动 + 30s 兜底轮询、启动恢复（RUNNING→QUEUED attempts+1 + resume PAUSED）、429 读 Retry-After 缺省 30s PAUSED 退避（attempts≤5）、进度合并写 `config_json.progress`；watch 通道支持运行中取消 | `agent/taskqueue/mod.rs`、`repositories/task_queue.rs` | ~~队列语义碎片化；重启后任务永远 RUNNING；PRD 承诺的 429 暂停/重试不存在~~ 队列语义统一，恢复/退避/取消齐备 |
 
 ### 🟠 结构性债务类
 
@@ -106,11 +108,11 @@
 
 ### 🟡 改进项
 
-- 工具结果 8000 字符硬截断无落盘引用（超长结果信息直接丢失）。
-- 重试退避未读取 `Retry-After`（PRD 已承诺）。
-- `task_worker` 的 sibling_index 用 task_id 哈希 %1000，仍可能撞 UNIQUE 约束（`task_worker.rs:152`）。
+- ~~工具结果 8000 字符硬截断无落盘引用（超长结果信息直接丢失）。~~ ✅ M3.3 落盘 + `read_tool_result` JIT 取回。
+- ~~重试退避未读取 `Retry-After`（PRD 已承诺）。~~ ✅ M4.1 任务队列读 `retry_after`（缺省 30s）；交互流重试退避仍在 `agent/runner.rs`。
+- ~~`task_worker` 的 sibling_index 用 task_id 哈希 %1000，仍可能撞 UNIQUE 约束（`task_worker.rs:152`）。~~ ✅ M4.4 `max+1` 查询，task_worker 已删除。
 - `model_stream_service.rs`（2019 行）混合了 provider 适配、SSE 解析、DSML 兜底解析、序列校验——DSML 兜底对不支持原生 function calling 的 provider 有价值，但应独立成模块。
-- 文档失真：`FINAL-SUMMARY-v1.5.0.md` 宣称"100% / 无债务 / 可发布"，但 smoke 清单全部未勾选，A2/A4 与之矛盾。（M0 已标注修正）
+- 文档失真：`FINAL-SUMMARY-v1.5.0.md` 宣称"100% / 无债务 / 可发布"，但 smoke 清单全部未勾选，A2/A4 与之矛盾。（M0 已标注修正；A2/A4 已由 M4 收口）
 
 ---
 

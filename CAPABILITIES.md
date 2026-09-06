@@ -20,9 +20,9 @@
 | C08 | Skills（Tier1 元数据 / Tier3 slash） | 🟡 | 热插拔可用；Tier2 语义未分层 |
 | C09 | 工具审批（安全策略/黑名单/超时） | 🟡 | 机制可用，策略硬编码在循环里 |
 | C10 | Agent 循环（ReAct） | 🟡 | 循环本体已迁 `agent/runner.rs` 并受 76 项金测护栏（M1）；可测性达成，范式可插拔（paradigms/）待 M2+ |
-| C11 | 任务队列（Task Queue） | 🟡 | 骨架可用：1s 忙轮询、无恢复、无 429、双实现并存 |
-| C12 | 并行分支分叉（Parallel Fork） | ❌ | 只建空分支不产 AI 输出，端到端断裂 |
-| C13 | Dual-Queue 中途注入 | 🟡 | 后端注入已会话作用域化（M1 `agent/session.rs`，并发污染消除）；无持久化 |
+| C11 | 任务队列（Task Queue） | ✅ | M4 `agent/taskqueue` 单实现：Notify 事件驱动、启动恢复、429 退避重试、运行中取消、进度字段 |
+| C12 | 并行分支分叉（Parallel Fork） | ✅ | M4 端到端：提案→编辑→入队→服务端驱动完整 ReAct 流→分支产真实回复；桌面双分支冒烟留待 M6 |
+| C13 | Dual-Queue 中途注入 | ✅ | M4/M4.6：会话作用域队列 + 注入持久化（`source=inject`）+ 生效前撤回（`cancel_injected_message`）+ Composer 排队 chip |
 | C14 | Agent 可观测性（run 审计/轨迹） | ❌ | 仅 tracing 日志 |
 | C15 | Agent 评估（golden 用例/scripted provider） | 🟡 | M0 已落地 scripted model + 13 个 golden 回放用例进 `cargo test`；BFCL 式用例与 CI eval job 待 M5 |
 | C16 | 记忆系统（核心硬编码层/情景/语义） | 📐 | 仅压缩摘要雏形（compressed_contexts） |
@@ -93,23 +93,23 @@
 - **目标态（v1.5）**：`agent::runner` 模板方法 + 显式状态机 + `AgentSession` 会话作用域（消灭全局静态）；范式策略接口就位（仅 ReAct 实现）。**验收锚点：golden 回放全绿（S0 用例）+ streaming.rs ≤ 800 行**。
 - **M0 进展**：依赖缝合 `ReactLoopDeps` 落地（流/MCP/压缩后端可注入），13 个 golden 用例锁定现行为。
 
-### C11 任务队列 🟡
+### C11 任务队列 ✅
 
-- **契约（现状）**：SQLite 持久化任务、串行执行、取消、前端面板 2s 轮询展示。
-- **缺陷**：1s 忙轮询无事件唤醒；重启后 RUNNING 卡死；无 429 暂停/重试；`TaskQueueService` 是死代码双实现；无任务进度。
-- **目标态（v1.5）**：`agent::taskqueue`——Notify 事件驱动 + 启动恢复（RUNNING→QUEUED 重置）+ 429 按 `Retry-After` 暂停重试 + 任务进度字段 + 删除死代码。**验收锚点：队列状态机单测 + 重启恢复集成测试**。
+- **契约（现状，M4 后）**：SQLite 持久化任务、`agent/taskqueue::TaskQueueScheduler` 单实现（死代码双实现已删除）——Notify 事件驱动 + 30s 兜底轮询、启动恢复（RUNNING→QUEUED attempts+1 + resume 到期 PAUSED）、429 按 `Retry-After` 暂停（缺省 30s，attempts≤5）、`config_json.progress` 进度（phase/工具计数，合并写）、watch 通道运行中取消；`max_parallel` 经 app_kv 可配（默认 1）。
+- **已落地（M4）**：迁移 `0016_task_queue_resilience.sql`（attempts/next_run_at）；仓储单测覆盖调度/恢复/取消/进度合并。
+- **验收锚点**：队列状态机单测 ✅；重启恢复集成测试 ✅（`startup_recovery_requeues_running_with_attempt_bump`）；桌面端到端冒烟随 M6 清单。
 
-### C12 并行分支分叉 ❌（v1.5.0 旗舰能力）
+### C12 并行分支分叉 ✅（v1.5.0 旗舰能力）
 
-- **承诺契约（PRD）**：AI 提议或用户主动发起 → 提案（毫秒级）→ 用户编辑分支/选模型 → 启动 → 队列串行跑流 → 各分支产真实 AI 回复 → 可比较。
-- **实况**：提案/审批面板存在；`execute_parallel_fork` 建分支是 TODO；TaskWorker 只建 branch+user message，**从不启动模型流**；全局单流锁也使多分支流不可能（ARCHITECTURE.md §3 A1/A2）。
-- **目标态（v1.5）**：补齐全链路——分支创建走统一 branch 服务（含 assistant placeholder）→ 每任务驱动一个完整 stream session → per-conversation 流锁放行跨分支并行 → 前端 ParallelForkReviewPanel 与 TaskQueuePanel 进度联动。**验收锚点：PRD §6.3 全部用例 + 三分支端到端冒烟**。
+- **承诺契约（PRD）**：AI 提议或用户主动发起 → 提案（毫秒级）→ 用户编辑分支/选模型 → 启动 → 队列跑流 → 各分支产真实 AI 回复 → 可比较。
+- **已落地（M4）**：`execute_parallel_fork` 走 `snapshot_service::create_parallel_fork_branch`（assistant placeholder + sibling_index `max+1`）→ 任务入队即唤醒 → `drive_task_stream` 服务端驱动完整 ReAct 循环 → 事件经 `task_stream_event` 信封桥接前端（`taskStreamBridge.ts` + TASK_WORKER 会话，服务端持久化）→ COMPLETED 可从面板跳转分支；per-conversation 流锁放行跨会话并行。
+- **验收锚点**：PRD §6.3 全部用例 + 三分支端到端冒烟 —— 单测层已覆盖（分支创建/入队/调度），桌面三分支并行冒烟随 M6 发布清单。
 
-### C13 Dual-Queue 注入 🟡
+### C13 Dual-Queue 注入 ✅
 
-- **契约（现状）**：Ctrl+Enter 在 tool boundary 注入 `[User supplement]`，UserInjected 事件回显。
-- **缺陷**：全局静态队列（并发污染风险）；注入消息不入消息树/无持久化（刷新即丢，历史不可见）；thinking 模型无 boundary 时注入延迟无 UI 提示。
-- **目标态（v1.5）**：会话作用域队列（S1 顺带解决）；注入消息作为消息节点持久化（非破坏性：独立 `source=inject` 标记）；"等待注入/将在下一轮生效"状态提示。**验收锚点：注入用例（含取消）+ 持久化验证**。
+- **契约（现状，M4 后）**：Ctrl+Enter 在 tool boundary 注入 `[User supplement]`，UserInjected 事件回显；队列会话作用域（`agent/session.rs`，随 agent session 生命周期）。
+- **已落地（M4/M4.6）**：注入消息作为消息节点持久化（迁移 `0017_message_source.sql`，`source=inject`，非破坏性；刷新/历史可见）；`cancel_injected_message` 在下一 boundary 前撤回排队注入（命中返回 true，已被消费返回 false）；Composer 已排队注入 chip 可视可撤回，流结束自动清空。
+- **验收锚点**：注入用例（含取消）✅（boundary drain golden + `cancel_injection` 单测：命中移除/重复取消/未知内容均断言）；持久化验证 ✅（`0017` 迁移 + 消息节点单测）。
 
 ### C14 Agent 可观测性 ❌
 

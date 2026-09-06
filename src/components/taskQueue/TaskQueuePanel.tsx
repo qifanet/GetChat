@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from "react";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { TaskQueueItemDto, TaskStatus } from "../../types/taskQueue";
 import { useAppStore } from "../../stores/useAppStore";
+import { ensureTaskStreamBridge, onTaskQueueChanged } from "../../services/taskStreamBridge";
 import {
   IconClock,
   IconPlay,
@@ -56,10 +57,12 @@ export function TaskQueuePanel() {
 
   useEffect(() => {
     let prevHadRunning = false;
+    let disposed = false;
 
     const fetchTasks = async () => {
       try {
         const items = await tauriCmd.listTaskQueue();
+        if (disposed) return;
         const nowSecs = Math.floor(Date.now() / 1000);
         const filtered = items.filter((task) => {
           if (task.status === "QUEUED" || task.status === "RUNNING" || task.status === "PAUSED") {
@@ -88,9 +91,19 @@ export function TaskQueuePanel() {
       }
     };
 
+    // Backend status transitions push updates via task_queue_changed; the
+    // interval stays as a low-frequency fallback (e.g. missed emissions).
     fetchTasks();
-    const interval = setInterval(fetchTasks, 1000);
-    return () => clearInterval(interval);
+    const unsubscribe = onTaskQueueChanged(() => {
+      void fetchTasks();
+    });
+    void ensureTaskStreamBridge();
+    const interval = setInterval(fetchTasks, 5000);
+    return () => {
+      disposed = true;
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   const handleCancel = useCallback(async (taskId: string) => {
@@ -141,7 +154,23 @@ export function TaskQueuePanel() {
             const isEditing = editingTaskId === task.id;
             const branchName = task.config?.branch_name ?? "";
             const initialMessage = task.config?.initial_message ?? "";
-            const canAct = task.status === "QUEUED";
+            const canEdit = task.status === "QUEUED";
+            const canCancel =
+              task.status === "QUEUED" || task.status === "PAUSED" || task.status === "RUNNING";
+
+            // M4.1 progress / backoff hints
+            const progressPhase = task.config?.progress?.phase as string | undefined;
+            const toolCallsDone = task.config?.progress?.toolCallsDone as number | undefined;
+            const retryInSecs =
+              task.status === "PAUSED" && task.nextRunAt != null
+                ? Math.max(0, task.nextRunAt - Math.floor(Date.now() / 1000))
+                : null;
+            const branchId = task.config?.branch_id as string | undefined;
+            const activeConvId = useAppStore.getState().activeSnapshot?.summary.id;
+            const canJump =
+              task.status === "COMPLETED" &&
+              Boolean(branchId) &&
+              task.conversationId === activeConvId;
 
             return (
               <div
@@ -185,7 +214,19 @@ export function TaskQueuePanel() {
 
                   {/* Action buttons */}
                   <div className="ml-auto flex items-center gap-1 shrink-0">
-                    {canAct && (
+                    {canJump && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (branchId) useAppStore.getState().setCurrentBranch(branchId);
+                        }}
+                        className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-miro-blue hover:bg-miro-blue-light transition-colors"
+                        title="View branch"
+                      >
+                        View
+                      </button>
+                    )}
+                    {canEdit && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -198,7 +239,7 @@ export function TaskQueuePanel() {
                         Edit
                       </button>
                     )}
-                    {canAct && (
+                    {canCancel && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -220,14 +261,33 @@ export function TaskQueuePanel() {
                     <div className="flex items-center gap-3 text-miro-text-secondary">
                       <span>Task: <span className="font-mono text-miro-text">{task.id.slice(0, 12)}…</span></span>
                       <span>Type: <span className="text-miro-text">{task.taskType}</span></span>
+                      {task.attempts > 0 && (
+                        <span>Attempts: <span className="text-miro-text">{task.attempts}</span></span>
+                      )}
                     </div>
+                    {task.status === "RUNNING" && progressPhase && (
+                      <div className="text-miro-text-secondary">
+                        Progress: <span className="text-miro-text">{progressPhase}</span>
+                        {toolCallsDone != null && toolCallsDone > 0 && (
+                          <span> · {toolCallsDone} tool call{toolCallsDone === 1 ? "" : "s"}</span>
+                        )}
+                      </div>
+                    )}
+                    {task.status === "PAUSED" && (
+                      <div className="text-yellow-600 dark:text-yellow-400">
+                        {task.errorMessage || "Waiting to retry"}
+                        {retryInSecs != null && retryInSecs > 0 && (
+                          <span> — retrying in {retryInSecs}s</span>
+                        )}
+                      </div>
+                    )}
                     {initialMessage && (
                       <div>
                         <span className="text-miro-text-secondary">Message:</span>
                         <p className="mt-0.5 text-miro-text whitespace-pre-wrap">{initialMessage}</p>
                       </div>
                     )}
-                    {task.errorMessage && (
+                    {task.errorMessage && task.status !== "PAUSED" && (
                       <div className="text-red-500">
                         Error: {task.errorMessage}
                       </div>

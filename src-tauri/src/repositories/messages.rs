@@ -11,7 +11,7 @@
  * Does NOT enforce domain rules (that's the service layer).
  */
 
-use sqlx::{Executor, FromRow, Sqlite};
+use sqlx::{Executor, FromRow, Sqlite, SqlitePool};
 
 // ============================================================================
 // Row Type
@@ -112,6 +112,82 @@ where
     .await?;
 
     Ok(())
+}
+
+/**
+ * Insert a dual-queue injected user message (C13).
+ *
+ * Injected messages are materialized when the receiving assistant message
+ * completes, parented under it with `source = 'inject'`. They never move the
+ * branch head — the injected text is mid-turn context, not a new turn.
+ */
+pub async fn insert_injected_user_message<'e, E>(
+    executor: E,
+    id: &str,
+    conversation_id: &str,
+    parent_message_id: &str,
+    depth: i32,
+    sibling_index: i32,
+    content_text: &str,
+    now_secs: i64,
+) -> sqlx::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query(
+        "INSERT INTO messages (id, conversation_id, role, status, parent_message_id,
+         depth, sibling_index, content_text, content_format, source,
+         created_at, updated_at)
+         VALUES (?, ?, 'USER', 'COMPLETED', ?, ?, ?, ?, 'MARKDOWN', 'inject', ?, ?)",
+    )
+    .bind(id)
+    .bind(conversation_id)
+    .bind(parent_message_id)
+    .bind(depth)
+    .bind(sibling_index)
+    .bind(content_text)
+    .bind(now_secs)
+    .bind(now_secs)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
+/** An injected user message materialized under an assistant message (C13). */
+#[derive(Debug, Clone)]
+pub struct InjectedMessageRow {
+    pub id: String,
+    pub parent_message_id: String,
+    pub content_text: String,
+    /// Ordering comes from SQL (ORDER BY); kept on the row for traceability.
+    #[allow(dead_code)]
+    pub sibling_index: i32,
+}
+
+/** List injected user messages for a conversation, ordered by parent + sibling. */
+pub async fn list_injected_by_conversation(
+    pool: &SqlitePool,
+    conversation_id: &str,
+) -> sqlx::Result<Vec<InjectedMessageRow>> {
+    sqlx::query_as::<_, (String, String, String, i32)>(
+        "SELECT id, parent_message_id, content_text, sibling_index FROM messages \
+         WHERE conversation_id = ? AND source = 'inject' AND status = 'COMPLETED' \
+         ORDER BY parent_message_id, sibling_index",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(id, parent_message_id, content_text, sibling_index)| InjectedMessageRow {
+                id,
+                parent_message_id,
+                content_text,
+                sibling_index,
+            })
+            .collect()
+    })
 }
 
 /** Insert an assistant STREAMING placeholder (for branch or variant). */

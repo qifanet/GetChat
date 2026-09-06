@@ -115,6 +115,7 @@ export type BrowserDebugCommandName =
   | "list_task_queue"
   | "cancel_task"
   | "inject_user_message_to_stream"
+  | "cancel_injected_message"
   | "get_proposal"
   | "list_proposals"
   | "execute_parallel_fork";
@@ -2058,6 +2059,34 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
           skipped: false,
           skipReason: undefined,
         } as T;
+      });
+
+    // v1.5.0 task queue / dual-queue mocks (task execution is backend-only).
+    case "list_task_queue":
+    case "list_proposals":
+      return readBrowserDebugCommand((_state): T => {
+        return [] as T;
+      });
+
+    case "cancel_task":
+    case "inject_user_message_to_stream":
+      return readBrowserDebugCommand((_state): T => {
+        return { success: true } as T;
+      });
+
+    case "cancel_injected_message":
+      return readBrowserDebugCommand((_state): T => {
+        return false as T;
+      });
+
+    case "get_proposal":
+      return readBrowserDebugCommand((_state): T => {
+        return null as T;
+      });
+
+    case "execute_parallel_fork":
+      return readBrowserDebugCommand((_state): T => {
+        return ["task_mock_1", "task_mock_2"] as T;
       });
 
     default:

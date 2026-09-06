@@ -96,6 +96,10 @@ pub struct ModelStreamFailure {
     pub code: String,
     pub message: String,
     pub retriable: bool,
+    /// Provider-advertised backoff (`Retry-After` header, seconds). Only set
+    /// for rate-limit failures; the task queue uses it to schedule the retry.
+    #[allow(dead_code)]
+    pub retry_after_secs: Option<u64>,
 }
 
 impl ModelStreamFailure {
@@ -105,6 +109,17 @@ impl ModelStreamFailure {
             code: code.to_string(),
             message: message.into(),
             retriable: true,
+            retry_after_secs: None,
+        }
+    }
+
+    /** Build a retriable rate-limit failure carrying the provider backoff. */
+    fn rate_limited(message: impl Into<String>, retry_after_secs: Option<u64>) -> Self {
+        Self {
+            code: "MODEL_RATE_LIMITED".to_string(),
+            message: message.into(),
+            retriable: true,
+            retry_after_secs,
         }
     }
 
@@ -114,6 +129,7 @@ impl ModelStreamFailure {
             code: code.to_string(),
             message: message.into(),
             retriable: false,
+            retry_after_secs: None,
         }
     }
 
@@ -1411,10 +1427,19 @@ async fn ensure_success_response(
         return Ok(response);
     }
 
+    // Retry-After must be captured before `.text()` consumes the response.
+    // Only integral-seconds form is parsed; HTTP-date form falls back to the
+    // consumer's default backoff.
+    let retry_after_secs = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|raw| raw.trim().parse::<u64>().ok());
+
     let body = response.text().await.unwrap_or_default();
     let preview = truncate_error_preview(format!("{endpoint} -> HTTP {status}; body={body}"));
 
-    let failure = match status {
+    let mut failure = match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ModelStreamFailure::terminal(
             "PROVIDER_AUTH_FAILED",
             "The configured provider credentials were rejected",
@@ -1423,9 +1448,9 @@ async fn ensure_success_response(
             "MODEL_ENDPOINT_NOT_FOUND",
             "The configured provider endpoint was not found. Check the Base URL.",
         ),
-        StatusCode::TOO_MANY_REQUESTS => ModelStreamFailure::retriable(
-            "MODEL_RATE_LIMITED",
+        StatusCode::TOO_MANY_REQUESTS => ModelStreamFailure::rate_limited(
             "The model provider rate-limited this request",
+            retry_after_secs,
         ),
         _ => ModelStreamFailure::retriable(
             "MODEL_BAD_RESPONSE",
@@ -1433,11 +1458,9 @@ async fn ensure_success_response(
         ),
     };
 
-    Err(ModelStreamFailure {
-        code: failure.code,
-        message: format!("{} ({preview})", failure.message),
-        retriable: failure.retriable,
-    })
+    failure.message = format!("{} ({preview})", failure.message);
+
+    Err(failure)
 }
 
 /** Truncate provider error previews so frontend errors remain readable. */

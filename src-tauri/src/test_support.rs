@@ -117,6 +117,12 @@ async fn run_migrations(pool: &SqlitePool) {
         include_str!("db/migrations/0009_skills_context_window.sql"),
         include_str!("db/migrations/0010_mcp_transport_config.sql"),
         include_str!("db/migrations/0011_message_reasoning_content.sql"),
+        include_str!("db/migrations/0012_branch_diff_summaries.sql"),
+        include_str!("db/migrations/0013_task_queue.sql"),
+        include_str!("db/migrations/0014_proposals.sql"),
+        include_str!("db/migrations/0015_tool_result_overflow.sql"),
+        include_str!("db/migrations/0016_task_queue_resilience.sql"),
+        include_str!("db/migrations/0017_message_source.sql"),
     ];
 
     for migration in migrations {

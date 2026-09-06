@@ -35,7 +35,7 @@ import {
   deleteRuntimeSession,
 } from "./streamRuntimeRegistry";
 import { createTextSurface } from "./surfaces/surfaceFactory";
-import type { RequestId, MessageId } from "../types/base";
+import type { RequestId, MessageId, ConversationId, BranchId } from "../types/base";
 import type { ModelStreamEvent } from "./tauriTypes";
 import type { MessageNode, ToolCallInfo } from "../types/conversation";
 import type { StreamSessionMeta } from "../types/stream";
@@ -456,12 +456,14 @@ export async function startAssistantVariantStream(params: {
  * The backend only emits transport-level events; persistence still happens
  * through the existing complete/fail message commands in this controller.
  */
-async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
+/** Route one model stream event to its handler (shared by interactive
+ * streams and backend task-worker streams — see taskStreamBridge.ts). */
+export async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
   switch (event.kind) {
     case "CHUNK":
       onStreamChunk(event.requestId, event.chunk);
       return;
-    case "COMPLETED":
+    case "COMPLETED": {
       if (event.finishReason === "tool_calls" && event.toolCalls) {
         // Backend reports tool calls requested — log for now, full ReAct loop in later phase
         console.info(
@@ -469,15 +471,39 @@ async function handleModelStreamEvent(event: ModelStreamEvent): Promise<void> {
           event.toolCalls.map((tc) => tc.function.name)
         );
       }
+      const completedSession = useStreamStore.getState().sessionsByRequestId[event.requestId];
+      if (completedSession?.completionMode === "TASK_WORKER") {
+        // The backend task worker already persisted the message (M4.4); the
+        // frontend only reflects state — never double-persists.
+        await completeWorkerStream(event.requestId);
+        return;
+      }
       await completeStream(event.requestId, event.usage, event.reasoningContent);
       return;
-    case "FAILED":
+    }
+    case "FAILED": {
+      const failedSession = useStreamStore.getState().sessionsByRequestId[event.requestId];
+      if (failedSession?.completionMode === "TASK_WORKER") {
+        if (event.code === "MODEL_RATE_LIMITED") {
+          // Backend paused the task for a Retry-After backoff; the placeholder
+          // stays STREAMING and events resume when the task wakes up.
+          console.info(
+            `[stream] worker rate-limited request=${event.requestId} — task paused for backoff`
+          );
+          return;
+        }
+        // Terminal worker failure: the backend already persisted the FAILED
+        // message with partial content; refresh the workspace to reflect it.
+        await settleWorkerStream(event.requestId, "FAILED");
+        return;
+      }
       await failStream(event.requestId, {
         code: event.code,
         message: event.message,
         retriable: event.retriable,
       });
       return;
+    }
     case "RETRYING": {
       const session = useStreamStore.getState().sessionsByRequestId[event.requestId];
       if (session) {
@@ -857,6 +883,100 @@ export function attachSurfaceToRequest(
  * After this, the MessageBubble will switch from StreamingAssistantContent
  * to MarkdownRenderer for the final formatted display.
  */
+
+// ============================================================================
+// Task-Worker Streams (v1.5.0 M4.4)
+// ============================================================================
+
+/**
+ * Ensure a streaming session + runtime exist for a backend worker stream.
+ *
+ * The task scheduler streams server-side and forwards events through
+ * `task_stream_event`; the request/branch/placeholder ids come from the event
+ * envelope. Idempotent: the first event creates the session, later events
+ * reuse it. `completionMode: "TASK_WORKER"` marks every outcome as
+ * backend-persisted so the frontend never calls complete/fail itself.
+ */
+export function ensureWorkerStreamSession(meta: {
+  requestId: RequestId;
+  conversationId: ConversationId;
+  branchId: BranchId;
+  targetMessageId: MessageId;
+}): void {
+  const existing = useStreamStore.getState().sessionsByRequestId[meta.requestId];
+  if (existing) return;
+
+  useStreamStore.getState().createSession({
+    requestId: meta.requestId,
+    conversationId: meta.conversationId,
+    branchId: meta.branchId,
+    targetMessageId: meta.targetMessageId,
+    status: "STREAMING",
+    rendererMode: "DOM_TEXT",
+    completionMode: "TASK_WORKER",
+    startedAt: Date.now(),
+    lastChunkAt: null,
+    lastFlushAt: null,
+    chunkCount: 0,
+    visibleVersion: 0,
+    visibleCharCount: 0,
+  });
+
+  setRuntimeSession({
+    requestId: meta.requestId,
+    chunks: [],
+    pendingChunks: [],
+    totalChars: 0,
+    surface: null,
+    flushTimer: null,
+    lastEmitAt: null,
+    shouldStickToBottom: true,
+    toolCalls: [],
+    contentBlocks: [],
+    currentTextChunks: [],
+  });
+}
+
+/**
+ * Settle a worker stream that the backend already persisted (COMPLETED or
+ * terminal FAILED): clean up frontend state and reload the snapshot so the
+ * message shows its persisted content from SQLite.
+ */
+async function settleWorkerStream(
+  requestId: RequestId,
+  status: "COMPLETED" | "FAILED"
+): Promise<void> {
+  const session = useStreamStore.getState().sessionsByRequestId[requestId];
+  if (!session) return;
+
+  if (status === "COMPLETED") {
+    useStreamStore.getState().completeSession(requestId);
+  } else {
+    useStreamStore.getState().failSession(requestId, {
+      code: "TASK_FAILED",
+      message: "Background task failed",
+    });
+  }
+  deleteRuntimeSession(requestId);
+  syncComposerSendingStateToActiveStreams();
+  setTimeout(() => {
+    useStreamStore.getState().removeSession(requestId);
+  }, 1500);
+
+  // Reload the conversation so the persisted branch content replaces the
+  // streaming placeholder. Only when it is the active conversation — inactive
+  // ones load fresh on open anyway.
+  const { workspace, openConversation } = useAppStore.getState();
+  const activeConversationId = workspace?.activeConversationId;
+  if (activeConversationId && activeConversationId === session.conversationId) {
+    await openConversation(activeConversationId).catch(() => {});
+  }
+}
+
+/** COMPLETED worker stream — alias kept for readability at the call site. */
+const completeWorkerStream = (requestId: RequestId): Promise<void> =>
+  settleWorkerStream(requestId, "COMPLETED");
+
 export async function completeStream(
   requestId: RequestId,
   usage?: Record<string, unknown>,

@@ -61,6 +61,10 @@ pub enum ContentBlockDto {
         result: String,
         success: bool,
     },
+    /** Mid-turn user injection marker (dual-queue, C13). */
+    UserInjected {
+        content: String,
+    },
 }
 
 /**

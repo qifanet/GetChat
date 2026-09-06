@@ -279,6 +279,18 @@ pub async fn build_prompt_messages(
 
     let mut compressed_source_ids: HashSet<String> = HashSet::new();
 
+    // Dual-queue injected messages (C13): parent id → recorded supplements,
+    // replayed right after their assistant turn's group below.
+    let injected_by_parent: HashMap<String, Vec<messages::InjectedMessageRow>> =
+        messages::list_injected_by_conversation(pool, &input.conversation_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .fold(HashMap::new(), |mut map, msg| {
+                map.entry(msg.parent_message_id.clone()).or_default().push(msg);
+                map
+            });
+
     if let Some(ref branch_id) = input.branch_id {
         if let Ok(Some(cc)) = compressed_contexts::find_latest_by_branch(
             pool, &input.conversation_id, branch_id,
@@ -395,6 +407,23 @@ pub async fn build_prompt_messages(
                         tool_call_id: Some(tc.call_id),
                         name: Some(tc.function_name),
                     });
+                }
+
+                // Replay dual-queue injections recorded under this assistant
+                // turn (C13) so mid-turn supplements survive refresh/replay in
+                // the same position the model originally saw them.
+                if let Some(injected) = injected_by_parent.get(&row.id) {
+                    for msg in injected {
+                        group.push(PromptMessage {
+                            source_message_id: Some(msg.id.clone()),
+                            role: "USER".to_string(),
+                            content: format!("[User supplement] {}", msg.content_text),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
                 }
 
                 message_groups.push(group);

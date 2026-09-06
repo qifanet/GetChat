@@ -889,6 +889,170 @@ pub async fn create_assistant_placeholder_for_branch(
 }
 
 /**
+ * A fork branch prepared for the task worker (M4.4).
+ *
+ * `create_parallel_fork_branch` materializes the whole branch skeleton —
+ * branch row, initial user message, STREAMING assistant placeholder — in one
+ * transaction; the worker later drives the stream into the placeholder.
+ */
+pub struct ParallelForkBranchPrepared {
+    pub branch_id: String,
+    pub user_message_id: String,
+    pub assistant_message_id: String,
+    pub request_id: String,
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+/**
+ * Create one parallel-fork branch end-to-end (M4.4, unified branch path).
+ *
+ * Fork point is the current mainline head. Model resolution falls back from
+ * the user's explicit choice to the mainline's preferred model. The assistant
+ * placeholder becomes the new branch head so the worker can stream into it.
+ */
+pub async fn create_parallel_fork_branch(
+    pool: &SqlitePool,
+    conversation_id: &str,
+    branch_name: &str,
+    initial_message: &str,
+    requested_model_id: &str,
+) -> Result<ParallelForkBranchPrepared, AppError> {
+    let mut tx = pool.begin().await.map_err(AppError::from)?;
+    let now = now_secs();
+
+    // Fork point = mainline head.
+    let conversation = conversations::find_by_id(&mut *tx, conversation_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Conversation not found"))?;
+    let mainline_id = conversation
+        .mainline_branch_id
+        .ok_or_else(|| AppError::invariant_violation("Conversation has no mainline branch"))?;
+    let mainline = branches::find_by_id(&mut *tx, &mainline_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Mainline branch not found"))?;
+    let fork_point_id = mainline
+        .head_message_id
+        .clone()
+        .ok_or_else(|| AppError::invariant_violation("Mainline branch has no head message to fork from"))?;
+    let fork_point = messages::find_by_id(&mut *tx, &fork_point_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Fork point message not found"))?;
+
+    // Model resolution: explicit choice > mainline preference.
+    let model_id = if !requested_model_id.trim().is_empty() {
+        requested_model_id.trim().to_string()
+    } else if !mainline.preferred_model_id.is_empty() {
+        mainline.preferred_model_id.clone()
+    } else {
+        return Err(AppError::invalid_argument(
+            "No model selected for the fork branch",
+        ));
+    };
+    let provider_id = crate::repositories::provider_models::find_by_id(&mut *tx, &model_id)
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("Fork branch model not found: {model_id}")))?
+        .provider_id;
+
+    // Branch row + initial user message (sibling_index via max+1 query, M4.4).
+    let branch_id = format!("branch_{}", uuid::Uuid::new_v4().simple());
+    let user_message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+    let user_sibling_index = messages::get_next_sibling_index(
+        &mut *tx,
+        Some(&fork_point_id),
+        conversation_id,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    messages::insert_user_message(
+        &mut *tx,
+        &user_message_id,
+        conversation_id,
+        Some(&fork_point_id),
+        fork_point.depth + 1,
+        user_sibling_index,
+        initial_message,
+        None,
+        now,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    branches::insert(
+        &mut *tx,
+        &branch_id,
+        conversation_id,
+        branch_name,
+        "ACTIVE",
+        Some(&mainline_id),
+        Some(&fork_point_id),
+        "CURRENT_LEAF",
+        Some(&fork_point_id),
+        Some(&user_message_id),
+        Some(&model_id),
+        now,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    // STREAMING assistant placeholder parented at the user message, then head.
+    let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
+    let assistant_message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+    let assistant_sibling_index = messages::get_next_sibling_index(
+        &mut *tx,
+        Some(&user_message_id),
+        conversation_id,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    messages::insert_assistant_placeholder(
+        &mut *tx,
+        &assistant_message_id,
+        conversation_id,
+        Some(&user_message_id),
+        fork_point.depth + 2,
+        assistant_sibling_index,
+        &provider_id,
+        &model_id,
+        &request_id,
+        "{}",
+        now,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    branches::update_head(&mut *tx, &branch_id, &assistant_message_id)
+        .await
+        .map_err(AppError::from)?;
+    conversations::touch(&mut *tx, conversation_id, now)
+        .await
+        .map_err(AppError::from)?;
+
+    tx.commit().await.map_err(AppError::from)?;
+
+    tracing::info!(
+        service = "create_parallel_fork_branch",
+        conv_id = %conversation_id,
+        branch_id = %branch_id,
+        user_message_id = %user_message_id,
+        assistant_message_id = %assistant_message_id,
+        request_id = %request_id,
+        "transaction_committed"
+    );
+
+    Ok(ParallelForkBranchPrepared {
+        branch_id,
+        user_message_id,
+        assistant_message_id,
+        request_id,
+        provider_id,
+        model_id,
+    })
+}
+
+/**
  * Create a STREAMING assistant variant placeholder (regenerate).
  *
  * Key difference from branch placeholder:
@@ -1063,6 +1227,39 @@ pub async fn complete_assistant_message(
             )
             .await
             .map_err(AppError::from)?;
+        }
+    }
+
+    // Materialize dual-queue injections as persisted message nodes (C13).
+    // Parented under the assistant message with source='inject'; they never
+    // move the branch head — injected text is mid-turn context, not a turn.
+    if let Some(ref blocks) = input.content_blocks {
+        for block in blocks {
+            if let crate::dto::messages::ContentBlockDto::UserInjected { content } = block {
+                if content.trim().is_empty() {
+                    continue;
+                }
+                let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+                let sibling_index = messages::get_next_sibling_index(
+                    &mut *tx,
+                    Some(&input.message_id),
+                    &row.conversation_id,
+                )
+                .await
+                .map_err(AppError::from)?;
+                messages::insert_injected_user_message(
+                    &mut *tx,
+                    &id,
+                    &row.conversation_id,
+                    &input.message_id,
+                    row.depth + 1,
+                    sibling_index,
+                    content,
+                    now_secs(),
+                )
+                .await
+                .map_err(AppError::from)?;
+            }
         }
     }
 

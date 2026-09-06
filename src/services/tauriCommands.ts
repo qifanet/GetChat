@@ -791,6 +791,15 @@ export async function injectUserMessageToStream(requestId: string, message: stri
   return executeCommand<void>("inject_user_message_to_stream", { requestId, message });
 }
 
+/**
+ * Remove a queued mid-stream injection before the ReAct loop drains it.
+ * Returns true when an identical queued entry was found and removed; false
+ * means the loop already consumed it (too late to cancel).
+ */
+export async function cancelInjectedMessage(requestId: string, message: string): Promise<boolean> {
+  return executeCommand<boolean>("cancel_injected_message", { requestId, message });
+}
+
 // ============================================================================
 // Proposal Commands (v1.5.0)
 // ============================================================================

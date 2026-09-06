@@ -180,17 +180,21 @@ pub fn run() {
                     crate::services::mcp_client::McpManager::new(),
                 ));
 
+                let scheduler =
+                    crate::agent::taskqueue::TaskQueueScheduler::new(pool.clone());
+
                 app_handle.manage(AppState {
                     db: pool.clone(),
                     key_store,
                     active_model_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-                    pending_model_stream: Arc::new(tokio::sync::Mutex::new(None)),
+                    pending_model_stream: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     tool_executor,
                     tool_limits: Arc::new(tokio::sync::Mutex::new(tool_limits)),
                     security_policy: Arc::new(tokio::sync::Mutex::new(security_policy)),
                     pending_approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     agent_sessions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     mcp_manager: mcp_manager.clone(),
+                    task_queue: scheduler.clone(),
                     app_handle: app_handle.clone(),
                 });
 
@@ -208,12 +212,9 @@ pub fn run() {
                     .await;
                 });
 
-                // Start TaskWorker in background
-                let worker_pool = pool.clone();
-                tokio::spawn(async move {
-                    let worker = Arc::new(crate::services::task_worker::TaskWorker::new(worker_pool));
-                    worker.start().await;
-                });
+                // Start the task queue scheduler (v1.5.0 M4) — owns startup
+                // recovery and the event loop; do not block app startup.
+                scheduler.spawn(app_handle).await;
             });
 
             tracing::info!("GetChat initialized successfully");
@@ -352,6 +353,7 @@ pub fn run() {
             commands::streaming::get_security_policy,
             commands::streaming::update_security_policy,
             commands::streaming::inject_user_message_to_stream,
+            commands::streaming::cancel_injected_message,
             // MCP Server management (4 + 2 file-based)
             commands::mcp::list_mcp_servers,
             commands::mcp::add_mcp_server,

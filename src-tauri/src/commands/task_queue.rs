@@ -21,12 +21,24 @@ pub async fn list_task_queue(state: State<'_, AppState>) -> Result<Vec<TaskQueue
     Ok(dtos)
 }
 
+/**
+ * Cancel a queued, paused, or running task. Routing goes through the
+ * scheduler so a RUNNING task's stream is aborted (watch signal) and its row
+ * is marked CANCELLED by the worker, while QUEUED/PAUSED rows are cancelled
+ * directly in the repository.
+ */
 #[tauri::command]
 pub async fn cancel_task(
     task_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let pool = &state.db;
-    TaskQueueRepository::cancel(pool, &task_id).await?;
+    let cancelled = state.task_queue.cancel(&task_id).await?;
+    if !cancelled {
+        tracing::warn!(
+            cmd = "cancel_task",
+            task_id = %task_id,
+            "task not in a cancellable state (already settled or unknown)"
+        );
+    }
     Ok(())
 }

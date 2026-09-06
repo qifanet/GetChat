@@ -19,7 +19,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tauri::State;
 use tokio::sync::{oneshot, Mutex};
 
 use crate::dto::common::ToolDefinitionDto;
@@ -60,7 +59,7 @@ pub(crate) enum McpBackend {
  * deterministic budget checks still run, but AI compression never triggers.
  */
 pub(crate) enum CompressionBackend<'a> {
-    Real(State<'a, AppState>),
+    Real(&'a AppState),
     #[allow(dead_code)]
     Disabled,
 }

@@ -41,7 +41,7 @@ use crate::state::{AppState, BUILTIN_DISABLED_TOOLS_KV_KEY, TOOL_LIMITS_KV_KEY};
 pub async fn get_enabled_tool_definitions(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::dto::common::ToolDefinitionDto>, AppError> {
-    let defs = build_backend_enabled_tool_definitions(&state).await;
+    let defs = build_backend_enabled_tool_definitions(state.inner()).await;
     let builtin_count = state.tool_executor.definitions().len();
 
     tracing::info!(
@@ -55,7 +55,7 @@ pub async fn get_enabled_tool_definitions(
 }
 
 /** Build the backend-authoritative enabled tool list. Frontend input is only a hint. */
-pub(crate) async fn build_backend_enabled_tool_definitions(state: &State<'_, AppState>) -> Vec<ToolDefinitionDto> {
+pub(crate) async fn build_backend_enabled_tool_definitions(state: &AppState) -> Vec<ToolDefinitionDto> {
     let mut defs = state.tool_executor.definitions();
 
     let app_data_dir = state.app_handle.path().app_data_dir().unwrap_or_default();
@@ -160,12 +160,18 @@ pub async fn start_model_stream(
     let provider_id = input.provider_id.clone();
     let model_id = input.model_id.clone();
 
+    // M4 per-conversation stream lock (A1): one stream per conversation keeps
+    // message-tree write ordering; different conversations stream in parallel.
     let mut active_streams = state.active_model_streams.lock().await;
-    if let Some(active_request_id) = active_streams.keys().next().cloned() {
+    let conflict = active_streams
+        .iter()
+        .find(|(_, active)| active.conversation_id == input.conversation_id)
+        .map(|(active_request_id, _)| active_request_id.clone());
+    if let Some(active_request_id) = conflict {
         let message = if active_request_id == request_id {
             "A stream with the same requestId is already active".to_string()
         } else {
-            format!("Another model stream is already active: {active_request_id}")
+            format!("Another model stream is already active in this conversation: {active_request_id}")
         };
         let _ = channel.send(ModelStreamEventDto::Failed {
             request_id: request_id.clone(),
@@ -179,7 +185,13 @@ pub async fn start_model_stream(
     }
 
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    active_streams.insert(request_id.clone(), cancel_tx);
+    active_streams.insert(
+        request_id.clone(),
+        crate::state::ActiveModelStream {
+            conversation_id: input.conversation_id.clone(),
+            cancel: cancel_tx,
+        },
+    );
     drop(active_streams);
     release_pending_model_stream_gate(&state, &request_id).await;
 
@@ -226,7 +238,7 @@ pub async fn start_model_stream(
         .lock()
         .await
         .insert(request_id.clone(), session.clone());
-    let deps = build_react_loop_deps(&state, session).await;
+    let deps = build_react_loop_deps(state.inner(), session).await;
     let tool_limits = state.tool_limits.lock().await.clone();
     let result = run_react_loop(
         &deps,
@@ -303,7 +315,7 @@ pub async fn abort_model_stream(
 
     let sender = {
         let active_streams = state.active_model_streams.lock().await;
-        active_streams.get(&request_id).cloned()
+        active_streams.get(&request_id).map(|active| active.cancel.clone())
     };
 
     if let Some(sender) = sender {
@@ -315,21 +327,17 @@ pub async fn abort_model_stream(
 }
 
 async fn release_pending_model_stream_gate(state: &State<'_, AppState>, request_id: &str) {
+    // Gates are keyed by conversation; drop whichever entry this request owns.
     let mut pending = state.pending_model_stream.lock().await;
-    if pending
-        .as_ref()
-        .map_or(false, |existing| existing.request_id == request_id)
-    {
-        *pending = None;
-    }
+    pending.retain(|_, existing| existing.request_id != request_id);
 }
 
 /**
  * Resolve the ReAct loop's dependencies from Tauri-managed application state.
  * Tests build an equivalent `ReactLoopDeps` fixture instead of calling this.
  */
-async fn build_react_loop_deps<'a>(
-    state: &'a State<'a, AppState>,
+pub(crate) async fn build_react_loop_deps<'a>(
+    state: &'a AppState,
     session: crate::agent::session::SharedAgentSession,
 ) -> ReactLoopDeps<'a> {
     ReactLoopDeps {
@@ -341,7 +349,7 @@ async fn build_react_loop_deps<'a>(
         app_data_dir: state.app_handle.path().app_data_dir().ok(),
         mcp: McpBackend::Real(state.mcp_manager.clone()),
         stream: StreamBackend::Real,
-        compression: CompressionBackend::Real(state.clone()),
+        compression: CompressionBackend::Real(state),
         session,
     }
 }
@@ -530,7 +538,7 @@ pub async fn get_context_status(
         .await
         .map_err(|e| AppError::db_error(&format!("Failed to build prompt: {e}")))?;
 
-    let tool_definitions = build_backend_enabled_tool_definitions(&state).await;
+    let tool_definitions = build_backend_enabled_tool_definitions(state.inner()).await;
     let context_window_kb = crate::repositories::provider_models::get_context_window_kb(
         &state.db,
         &model_id,
@@ -691,5 +699,41 @@ pub async fn inject_user_message_to_stream(
         None => Err(AppError::invalid_argument(&format!(
             "No agent session found for request_id: {request_id}"
         ))),
+    }
+}
+
+/**
+ * Withdraw a not-yet-consumed Dual-Queue injection (C13 cancel).
+ *
+ * Returns false when the session already drained the entry (the model is
+ * already processing it) or no session exists — the frontend surfaces this as
+ * "too late to cancel" and leaves the recorded supplement in place.
+ */
+#[tauri::command]
+pub async fn cancel_injected_message(
+    state: State<'_, AppState>,
+    request_id: String,
+    message: String,
+) -> Result<bool, AppError> {
+    let session = state
+        .agent_sessions
+        .lock()
+        .await
+        .get(&request_id)
+        .cloned();
+    match session {
+        Some(session) => {
+            let cancelled =
+                crate::agent::session::cancel_injection(&session, &message).await;
+            if cancelled {
+                tracing::info!(
+                    cmd = "cancel_injected_message",
+                    request_id = %request_id,
+                    "injection withdrawn"
+                );
+            }
+            Ok(cancelled)
+        }
+        None => Ok(false),
     }
 }

@@ -37,3 +37,41 @@ pub(crate) async fn drain_injections(session: &SharedAgentSession) -> Vec<String
     let mut session = session.lock().await;
     session.injections.drain(..).collect()
 }
+
+/**
+ * Withdraw a not-yet-consumed injection (C13 dual-queue cancel).
+ *
+ * Returns true when an identical queued entry was found and removed; false
+ * means the loop already drained it (it is being or was processed) — the
+ * caller then surfaces "too late to cancel" to the user.
+ */
+pub(crate) async fn cancel_injection(session: &SharedAgentSession, content: &str) -> bool {
+    let mut session = session.lock().await;
+    if let Some(pos) = session.injections.iter().position(|item| item == content) {
+        session.injections.remove(pos);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancel_injection_removes_only_identical_queued_entry() {
+        let session = new_shared_session();
+        session.lock().await.injections = vec!["first".into(), "second".into()];
+
+        // Unknown content reports "already drained" and touches nothing.
+        assert!(!cancel_injection(&session, "missing").await);
+        assert_eq!(drain_injections(&session).await, vec!["first", "second"]);
+
+        session.lock().await.injections = vec!["first".into(), "second".into()];
+        assert!(cancel_injection(&session, "first").await);
+        // A second cancel of the same content is "too late" — already gone.
+        assert!(!cancel_injection(&session, "first").await);
+        assert_eq!(drain_injections(&session).await, vec!["second"]);
+    }
+}

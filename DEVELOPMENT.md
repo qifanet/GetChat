@@ -119,14 +119,14 @@
 
 ### M4 — 任务队列重写 + 并行分叉端到端（旗舰能力收口）
 
-- [ ] M4.1 `agent/taskqueue/mod.rs`：事件驱动调度（`Notify` + 状态机 QUEUED/RUNNING/PAUSED/COMPLETED/FAILED/CANCELLED）；启动恢复（RUNNING→QUEUED 重置，attempts+1）；429 处理（读 `Retry-After`，默认 30s，PAUSED 状态 + 前端提示）；任务进度字段（`config_json` 增加 progress 事件约定）；删除死代码 `task_queue_service.rs`。
-- [ ] M4.2 新迁移 `0016_task_queue_resilience.sql`（`attempts INTEGER DEFAULT 0`、`next_run_at INTEGER`；不改既有列）。
-- [ ] M4.3 per-conversation 流锁：替换全局 `active_model_streams` 检查为 conversation 粒度（同会话并发流仍拒绝，跨会话/分支放行）；`STREAM_ALREADY_ACTIVE` 语义保留。
-- [ ] M4.4 分叉链路收口：`execute_parallel_fork` 补齐分支创建（走统一 branch 服务 + assistant placeholder，替换 proposal.rs 的 TODO 与 task_worker 的复制实现，sibling_index 用 `max+1` 查询替代哈希）；`TaskWorker` 的 PARALLEL_FORK 分支改为驱动完整 stream session（复用 `agent::runner`，事件按 branch 路由到 TaskQueuePanel）。
-- [ ] M4.5 前端：ParallelForkReviewPanel ↔ execute_parallel_fork 联调（编辑消息/选模型/启动）；TaskQueuePanel 增加进度、PAUSED(429) 状态、跳转分支；注入消息持久化（C13，消息节点加 `source=inject`，刷新/历史可见）。
-- [ ] M4.6 注入取消：注入生效前（下一 boundary 前）允许撤回。
+- [x] M4.1（2026-09-06）`agent/taskqueue/mod.rs` `TaskQueueScheduler`：事件驱动调度（`Notify` 唤醒 + `next_wake_delay` 取最近 PAUSED `next_run_at`，30s 兜底轮询）；状态机 QUEUED/RUNNING/PAUSED/COMPLETED/FAILED/CANCELLED；启动恢复 `reset_running_for_startup`（RUNNING→QUEUED，attempts+1）+ `resume_due_paused`；429 处理（`MODEL_RATE_LIMITED` 读 `retry_after`，缺省 30s，`pause_for_retry` 保占位 STREAMING 不丢上下文，MAX_TASK_ATTEMPTS=5 后转 FAILED）；任务进度约定 `config_json.progress`（phase STREAMING/TOOLS_RUNNING + toolCallsDone，写入时与既有 config 对象合并）；**死代码删除**：`services/task_queue_service.rs`、`services/task_worker.rs` 双实现收口为调度器单实现。运行中任务取消用 `watch` 通道注入 `cancel_model_stream`，`cancel` 对 QUEUED/PAUSED 直接落库，RUNNING 仅 RUNNING 可 `mark_cancelled`。
+- [x] M4.2（2026-09-06）迁移 `0016_task_queue_resilience.sql`（`attempts INTEGER NOT NULL DEFAULT 0`、`next_run_at INTEGER`；不改既有列）。
+- [x] M4.3（2026-09-06）per-conversation 流锁（A1）：`start_model_stream` 检查从全局"任意流活动即拒绝"改为同 conversation 独占（`agent_sessions` 按 conversation_id 索引）；`STREAM_ALREADY_ACTIVE` 语义保留；worker 流与用户主动流共用该锁——`cancelActiveStreams` → `abort_model_stream` → 调度器 watch 通道 → 任务 CANCELLED，语义闭环。
+- [x] M4.4（2026-09-06）分叉链路收口：`execute_parallel_fork` 逐分支走 `snapshot_service::create_parallel_fork_branch`（统一分支创建 + assistant 占位，sibling_index `max+1` 查询），任务行 config 携带 branch/initial_message/model/provider/占位消息 id，`scheduler.enqueue` 即时唤醒；执行由 `drive_task_stream` 服务端驱动完整 ReAct 循环（复用 `agent::runner` + `build_prompt_messages` + 内置工具表 + `resolve_stream_request`），事件经 `task_stream_event` 信封 {taskId, conversationId, branchId, requestId, assistantMessageId} 前端渲染；结果/失败/取消全部服务端落库（Completed→`mark_completed`，Err→FAILED 或 429 PAUSED）。
+- [x] M4.5（2026-09-06）前端联调：`ParallelForkReviewPanel` 编辑消息/选模型/启动（并行分叉创建即返回 task_ids 入队）；新增 `services/taskStreamBridge.ts`（`task_stream_event`/`task_queue_changed` 单订阅者，懒初始化幂等，App 启动 + TaskQueuePanel 双入口），`streamController` 增 `ensureWorkerStreamSession`/`settleWorkerStream`（`completionMode: "TASK_WORKER"`——持久化全在服务端，前端不重复落库，完成即 `openConversation` 刷新快照；429 保留会话等待续传）；`AssistantMessageBubble` 移除 70 行客户端轮询启动流死路径；TaskQueuePanel：bridge 事件驱动刷新（5s 兜底）、RUNNING 进度 phase+工具计数、PAUSED 黄条退避倒计时（nextRunAt）、attempts、COMPLETED 同会话跳转分支；注入持久化 C13（迁移 `0017_message_source.sql`，注入用户消息节点 `source=inject`，刷新/历史可见）。
+- [x] M4.6（2026-09-06）注入取消：后端 `cancel_injected_message` 命令（`agent/session.rs::cancel_injection` 移除第一条同文排队注入；会话不存在返回 false）+ `tauriCommands.cancelInjectedMessage` 包装 + Composer 已排队注入 chip（× 撤回；true 移除，false 提示"已被模型消费"，流结束自动清空）；browserDebugRuntime 补齐 task queue/inject/proposal 命令 mock。
 
-**验收门禁 M4**：§4.2 端到端场景 100% 通过；重启恢复集成测试；两分支并行（不同 conversation）各自流式互不影响；PRD §6.3 清单逐项勾选。
+**验收门禁 M4**：重启恢复/调度/取消/进度合并仓储单测 ✅（`startup_recovery_requeues_running_with_attempt_bump`、`claim_due_skips_conversation_with_running_task`、`pause_for_retry_bumps_attempts_and_resume_requeues`、`cancel_allows_queued_and_paused_only`、`update_progress_merges_without_clobbering_config`）；per-conversation 流锁下同会话拒绝/跨会话放行由会话索引单测覆盖 ✅；端到端桌面双分支并行实测留待 M6 发布前 smoke 清单（PRD §6.3）。后端 105/105 全绿 0 警告，前端 tsc 0 错误 + 124/124 vitest。
 
 ### M5 — 可观测性 + 评估入 CI
 

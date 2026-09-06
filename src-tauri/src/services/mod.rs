@@ -22,6 +22,4 @@ pub mod prompt_service;
 pub mod snapshot_service;
 pub mod skill_fs;
 pub mod system_prompt_service;
-pub mod task_queue_service;
-pub mod task_worker;
 pub mod token_estimator;

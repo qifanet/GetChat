@@ -15,6 +15,7 @@ import { useAppStore } from "./stores/useAppStoreSelector";
 import { useCompactAppShell } from "./hooks/useCompactAppShell";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { sendMessageAction } from "./features/composer/sendMessageAction";
+import { ensureTaskStreamBridge } from "./services/taskStreamBridge";
 import { getConversationDisplayTitle } from "./i18n/displayNames";
 import { findBranchContainingMessage } from "./selectors/conversationSelectors";
 import { TopContextBar } from "./components/layout/TopContextBar";
@@ -773,6 +774,9 @@ export function App() {
   const hasConfiguredProviders = connectedProviderCount > 0;
   useEffect(() => {
     void initializeApp();
+    // Worker streams push events from the backend scheduler; the bridge must
+    // exist even when the task queue panel is hidden.
+    void ensureTaskStreamBridge();
   }, [initializeApp]);
   useEffect(() => {
     if (!isCompactShell) {

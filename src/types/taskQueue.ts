@@ -4,7 +4,7 @@
 
 export type TaskType = 'PARALLEL_FORK' | 'TITLE_GENERATION';
 
-export type TaskStatus = 
+export type TaskStatus =
   | 'QUEUED'
   | 'RUNNING'
   | 'PAUSED'
@@ -24,4 +24,8 @@ export interface TaskQueueItemDto {
   createdAt: number;
   startedAt: number | null;
   completedAt: number | null;
+  /** Restart recoveries + 429 backoff cycles (M4.1). */
+  attempts: number;
+  /** Scheduled wake-up for PAUSED tasks (epoch seconds); null = immediately due. */
+  nextRunAt: number | null;
 }

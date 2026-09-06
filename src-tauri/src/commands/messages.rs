@@ -105,7 +105,7 @@ pub async fn create_assistant_placeholder_for_branch(
     let conv_id = input.conversation_id.clone();
     let branch_id = input.branch_id.clone();
     let request_id = input.request_id.clone();
-    acquire_pending_model_stream_gate(&state, &request_id).await?;
+    acquire_pending_model_stream_gate(&state, &conv_id, &request_id).await?;
     let result = snapshot_service::create_assistant_placeholder_for_branch(&state.db, &input).await;
     if result.is_err() {
         release_pending_model_stream_gate(&state, &request_id).await;
@@ -141,7 +141,7 @@ pub async fn create_assistant_variant_placeholder(
     let conv_id = input.conversation_id.clone();
     let parent_msg_id = input.parent_message_id.clone();
     let request_id = input.request_id.clone();
-    acquire_pending_model_stream_gate(&state, &request_id).await?;
+    acquire_pending_model_stream_gate(&state, &conv_id, &request_id).await?;
     let result = snapshot_service::create_assistant_variant_placeholder(&state.db, &input).await;
     if result.is_err() {
         release_pending_model_stream_gate(&state, &request_id).await;
@@ -166,40 +166,49 @@ pub async fn create_assistant_variant_placeholder(
 
 async fn acquire_pending_model_stream_gate(
     state: &State<'_, AppState>,
+    conversation_id: &str,
     request_id: &str,
 ) -> Result<(), AppError> {
-    if let Some(active_request_id) = state.active_model_streams.lock().await.keys().next().cloned() {
+    // M4 per-conversation lock (A1): only streams in the SAME conversation block
+    // preparation; other conversations may prepare and stream concurrently.
+    let conflict = {
+        let active_streams = state.active_model_streams.lock().await;
+        active_streams
+            .iter()
+            .find(|(_, active)| active.conversation_id.as_deref() == Some(conversation_id))
+            .map(|(active_request_id, _)| active_request_id.clone())
+    };
+    if let Some(active_request_id) = conflict {
         return Err(AppError::conflict(format!(
-            "Another model stream is already active: {active_request_id}"
+            "Another model stream is already active in this conversation: {active_request_id}"
         )));
     }
 
     let mut pending = state.pending_model_stream.lock().await;
-    if let Some(existing) = pending.as_ref() {
+    if let Some(existing) = pending.get_mut(conversation_id) {
         if existing.started_at.elapsed() <= PENDING_MODEL_STREAM_STALE_AFTER {
             return Err(AppError::conflict(format!(
-                "Another model stream is already being prepared: {}",
+                "Another model stream is already being prepared in this conversation: {}",
                 existing.request_id
             )));
         }
-        *pending = None;
+        pending.remove(conversation_id);
     }
 
-    *pending = Some(PendingModelStream {
-        request_id: request_id.to_string(),
-        started_at: Instant::now(),
-    });
+    pending.insert(
+        conversation_id.to_string(),
+        PendingModelStream {
+            request_id: request_id.to_string(),
+            started_at: Instant::now(),
+        },
+    );
     Ok(())
 }
 
 async fn release_pending_model_stream_gate(state: &State<'_, AppState>, request_id: &str) {
+    // Gates are keyed by conversation; drop whichever entry this request owns.
     let mut pending = state.pending_model_stream.lock().await;
-    if pending
-        .as_ref()
-        .map_or(false, |existing| existing.request_id == request_id)
-    {
-        *pending = None;
-    }
+    pending.retain(|_, existing| existing.request_id != request_id);
 }
 
 /**

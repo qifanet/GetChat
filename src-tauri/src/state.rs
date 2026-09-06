@@ -113,17 +113,29 @@ impl SecureKeyStore for SystemKeyStore {
 // App State
 // ============================================================================
 
-/** Runtime cancellation registry for active provider streams. */
-pub type ActiveModelStreamRegistry =
-    Arc<Mutex<HashMap<String, watch::Sender<bool>>>>;
+/**
+ * A conversation-scoped active stream entry.
+ *
+ * The M4 stream lock (A1) is per-conversation: streams in different
+ * conversations run in parallel, while a conversation keeps at most one stream
+ * to protect message-tree write ordering.
+ */
+pub struct ActiveModelStream {
+    pub conversation_id: Option<String>,
+    pub cancel: watch::Sender<bool>,
+}
+
+/** Runtime cancellation registry for active provider streams, keyed by request_id. */
+pub type ActiveModelStreamRegistry = Arc<Mutex<HashMap<String, ActiveModelStream>>>;
 
 /**
- * Short-lived gate set after an assistant placeholder is created and before
+ * Short-lived gates set after an assistant placeholder is created and before
  * the provider stream is registered. This closes the IPC gap where duplicate
  * frontend clicks could create multiple placeholders before `start_model_stream`
- * had a chance to populate `active_model_streams`.
+ * had a chance to populate `active_model_streams`. Keyed by conversation so
+ * independent conversations can prepare streams concurrently.
  */
-pub type PendingModelStreamGate = Arc<Mutex<Option<PendingModelStream>>>;
+pub type PendingModelStreamGate = Arc<Mutex<HashMap<String, PendingModelStream>>>;
 
 #[derive(Debug, Clone)]
 pub struct PendingModelStream {
@@ -144,6 +156,8 @@ pub struct AppState {
     /** Per-request agent sessions (inject queue etc.), keyed by request_id. */
     pub agent_sessions: Arc<Mutex<HashMap<String, crate::agent::session::SharedAgentSession>>>,
     pub mcp_manager: Arc<Mutex<crate::services::mcp_client::McpManager>>,
+    /** Background task scheduler (v1.5.0 M4): owns the task state machine. */
+    pub task_queue: Arc<crate::agent::taskqueue::TaskQueueScheduler>,
     pub app_handle: tauri::AppHandle,
 }
 

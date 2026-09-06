@@ -812,7 +812,7 @@ pub struct CompressContextResult {
 }
 
 pub async fn compress_context(
-    state: &tauri::State<'_, AppState>,
+    state: &AppState,
     conversation_id: &str,
     branch_id: &str,
     model_id: &str,

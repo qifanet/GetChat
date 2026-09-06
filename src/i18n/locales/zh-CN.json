@@ -227,7 +227,15 @@
     "contextSkills": "Skills 元信息",
     "contextEstimateHint": "估算值用于上下文预算，不等同于账单 token。",
     "sendAsNewBranch": "作为新分支发送",
-    "branchModeHint": "新分支：原路径保持不变。"
+    "branchModeHint": "新分支：原路径保持不变。",
+    "injectPlaceholder": "流式输出期间 Ctrl+Enter 注入",
+    "injectHint": "Enter = 注入 · Shift+Enter = 换行",
+    "injectTitle": "注入消息到当前流",
+    "injectedNotice": "已注入 — 将在下一个工具边界生效",
+    "injectFailedNotice": "注入失败 — 当前没有进行中的流",
+    "pendingInjectionTitle": "已排队，等待下一个工具边界",
+    "cancelInjection": "撤销这条排队中的注入",
+    "cancelInjectionLate": "已被模型消费，无法撤销"
   },
   "onboarding": {
     "badge": "首次配置",

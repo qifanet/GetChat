@@ -227,7 +227,15 @@
     "contextSkills": "Skills metadata",
     "contextEstimateHint": "Estimate for context budgeting, not billing tokens.",
     "sendAsNewBranch": "Send as new branch",
-    "branchModeHint": "New branch: original path stays unchanged."
+    "branchModeHint": "New branch: original path stays unchanged.",
+    "injectPlaceholder": "Ctrl+Enter to inject during stream",
+    "injectHint": "Enter = inject · Shift+Enter = newline",
+    "injectTitle": "Inject message to active stream",
+    "injectedNotice": "Injected — will apply at next tool boundary",
+    "injectFailedNotice": "Inject failed — no active stream",
+    "pendingInjectionTitle": "Queued for next tool boundary",
+    "cancelInjection": "Cancel this queued injection",
+    "cancelInjectionLate": "Already consumed by the model — cannot cancel"
   },
   "onboarding": {
     "badge": "First setup",

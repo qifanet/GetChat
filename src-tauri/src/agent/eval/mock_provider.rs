@@ -188,6 +188,7 @@ impl ScriptedModel {
                 code: "SCRIPT_EXHAUSTED".to_string(),
                 message: "Scripted model ran out of steps — the loop made more model calls than the script provides".to_string(),
                 retriable: false,
+                retry_after_secs: None,
             });
         };
 
@@ -236,6 +237,7 @@ impl ScriptedModel {
                 code,
                 message,
                 retriable,
+                retry_after_secs: None,
             }),
         }
     }
