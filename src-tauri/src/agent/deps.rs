@@ -89,4 +89,7 @@ pub(crate) struct ReactLoopDeps<'a> {
     pub compression: CompressionBackend<'a>,
     /// This run's session handle (injections live here, scoped by request_id).
     pub session: SharedAgentSession,
+    /// Run-level audit sink (M5.1); `None` in golden tests unless a case
+    /// asserts on the trail itself.
+    pub auditor: Option<super::audit::SharedRunAuditor>,
 }

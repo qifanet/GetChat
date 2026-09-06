@@ -14,6 +14,7 @@ import {
   BuiltinToolsSection,
   McpServersSection,
   SkillsSection,
+  AgentRunsSection,
 } from "./GlobalSettingsSections";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../../i18n";
 import {
@@ -510,6 +511,9 @@ export function AppSettingsView() {
 
           {/* Skills */}
           <SkillsSection />
+
+          {/* Agent Run Audit Trails */}
+          <AgentRunsSection />
 
           {/* Error / Feedback */}
         </div>

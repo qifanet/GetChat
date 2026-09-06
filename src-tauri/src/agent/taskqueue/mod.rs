@@ -575,6 +575,9 @@ impl TaskQueueScheduler {
             stream: StreamBackend::Real,
             compression: CompressionBackend::Real(state),
             session,
+            auditor: Some(std::sync::Arc::new(
+                crate::agent::audit::SqliteRunAuditor::new(state.db.clone()),
+            )),
         };
         let tool_limits = state.tool_limits.lock().await.clone();
 

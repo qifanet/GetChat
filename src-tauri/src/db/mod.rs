@@ -164,6 +164,10 @@ async fn run_migrations(pool: &SqlitePool) {
     // 0017: Message provenance — messages.source for dual-queue inject persistence
     let sql_0017 = include_str!("migrations/0017_message_source.sql");
     execute_migration_sql(pool, sql_0017, "Migration 0017").await;
+
+    // 0018: Agent run audit trail (B6 observability)
+    let sql_0018 = include_str!("migrations/0018_agent_runs.sql");
+    execute_migration_sql(pool, sql_0018, "Migration 0018").await;
 }
 
 /**

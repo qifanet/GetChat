@@ -18,6 +18,7 @@
  * M2 adds `agent::tools`, M4 adds `agent::taskqueue` per the same plan.
  */
 
+pub(crate) mod audit;
 pub(crate) mod budget;
 pub(crate) mod context;
 pub(crate) mod deps;

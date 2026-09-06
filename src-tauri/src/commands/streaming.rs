@@ -351,6 +351,9 @@ pub(crate) async fn build_react_loop_deps<'a>(
         stream: StreamBackend::Real,
         compression: CompressionBackend::Real(state),
         session,
+        auditor: Some(std::sync::Arc::new(
+            crate::agent::audit::SqliteRunAuditor::new(state.db.clone()),
+        )),
     }
 }
 

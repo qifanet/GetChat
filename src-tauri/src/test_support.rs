@@ -123,6 +123,7 @@ async fn run_migrations(pool: &SqlitePool) {
         include_str!("db/migrations/0015_tool_result_overflow.sql"),
         include_str!("db/migrations/0016_task_queue_resilience.sql"),
         include_str!("db/migrations/0017_message_source.sql"),
+        include_str!("db/migrations/0018_agent_runs.sql"),
     ];
 
     for migration in migrations {

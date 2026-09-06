@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import * as tauriCmd from "../../services/tauriCommands";
 import type { TaskQueueItemDto, TaskStatus } from "../../types/taskQueue";
 import { useAppStore } from "../../stores/useAppStore";
@@ -30,13 +31,13 @@ const STATUS_ICON: Record<TaskStatus, React.FC<{ className?: string; size?: numb
   CANCELLED: IconXCircle,
 };
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  QUEUED: "Waiting",
-  RUNNING: "Running",
-  PAUSED: "Paused",
-  COMPLETED: "Done",
-  FAILED: "Failed",
-  CANCELLED: "Cancelled",
+const STATUS_LABEL_KEY: Record<TaskStatus, string> = {
+  QUEUED: "taskQueue.statusWaiting",
+  RUNNING: "taskQueue.statusRunning",
+  PAUSED: "taskQueue.statusPaused",
+  COMPLETED: "taskQueue.statusCompleted",
+  FAILED: "taskQueue.statusFailed",
+  CANCELLED: "taskQueue.statusCancelled",
 };
 
 const STATUS_BADGE: Record<TaskStatus, string> = {
@@ -49,6 +50,7 @@ const STATUS_BADGE: Record<TaskStatus, string> = {
 };
 
 export function TaskQueuePanel() {
+  const { t } = useTranslation();
   const [tasks, setTasks] = useState<TaskQueueItemDto[]>([]);
   const [visible, setVisible] = useState(false);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
@@ -135,14 +137,14 @@ export function TaskQueuePanel() {
           <div className="flex items-center gap-2">
             <IconClock size={14} className="text-miro-text-secondary" />
             <span className="text-xs font-medium text-miro-text-secondary">
-              Task Queue ({tasks.length})
+              {t("taskQueue.title", { count: tasks.length })}
             </span>
           </div>
           <button
             onClick={() => setVisible(false)}
             className="flex items-center gap-1 text-[10px] text-miro-text-secondary hover:text-miro-text transition-colors"
           >
-            Hide
+            {t("taskQueue.hide")}
           </button>
         </div>
 
@@ -195,7 +197,7 @@ export function TaskQueuePanel() {
                   <span
                     className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_BADGE[task.status]}`}
                   >
-                    {STATUS_LABEL[task.status]}
+                    {t(STATUS_LABEL_KEY[task.status])}
                   </span>
 
                   {/* Branch name — always visible */}
@@ -221,7 +223,7 @@ export function TaskQueuePanel() {
                           if (branchId) useAppStore.getState().setCurrentBranch(branchId);
                         }}
                         className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-miro-blue hover:bg-miro-blue-light transition-colors"
-                        title="View branch"
+                        title={t("taskQueue.viewBranch")}
                       >
                         View
                       </button>
@@ -233,7 +235,7 @@ export function TaskQueuePanel() {
                           handleStartEdit(task);
                         }}
                         className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-miro-blue hover:bg-miro-blue-light transition-colors"
-                        title="Edit message"
+                        title={t("taskQueue.editMessage")}
                       >
                         <IconPencilSquare size={10} />
                         Edit
@@ -246,7 +248,7 @@ export function TaskQueuePanel() {
                           handleCancel(task.id);
                         }}
                         className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-miro-red hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        title="Cancel task"
+                        title={t("taskQueue.cancelTask")}
                       >
                         <IconX size={10} />
                         Cancel
@@ -259,37 +261,37 @@ export function TaskQueuePanel() {
                 {isExpanded && !isEditing && (
                   <div className="border-t border-miro-border/15 px-3 py-2 space-y-1.5 text-xs bg-miro-card/50">
                     <div className="flex items-center gap-3 text-miro-text-secondary">
-                      <span>Task: <span className="font-mono text-miro-text">{task.id.slice(0, 12)}…</span></span>
-                      <span>Type: <span className="text-miro-text">{task.taskType}</span></span>
+                      <span>{t("taskQueue.task")}: <span className="font-mono text-miro-text">{task.id.slice(0, 12)}…</span></span>
+                      <span>{t("taskQueue.type")}: <span className="text-miro-text">{task.taskType}</span></span>
                       {task.attempts > 0 && (
-                        <span>Attempts: <span className="text-miro-text">{task.attempts}</span></span>
+                        <span>{t("taskQueue.attempts", { count: task.attempts })}</span>
                       )}
                     </div>
                     {task.status === "RUNNING" && progressPhase && (
                       <div className="text-miro-text-secondary">
-                        Progress: <span className="text-miro-text">{progressPhase}</span>
+                        {t("taskQueue.progress")}: <span className="text-miro-text">{progressPhase}</span>
                         {toolCallsDone != null && toolCallsDone > 0 && (
-                          <span> · {toolCallsDone} tool call{toolCallsDone === 1 ? "" : "s"}</span>
+                          <span> · {t("taskQueue.toolCallsDone", { count: toolCallsDone })}</span>
                         )}
                       </div>
                     )}
                     {task.status === "PAUSED" && (
                       <div className="text-yellow-600 dark:text-yellow-400">
-                        {task.errorMessage || "Waiting to retry"}
+                        {task.errorMessage || t("taskQueue.waitingToRetry")}
                         {retryInSecs != null && retryInSecs > 0 && (
-                          <span> — retrying in {retryInSecs}s</span>
+                          <span>{t("taskQueue.retryingIn", { count: retryInSecs })}</span>
                         )}
                       </div>
                     )}
                     {initialMessage && (
                       <div>
-                        <span className="text-miro-text-secondary">Message:</span>
+                        <span className="text-miro-text-secondary">{t("taskQueue.message")}</span>
                         <p className="mt-0.5 text-miro-text whitespace-pre-wrap">{initialMessage}</p>
                       </div>
                     )}
                     {task.errorMessage && task.status !== "PAUSED" && (
                       <div className="text-red-500">
-                        Error: {task.errorMessage}
+                        {t("taskQueue.error", { message: task.errorMessage })}
                       </div>
                     )}
                   </div>
@@ -299,7 +301,7 @@ export function TaskQueuePanel() {
                 {isEditing && (
                   <div className="border-t border-miro-border/15 px-3 py-2 bg-miro-card/50 space-y-2">
                     <div className="text-xs text-miro-text-secondary">
-                      Editing message for <span className="font-medium text-miro-text">{branchName || task.id.slice(0, 12)}</span>
+                      {t("taskQueue.editingMessageFor", { name: branchName || task.id.slice(0, 12) })}
                     </div>
                     <textarea
                       value={editDraft}
@@ -320,13 +322,13 @@ export function TaskQueuePanel() {
                         }}
                         className="rounded-md bg-miro-accent-fill px-2.5 py-1 text-[11px] font-medium text-white hover:brightness-110 transition-[filter]"
                       >
-                        Save
+                        {t("common.save")}
                       </button>
                       <button
                         onClick={() => setEditingTaskId(null)}
                         className="rounded-md px-2.5 py-1 text-[11px] text-miro-text-secondary hover:bg-miro-surface-high transition-colors"
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                     </div>
                   </div>

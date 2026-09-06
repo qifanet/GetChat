@@ -50,3 +50,23 @@ jobs:
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test --locked
+
+  # M5.2: the scripted-provider eval suite gets its own signal — BFCL-style
+  # function-calling families plus the baseline drift detector (M5.4).
+  # windows-latest like `backend`: tauri's gtk/webkit system deps are not
+  # installable on the ubuntu runner.
+  eval:
+    name: Agent Eval (BFCL + drift)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Golden eval suite (BFCL families + baseline drift)
+        working-directory: src-tauri
+        run: cargo test --locked --lib agent::eval

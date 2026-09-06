@@ -11,6 +11,7 @@
  * Commands do NOT contain: SQL, domain validation, state calculations.
  */
 
+pub mod agent_runs;
 pub mod bootstrap;
 pub mod branches;
 pub mod conversations;

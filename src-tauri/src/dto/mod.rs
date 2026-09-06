@@ -7,6 +7,7 @@
  * explicit and unused umbrella re-exports do not accumulate warning noise.
  */
 
+pub mod agent_runs;
 pub mod common;
 pub mod conversations;
 pub mod debug;

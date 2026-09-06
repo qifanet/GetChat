@@ -16,6 +16,7 @@ import {
   type BranchTreeNode,
 } from "../../selectors/branchSelectors";
 import { BranchHealthCard } from "./BranchHealthCard";
+import { AgentMetricsPanel } from "./AgentMetricsPanel";
 import { ConversationGlobalView } from "./ConversationGlobalView";
 import {
   IconChevronDown,
@@ -237,6 +238,7 @@ export function BranchPanel() {
           ) : null}
 
             <BranchHealthCard />
+            <AgentMetricsPanel />
           </div>
         )}
       </div>

@@ -801,6 +801,31 @@ export async function cancelInjectedMessage(requestId: string, message: string):
 }
 
 // ============================================================================
+// Agent Run Audit (v1.5.0)
+// ============================================================================
+
+/**
+ * List recent agent run audit trails, newest first. Omit `conversationId`
+ * to list across all conversations; `limit` defaults to 20 on the backend.
+ */
+export async function listAgentRuns(
+  conversationId?: string | null,
+  limit?: number
+): Promise<import("../types/agentRuns").AgentRunDto[]> {
+  return executeCommand("list_agent_runs", {
+    conversationId: conversationId ?? null,
+    limit: limit ?? null,
+  });
+}
+
+/** Export one agent run's full audit trail; null when the run id is unknown. */
+export async function exportAgentRun(
+  runId: string
+): Promise<import("../types/agentRuns").AgentRunDto | null> {
+  return executeCommand("export_agent_run", { runId });
+}
+
+// ============================================================================
 // Proposal Commands (v1.5.0)
 // ============================================================================
 

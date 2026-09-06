@@ -19,8 +19,7 @@ import {
   selectCurrentConversationSummary,
 } from "../../selectors/conversationSelectors";
 import { copyTextToClipboard } from "../../utils/clipboard";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { downloadTextFile } from "../../utils/downloadFile";
 import { IconX } from "../common/Icon";
 import type { ExportFormat, ExportScope } from "../../types/base";
 import type { MessageNode, ConversationSnapshot } from "../../types/conversation";
@@ -225,31 +224,6 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Trigger a file download with the given content. */
-async function saveFile(content: string, filename: string): Promise<boolean> {
-  const ext = filename.endsWith(".json") ? "json" : filename.endsWith(".html") ? "html" : "md";
-  try {
-    const filePath = await save({
-      defaultPath: filename,
-      filters: [{ name: "Documents", extensions: [ext] }],
-    });
-    if (!filePath) return false;
-    const encoder = new TextEncoder();
-    await writeFile(filePath, encoder.encode(content));
-    return true;
-  } catch (err) {
-    console.warn("[export] Tauri save failed, falling back to browser download", err);
-    const blob = new Blob([content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    return true;
-  }
-}
-
 /** Modal dialog for exporting conversation content as Markdown, JSON, or HTML. */
 export function ExportDialog() {
   const { t } = useTranslation();
@@ -297,7 +271,7 @@ export function ExportDialog() {
     if (!exportContent) return;
     setSaving(true);
     try {
-      const ok = await saveFile(exportContent, filename);
+      const ok = await downloadTextFile(exportContent, filename);
       if (ok) {
         setSaveSuccess(true);
         setTimeout(() => { closeExportDialog(); }, 800);

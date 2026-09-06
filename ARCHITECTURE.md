@@ -68,6 +68,8 @@
 > M1 更新：循环迁入 `agent/runner.rs`、压缩编排迁入 `agent/context.rs`、注入队列会话作用域化（`agent/session.rs`）；`commands/streaming.rs` 缩为 command 壳（695 行），MCP 管理/Skills 拆至 `commands/mcp.rs`、`commands/skills.rs`。全局单流检查仍在 `start_model_stream`（M4/S5 引入 per-conversation 流锁）；`TODO_STORE` 按 conversation_id 键控的全局静态留待 M2 工具模块落库。
 >
 > M4 更新：per-conversation 流锁落地（A1 ✅）；任务队列收口为 `agent/taskqueue/mod.rs::TaskQueueScheduler` 单实现（A4 ✅，`services/task_worker.rs`/`task_queue_service.rs` 删除），并行分叉经 `execute_parallel_fork` → 入队 → 服务端 `drive_task_stream` 驱动完整 ReAct 循环（A2 ✅），事件经 `task_stream_event`/`task_queue_changed` 桥接前端（`services/taskStreamBridge.ts`，worker 会话 `completionMode: TASK_WORKER` 全服务端持久化）；注入撤回 `cancel_injected_message`（M4.6）。
+>
+> M5 更新：B6 可观测性落地——`RunAuditor` 缝（`agent/audit.rs`，`ReactLoopDeps.auditor: Option<SharedRunAuditor>`）由 `run_react_loop` 包装层埋点：insert 起始行 → 每轮/审批 JSON 快照替换 → 退出时 first-write-wins 写 outcome（审计写失败仅告警不阻断流；golden 用例传 None，MemoryAuditor 用于断言）；`agent_runs` 表（迁移 0018）+ `repositories/agent_runs.rs`；`list_agent_runs`/`export_agent_run` 命令；前端 `AgentMetricsPanel`（侧栏折叠面板，M5.3）+ 设置页轨迹导出；M5.2 BFCL 四类用例入 `agent/eval/cases.rs` + CI `eval` job；M5.4 漂移检测 `agent/eval/drift.rs`（轮次/工具数基线 ±20%，token 基线待真实 usage；原 M1.2 预留的 AgentEventSink 由 RunAuditor 审计缝替代实现）。
 
 ### 2.3 数据所有权（继续有效的核心不变量）
 
@@ -104,7 +106,7 @@
 | B3 | **上下文管理三套策略散落在循环里**：`maybe_compress_react_prompt`(60%) / pre-append 压缩(96%) / `prune_old_tool_results`+`apply_deterministic_budget_trim`，加上 8000 字符硬截断，彼此不知道对方 | ~~`streaming.rs` 内联三处~~ ✅ M3 归一：预算台账 `agent/budget.rs`（Budget + 可配置阈值）+ `enforce_budget()` 单入口（`agent/context.rs`）；超长结果落盘 `tool_result_overflow` + `read_tool_result` JIT 取回 | 手册 §7.2 GSSC 流水线无从谈起；预算口径分裂，行为难预测（口径已归一；GSSC 全流水线随记忆系统 v1.6） |
 | B4 | **工具系统单体**：7 个内置工具 + MCP 路由 + 审批黑名单 + 一个 ~400 行手写计算器解析器全部在 `tool_executor.rs`（2049 行）；单轮多工具串行执行，无并行策略 | ~~`services/tool_executor.rs`~~ ✅ M2 全部完成：拆分为 `agent/tools/`（registry + executor + builtin/ 七模块）；审批数据化为 `agent/policy.rs` 规则表；并行执行落地（免审批+Safe 连续段 `join_all`、按序回填、串行回退开关） | 新工具必须改单体；BFCL 意义上的 parallel 调用无法兑现；无法按工具做风险分级 |
 | B5 | **审批策略与机制耦合**：`requires_tool_approval` + 黑名单匹配 + oneshot 等待全部内联在工具循环里（~110 行嵌套） | `streaming.rs:1543-1654`（决策与等待均已迁入 `agent/policy.rs`：规则表 + `request_user_approval`，✅ M2.3/M2.5） | 手册 §8.3 的"规则强制审批/审计"无法演进；无法配置化（审计持久化随 M5） |
-| B6 | **可观测性缺失**：循环只有 tracing 日志；无 run 级审计（轮次、每轮 token、工具时延、审批记录），前端无法展示 Agent 轨迹 | 全局检索无 `agent_runs` 类持久化 | 无法调试"这轮为什么调了这个工具"，无法做手册 §10 的持续评估 |
+| B6 | **可观测性缺失**：循环只有 tracing 日志；无 run 级审计（轮次、每轮 token、工具时延、审批记录），前端无法展示 Agent 轨迹 | ~~全局检索无 `agent_runs` 类持久化~~ ✅ M5 完成：`agent_runs` 表（迁移 0018）+ `RunAuditor` 缝（`agent/audit.rs`，runner 包装层埋点、审计写失败不阻断流）+ `list_agent_runs`/`export_agent_run` 命令 + 设置页"Agent 运行轨迹"导出 + 侧栏折叠指标面板（M5.3）；漂移检测雏形 `agent/eval/drift.rs`（M5.4，token 基线待真实 usage 接入） | 循环所有退出路径（完成/取消/失败/软停止）都有完整轨迹可导出，为手册 §10 持续评估提供数据面 |
 
 ### 🟡 改进项
 
@@ -234,6 +236,6 @@ start_model_stream (command 壳，<50 行)
 | S3 | PromptBuilder 抽取（先原样搬家，不改文案）；`tools/` 拆分与 PolicyEngine | B2、B4、B5 | M2 |
 | S4 | ContextManager 归一三套策略 + 预算台账；工具结果落盘引用 | B3、🟡截断 | M3 |
 | S5 | per-conversation 流锁 + 任务队列重写（Notify/恢复/429）+ 并行分叉端到端 | A1、A2、A4 | M4 |
-| S6 | `agent_runs` 审计 + eval 用例进 CI（漂移检测雏形） | B6 | M5 |
+| S6 | `agent_runs` 审计 + eval 用例进 CI（漂移检测雏形） | B6 | ✅ M5 |
 
 每步的详细任务、工时与验收门禁见 [DEVELOPMENT.md](./DEVELOPMENT.md)；每步完成后在 [CAPABILITIES.md](./CAPABILITIES.md) 勾选对应能力状态。

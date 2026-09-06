@@ -23,8 +23,8 @@
 | C11 | 任务队列（Task Queue） | ✅ | M4 `agent/taskqueue` 单实现：Notify 事件驱动、启动恢复、429 退避重试、运行中取消、进度字段 |
 | C12 | 并行分支分叉（Parallel Fork） | ✅ | M4 端到端：提案→编辑→入队→服务端驱动完整 ReAct 流→分支产真实回复；桌面双分支冒烟留待 M6 |
 | C13 | Dual-Queue 中途注入 | ✅ | M4/M4.6：会话作用域队列 + 注入持久化（`source=inject`）+ 生效前撤回（`cancel_injected_message`）+ Composer 排队 chip |
-| C14 | Agent 可观测性（run 审计/轨迹） | ❌ | 仅 tracing 日志 |
-| C15 | Agent 评估（golden 用例/scripted provider） | 🟡 | M0 已落地 scripted model + 13 个 golden 回放用例进 `cargo test`；BFCL 式用例与 CI eval job 待 M5 |
+| C14 | Agent 可观测性（run 审计/轨迹） | ✅ | M5.1/M5.3：`agent_runs` 表 + RunAuditor 缝全退出路径埋点 + 导出命令 + 设置页轨迹导出 + 侧栏折叠指标面板 |
+| C15 | Agent 评估（golden 用例/scripted provider） | ✅ | M5.2/M5.4：BFCL 四类用例 + CI eval job + 漂移检测雏形；LLM Judge 保留为发布前人工门禁 |
 | C16 | 记忆系统（核心硬编码层/情景/语义） | 📐 | 仅压缩摘要雏形（compressed_contexts） |
 | C17 | 子代理 / 上下文交接 | 📐 | 手册 §7.3 目标，规划中 |
 
@@ -111,14 +111,16 @@
 - **已落地（M4/M4.6）**：注入消息作为消息节点持久化（迁移 `0017_message_source.sql`，`source=inject`，非破坏性；刷新/历史可见）；`cancel_injected_message` 在下一 boundary 前撤回排队注入（命中返回 true，已被消费返回 false）；Composer 已排队注入 chip 可视可撤回，流结束自动清空。
 - **验收锚点**：注入用例（含取消）✅（boundary drain golden + `cancel_injection` 单测：命中移除/重复取消/未知内容均断言）；持久化验证 ✅（`0017` 迁移 + 消息节点单测）。
 
-### C14 Agent 可观测性 ❌
+### C14 Agent 可观测性 ✅
 
-- **目标态（v1.5）**：`agent_runs` 表（run_id、conversation_id、轮次、每轮 token、工具调用记录、审批结果、时长、终止原因）+ 设置页"导出本轮 Agent 轨迹"调试入口。**验收锚点：一次多轮工具对话的轨迹完整性检查**。
+- **已落地（M5.1/M5.3）**：`agent_runs` 表（迁移 `0018_agent_runs.sql`：run_id、conversation/branch/model、每轮 token 与耗时、tool_calls JSON、审批记录 JSON、终止原因）由 `RunAuditor` 缝（`agent/audit.rs`）在 `run_react_loop` 包装层写入——增量快照替换持久化，退出路径全覆盖（完成/取消/失败/软停止/连败停止），审计写失败仅告警不阻断流；`list_agent_runs`（按会话过滤/限量）与 `export_agent_run` 命令；前端：设置页"Agent 运行轨迹"分区（最近 20 次，逐条 JSON 导出）+ 侧栏 `AgentMetricsPanel` 折叠指标面板（默认收起，轮次/token/工具时延，运行中低频轮询，逐 run 导出）。
+- **验收锚点**：轨迹完整性 ✅（`run_auditor_records_turns_and_outcome` golden：两轮记录 + 终态 + 工具时延；仓储单测：first-write-wins/最新序/限量）；导出链路 `export_agent_run` 未知 id 返回 null ✅。桌面端真实多轮对话导出人工抽查随 M6 smoke 清单。
 
-### C15 Agent 评估 🟡（M0 已落地基座）
+### C15 Agent 评估 ✅（CI 覆盖落地；LLM Judge 留人工门禁）
 
-- **已落地（M0）**：`agent/eval/mock_provider.rs` 脚本化模型（文本/工具调用/可重试失败剧本 + 请求录制）+ 13 个 golden 回放用例覆盖：单工具/多工具/空工具调用、连败上限、回内跳过、软停止、审批三态、注入、取消、重试退避、提示词组装、脚本耗尽。
-- **目标态（v1.5 剩余，M5）**：BFCL 四类风格用例（simple/multiple/parallel/irrelevance）扩充进 CI eval job；LLM Judge 质量冒烟作为发布前人工门禁；漂移检测雏形（golden 基线偏差 >20% 报警）。**验收锚点：CI 新增 eval job 全绿**。
+- **已落地（M0）**：`agent/eval/mock_provider.rs` 脚本化模型（文本/工具调用/可重试失败剧本 + 请求录制）+ golden 回放用例覆盖：单工具/多工具/空工具调用、连败上限、回内跳过、软停止、审批三态、注入、取消、重试退避、提示词组装、脚本耗尽。
+- **已落地（M5.2/M5.4）**：BFCL 四类风格用例（`bfcl_simple`/`bfcl_multiple`/`bfcl_parallel`/`bfcl_irrelevance`：目录暴露、参数透传、去杂执行、拒绝工具权）进用例集；CI 新增 `eval` job（`cargo test --locked --lib agent::eval`）；漂移检测雏形 `agent/eval/drift.rs`（四场景轮次/工具数基线，偏差 >20% 报警并输出漂移报告；token 基线待真实 usage 接入）。
+- **验收锚点**：CI eval job 全绿 ✅。LLM Judge 质量冒烟保留为发布前人工门禁（M6 清单）。
 
 ### C16 记忆系统 📐（v1.6 方向，v1.5 只落地基座）
 

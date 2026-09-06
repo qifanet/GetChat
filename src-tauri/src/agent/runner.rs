@@ -80,6 +80,7 @@ async fn stream_final_response_without_tools(
     prompt_messages: Vec<ModelPromptMessageDto>,
     channel: &Channel<ModelStreamEventDto>,
     cancel_rx: watch::Receiver<bool>,
+    turn: u32,
 ) -> Result<ReactLoopOutcome, ModelStreamFailure> {
     let final_request = ResolvedModelStreamRequest {
         request_id: initial_request.request_id.clone(),
@@ -99,14 +100,31 @@ async fn stream_final_response_without_tools(
         activated_skill: initial_request.activated_skill.clone(),
     };
 
+    let final_started = std::time::Instant::now();
     match dispatch_stream(deps, &final_request, channel, cancel_rx).await {
         Ok(ModelStreamOutcome::Completed {
             usage,
             reasoning_content,
-        }) => Ok(ReactLoopOutcome::Completed {
-            usage,
-            reasoning_content,
-        }),
+        }) => {
+            // M5.1: the forced final answer is itself an audited turn.
+            if let Some(auditor) = &deps.auditor {
+                auditor
+                    .turn_recorded(crate::agent::audit::TurnAuditRecord {
+                        turn,
+                        prompt_tokens: usage.as_ref().and_then(|u| u.prompt_tokens.map(i64::from)),
+                        completion_tokens: usage
+                            .as_ref()
+                            .and_then(|u| u.completion_tokens.map(i64::from)),
+                        duration_ms: final_started.elapsed().as_millis() as u64,
+                        tool_calls: Vec::new(),
+                    })
+                    .await;
+            }
+            Ok(ReactLoopOutcome::Completed {
+                usage,
+                reasoning_content,
+            })
+        }
         Ok(ModelStreamOutcome::Cancelled) => Ok(ReactLoopOutcome::Cancelled),
         Ok(ModelStreamOutcome::ToolCallsRequested { .. }) => {
             // Empty tool list should force text. If a provider still reports a
@@ -121,6 +139,58 @@ async fn stream_final_response_without_tools(
 }
 
 pub(crate) async fn run_react_loop(
+    deps: &ReactLoopDeps<'_>,
+    initial_request: ResolvedModelStreamRequest,
+    channel: &Channel<ModelStreamEventDto>,
+    cancel_rx: watch::Receiver<bool>,
+    max_iterations: u32,
+    max_consecutive_failures: u32,
+    approval_timeout_secs: u32,
+    tool_execution_timeout_secs: u64,
+) -> Result<ReactLoopOutcome, ModelStreamFailure> {
+    // M5.1: frame the whole run so every exit path (completed, cancelled,
+    // failed, soft stops) lands a terminal audit record. Wall-clock duration
+    // is derivable from started_at/finished_at in the audit row.
+    if let Some(auditor) = &deps.auditor {
+        auditor
+            .run_started(&crate::agent::audit::RunAuditSeed {
+                run_id: initial_request.request_id.clone(),
+                conversation_id: initial_request.conversation_id.clone(),
+                branch_id: initial_request.branch_id.clone(),
+                model_id: Some(initial_request.model_id.clone()),
+            })
+            .await;
+    }
+
+    let result = run_react_loop_inner(
+        deps,
+        initial_request,
+        channel,
+        cancel_rx,
+        max_iterations,
+        max_consecutive_failures,
+        approval_timeout_secs,
+        tool_execution_timeout_secs,
+    )
+    .await;
+
+    if let Some(auditor) = &deps.auditor {
+        let outcome = match &result {
+            Ok(ReactLoopOutcome::Completed { usage: _, .. }) => {
+                crate::agent::audit::RunAuditOutcome::Completed
+            }
+            Ok(ReactLoopOutcome::Cancelled) => crate::agent::audit::RunAuditOutcome::Cancelled,
+            Err(failure) => crate::agent::audit::RunAuditOutcome::Failed(
+                failure.message.chars().take(500).collect(),
+            ),
+        };
+        auditor.run_finished(outcome).await;
+    }
+
+    result
+}
+
+async fn run_react_loop_inner(
     deps: &ReactLoopDeps<'_>,
     initial_request: ResolvedModelStreamRequest,
     channel: &Channel<ModelStreamEventDto>,
@@ -178,6 +248,9 @@ pub(crate) async fn run_react_loop(
         if *cancel_rx.borrow() {
             return Ok(ReactLoopOutcome::Cancelled);
         }
+
+        // M5.1: per-turn wall clock (recorded when this turn resolves).
+        let turn_started = std::time::Instant::now();
 
         crate::agent::context::enforce_budget(
             deps,
@@ -292,6 +365,19 @@ pub(crate) async fn run_react_loop(
                         "react loop: token estimate vs actual usage"
                     );
                 }
+                if let Some(auditor) = &deps.auditor {
+                    auditor
+                        .turn_recorded(crate::agent::audit::TurnAuditRecord {
+                            turn: iteration,
+                            prompt_tokens: usage.as_ref().and_then(|u| u.prompt_tokens.map(i64::from)),
+                            completion_tokens: usage
+                                .as_ref()
+                                .and_then(|u| u.completion_tokens.map(i64::from)),
+                            duration_ms: turn_started.elapsed().as_millis() as u64,
+                            tool_calls: Vec::new(),
+                        })
+                        .await;
+                }
                 return Ok(ReactLoopOutcome::Completed {
                     usage,
                     reasoning_content,
@@ -302,7 +388,7 @@ pub(crate) async fn run_react_loop(
             }
             ModelStreamOutcome::ToolCallsRequested {
                 tool_calls,
-                usage: _,
+                usage,
                 reasoning_content,
             } => {
                 if tool_calls.is_empty() {
@@ -326,6 +412,8 @@ pub(crate) async fn run_react_loop(
 
                 // 1. Emit TOOL_CALL events and execute each tool
                 let _tool_results: Vec<ToolCallDto> = Vec::new();
+                // M5.1: timed audit trail for every call this iteration runs.
+                let mut audited_calls: Vec<crate::agent::audit::AuditedToolCall> = Vec::new();
 
                 // Add the assistant message with tool_calls to the prompt
                 let assistant_tool_call_message = ModelPromptMessageDto {
@@ -382,7 +470,8 @@ pub(crate) async fn run_react_loop(
 
                     // Execute the batch: parallel for multi-call Safe runs,
                     // serial (with the approval flow) for a single call.
-                    let outcomes: Vec<Result<ToolExecutionResult, ReactLoopOutcome>> = if batch_calls.len() > 1 {
+                    let outcomes: Vec<Result<(ToolExecutionResult, u64), ReactLoopOutcome>> =
+                        if batch_calls.len() > 1 {
                         if PARALLEL_TOOL_EXECUTION_ENABLED {
                             let executions = batch_calls.iter().map(|tc| execute_tool_checked(
                                 deps,
@@ -415,6 +504,17 @@ pub(crate) async fn run_react_loop(
                         let tc = &batch_calls[0];
                         let requires_approval = requires_tool_approval(&tc.function.name, &tc.function.arguments, &security_policy);
                         vec![if requires_approval {
+                            // M5.1: the approval itself is part of the trail.
+                            if let Some(auditor) = &deps.auditor {
+                                auditor
+                                    .approval_recorded(crate::agent::audit::ApprovalAuditRecord {
+                                        turn: iteration,
+                                        call_id: tc.id.clone(),
+                                        function_name: tc.function.name.clone(),
+                                        decision: "APPROVED".to_string(),
+                                    })
+                                    .await;
+                            }
                             match request_user_approval(
                                 deps,
                                 channel,
@@ -437,35 +537,62 @@ pub(crate) async fn run_react_loop(
                                 )
                                 .await
                                 {
-                                    Ok(result) => Ok(result),
+                                    Ok((result, duration_ms)) => Ok((result, duration_ms)),
                                     Err(outcome) => return Ok(outcome),
                                 },
                                 ApprovalOutcome::TimedOut => {
+                                    if let Some(auditor) = &deps.auditor {
+                                        auditor
+                                            .approval_recorded(crate::agent::audit::ApprovalAuditRecord {
+                                                turn: iteration,
+                                                call_id: tc.id.clone(),
+                                                function_name: tc.function.name.clone(),
+                                                decision: "TIMED_OUT".to_string(),
+                                            })
+                                            .await;
+                                    }
                                     tracing::info!(
                                         request_id = %request_id,
                                         approval_id = format!("{}_{}", request_id, tc.id),
                                         timeout_secs = approval_timeout_secs,
                                         "tool approval timed out"
                                     );
-                                    Ok(crate::agent::tools::ToolExecutionResult {
-                                        success: false,
-                                        output: format!(
-                                            "Approval timed out after {} seconds — user did not respond in time. \
-                                             This is NOT a user rejection. The user may have stepped away or is busy. \
-                                             You may retry this tool call if appropriate.",
-                                            approval_timeout_secs
-                                        ),
-                                    })
+                                    Ok((
+                                        crate::agent::tools::ToolExecutionResult {
+                                            success: false,
+                                            output: format!(
+                                                "Approval timed out after {} seconds — user did not respond in time. \
+                                                 This is NOT a user rejection. The user may have stepped away or is busy. \
+                                                 You may retry this tool call if appropriate.",
+                                                approval_timeout_secs
+                                            ),
+                                        },
+                                        0,
+                                    ))
                                 }
                                 ApprovalOutcome::Rejected => {
+                                    if let Some(auditor) = &deps.auditor {
+                                        auditor
+                                            .approval_recorded(crate::agent::audit::ApprovalAuditRecord {
+                                                turn: iteration,
+                                                call_id: tc.id.clone(),
+                                                function_name: tc.function.name.clone(),
+                                                decision: "REJECTED".to_string(),
+                                            })
+                                            .await;
+                                    }
                                     tracing::info!(
                                         request_id = %request_id,
                                         "user rejected tool execution"
                                     );
-                                    Ok(crate::agent::tools::ToolExecutionResult {
-                                        success: false,
-                                        output: "User explicitly rejected this operation.".to_string(),
-                                    })
+                                    Ok((
+                                        crate::agent::tools::ToolExecutionResult {
+                                            success: false,
+                                            output: "User explicitly rejected this operation."
+                                                .to_string(),
+                                        },
+                                        0,
+                                    ))
                                 }
                             }
                         } else {
@@ -481,7 +608,7 @@ pub(crate) async fn run_react_loop(
                             )
                             .await
                             {
-                                Ok(result) => Ok(result),
+                                Ok((result, duration_ms)) => Ok((result, duration_ms)),
                                 Err(outcome) => return Ok(outcome),
                             }
                         }]
@@ -491,10 +618,15 @@ pub(crate) async fn run_react_loop(
                     // each tool_call_id still pairs with its assistant call.
                     for (offset, execution_outcome) in outcomes.into_iter().enumerate() {
                         let tc = &tool_calls[tool_index + offset];
-                        let result = match execution_outcome {
-                            Ok(result) => result,
+                        let (result, tool_duration_ms) = match execution_outcome {
+                            Ok(pair) => pair,
                             Err(outcome) => return Ok(outcome),
                         };
+                        audited_calls.push(crate::agent::audit::AuditedToolCall {
+                            name: tc.function.name.clone(),
+                            success: result.success,
+                            duration_ms: tool_duration_ms,
+                        });
 
                         tracing::info!(
                             request_id = %request_id,
@@ -644,6 +776,11 @@ pub(crate) async fn run_react_loop(
                                         result: skipped_output.clone(),
                                         success: false,
                                     });
+                                    audited_calls.push(crate::agent::audit::AuditedToolCall {
+                                        name: skipped_tc.function.name.clone(),
+                                        success: false,
+                                        duration_ms: 0,
+                                    });
                                     prompt_messages.push(ModelPromptMessageDto {
                                         source_message_id: None,
                                         role: "tool".to_string(),
@@ -655,6 +792,23 @@ pub(crate) async fn run_react_loop(
                                     });
                                 }
 
+                                // M5.1: close the audit turn with what ran (and
+                                // what was skipped) before the forced final answer.
+                                if let Some(auditor) = &deps.auditor {
+                                    auditor
+                                        .turn_recorded(crate::agent::audit::TurnAuditRecord {
+                                            turn: iteration,
+                                            prompt_tokens: usage
+                                                .as_ref()
+                                                .and_then(|u| u.prompt_tokens.map(i64::from)),
+                                            completion_tokens: usage
+                                                .as_ref()
+                                                .and_then(|u| u.completion_tokens.map(i64::from)),
+                                            duration_ms: turn_started.elapsed().as_millis() as u64,
+                                            tool_calls: audited_calls,
+                                        })
+                                        .await;
+                                }
                                 prompt_messages.push(ModelPromptMessageDto {
                                     source_message_id: None,
                                     role: "system".to_string(),
@@ -674,6 +828,7 @@ pub(crate) async fn run_react_loop(
                                     prompt_messages,
                                     channel,
                                     cancel_rx,
+                                    iteration,
                                 )
                                 .await;
                             }
@@ -681,6 +836,23 @@ pub(crate) async fn run_react_loop(
                     }
 
                     tool_index = batch_end;
+                }
+
+                // M5.1: close this iteration's audit turn (tools + usage).
+                if let Some(auditor) = &deps.auditor {
+                    auditor
+                        .turn_recorded(crate::agent::audit::TurnAuditRecord {
+                            turn: iteration,
+                            prompt_tokens: usage
+                                .as_ref()
+                                .and_then(|u| u.prompt_tokens.map(i64::from)),
+                            completion_tokens: usage
+                                .as_ref()
+                                .and_then(|u| u.completion_tokens.map(i64::from)),
+                            duration_ms: turn_started.elapsed().as_millis() as u64,
+                            tool_calls: audited_calls,
+                        })
+                        .await;
                 }
 
                 // Drain this run's inject queue and append as user messages
@@ -760,12 +932,27 @@ pub(crate) async fn run_react_loop(
         activated_skill: initial_request.activated_skill.clone(),
     };
 
+    // M5.1: the max-iterations final answer is an audited turn as well.
+    let final_started = std::time::Instant::now();
     match dispatch_stream(deps, &final_request, channel, cancel_rx).await
     {
         Ok(ModelStreamOutcome::Completed {
             usage,
             reasoning_content,
         }) => {
+            if let Some(auditor) = &deps.auditor {
+                auditor
+                    .turn_recorded(crate::agent::audit::TurnAuditRecord {
+                        turn: max_iterations,
+                        prompt_tokens: usage.as_ref().and_then(|u| u.prompt_tokens.map(i64::from)),
+                        completion_tokens: usage
+                            .as_ref()
+                            .and_then(|u| u.completion_tokens.map(i64::from)),
+                        duration_ms: final_started.elapsed().as_millis() as u64,
+                        tool_calls: Vec::new(),
+                    })
+                    .await;
+            }
             Ok(ReactLoopOutcome::Completed {
                 usage,
                 reasoning_content,
@@ -904,15 +1091,21 @@ async fn execute_tool_checked(
     context: ToolExecutionContext,
     cancel_rx: &watch::Receiver<bool>,
     default_timeout_secs: u64,
-) -> Result<ToolExecutionResult, ReactLoopOutcome> {
+) -> Result<(ToolExecutionResult, u64), ReactLoopOutcome> {
+    // M5.1: every returned execution carries its wall-clock duration for the
+    // run audit trail.
+    let tool_started = std::time::Instant::now();
     // Resolve legacy tool names before the allowed-set check so old names like
     // file_read/file_write are accepted when the unified "file" tool is enabled.
     let resolved_name = resolve_legacy_tool_name(tool_name);
     if !allowed_tool_names.contains(&resolved_name) && !allowed_tool_names.contains(tool_name) {
-        return Ok(ToolExecutionResult {
-            success: false,
-            output: format!("Tool is not enabled for this stream: {tool_name}"),
-        });
+        return Ok((
+            ToolExecutionResult {
+                success: false,
+                output: format!("Tool is not enabled for this stream: {tool_name}"),
+            },
+            0,
+        ));
     }
 
     // Extract per-call timeout from tool arguments if provided; otherwise use
@@ -932,19 +1125,23 @@ async fn execute_tool_checked(
 
     let mut cancel_rx = cancel_rx.clone();
     tokio::select! {
-        result = execute_tool_with_mcp(deps, tool_name, arguments, context) => Ok(result),
-        _ = tokio::time::sleep(Duration::from_secs(per_call_timeout)) => Ok(ToolExecutionResult {
-            success: false,
-            output: format!("Tool execution timed out after {} seconds: {}", per_call_timeout, tool_name),
-        }),
+        result = execute_tool_with_mcp(deps, tool_name, arguments, context) => {
+            Ok((result, tool_started.elapsed().as_millis() as u64))
+        }
+        _ = tokio::time::sleep(Duration::from_secs(per_call_timeout)) => {
+            Ok((ToolExecutionResult {
+                success: false,
+                output: format!("Tool execution timed out after {} seconds: {}", per_call_timeout, tool_name),
+            }, tool_started.elapsed().as_millis() as u64))
+        }
         changed = cancel_rx.changed() => {
             if changed.is_ok() && *cancel_rx.borrow() {
                 Err(ReactLoopOutcome::Cancelled)
             } else {
-                Ok(ToolExecutionResult {
+                Ok((ToolExecutionResult {
                     success: false,
                     output: "Tool execution interrupted by stream state change".to_string(),
-                })
+                }, tool_started.elapsed().as_millis() as u64))
             }
         }
     }

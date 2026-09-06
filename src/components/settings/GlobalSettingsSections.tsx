@@ -3,12 +3,15 @@
  * @description Global settings sections shared across the application.
  *
  * Contains ToolSettingsSection, SecurityPolicySection, BuiltinToolsSection,
- * McpServersSection, and SkillsSection. These are global settings (use global
- * Tauri commands, not per-provider) and are displayed in AppSettingsView.
+ * McpServersSection, SkillsSection, and AgentRunsSection. These are global
+ * settings (use global Tauri commands, not per-provider) and are displayed
+ * in AppSettingsView.
  */
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as tauriCmd from "../../services/tauriCommands";
+import type { AgentRunDto } from "../../types/agentRuns";
+import { downloadTextFile } from "../../utils/downloadFile";
 import { useSettingsToast } from "./AppSettingsView";
 
 export const BUILTIN_TOOL_I18N_KEYS: Record<string, { nameKey: string; descriptionKey: string }> = {
@@ -613,4 +616,132 @@ function SkillsSection() {
   );
 }
 
-export { ToolSettingsSection, SecurityPolicySection, BuiltinToolsSection, McpServersSection, SkillsSection };
+/** Outcome badge styling for an agent run row. */
+const RUN_OUTCOME_STYLE: Record<string, string> = {
+  COMPLETED: "bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400",
+  FAILED: "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400",
+  CANCELLED: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
+};
+
+/** Agent run audit trail listing — inspect and export recent loop traces (M5.1). */
+function AgentRunsSection() {
+  const { t, i18n } = useTranslation();
+  const showToast = useSettingsToast();
+  const [runs, setRuns] = useState<AgentRunDto[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  function loadData() {
+    tauriCmd
+      .listAgentRuns(null, 20)
+      .then(setRuns)
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  function formatStartedAt(unixSecs: number): string {
+    return new Intl.DateTimeFormat(i18n.language.startsWith("zh") ? "zh-CN" : "en-US", {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(unixSecs * 1000));
+  }
+
+  async function handleExport(run: AgentRunDto) {
+    setExportingId(run.id);
+    try {
+      const trail = await tauriCmd.exportAgentRun(run.id);
+      if (!trail) {
+        showToast(t("settings.agentRunsExportMissing"));
+        return;
+      }
+      const ok = await downloadTextFile(
+        JSON.stringify(trail, null, 2),
+        `agent-run-${run.id.slice(0, 8)}.json`
+      );
+      showToast(ok ? t("common.saved") : t("settings.agentRunsExportCancelled"));
+    } catch (err) {
+      console.error("[agentRuns] export failed:", err);
+      showToast(t("settings.agentRunsExportFailed"));
+    } finally {
+      setExportingId(null);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <section id="section-agent-runs" className="app-panel min-w-0 rounded-shell bg-miro-card/95 p-5">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-semibold tracking-[-0.02em] text-miro-text">
+            {t("settings.agentRunsTitle")}
+          </h3>
+          <p className="mt-1 text-xs text-miro-text-secondary">
+            {t("settings.agentRunsHelp")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={loadData}
+          className="app-secondary-button rounded-lg px-3 py-1.5 text-xs"
+        >
+          {t("settings.agentRunsRefresh")}
+        </button>
+      </div>
+
+      {runs.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {runs.map((run) => {
+            const outcomeStyle = run.outcome
+              ? (RUN_OUTCOME_STYLE[run.outcome] ?? RUN_OUTCOME_STYLE.CANCELLED)
+              : "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400";
+            const turnCount = Array.isArray(run.turns) ? run.turns.length : 0;
+            return (
+              <div
+                key={run.id}
+                className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-miro-border/20 px-3 py-2"
+              >
+                <span className="font-mono text-[10px] text-miro-text-secondary/70">
+                  {formatStartedAt(run.startedAt)}
+                </span>
+                <span
+                  className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${outcomeStyle}`}
+                >
+                  {run.outcome ?? t("settings.agentRunsRunning")}
+                </span>
+                <span className="min-w-0 truncate text-xs text-miro-text-secondary">
+                  {run.modelId ?? "—"}
+                </span>
+                <span className="ml-auto shrink-0 text-[11px] text-miro-text-secondary">
+                  {t("settings.agentRunsTurns", { count: turnCount })}
+                </span>
+                <button
+                  type="button"
+                  disabled={exportingId === run.id}
+                  onClick={() => void handleExport(run)}
+                  className="app-secondary-button shrink-0 rounded-lg px-2.5 py-1 text-[11px]"
+                >
+                  {t("settings.agentRunsExport")}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {runs.length === 0 && (
+        <p className="mt-3 text-xs text-miro-text-secondary/60">
+          {t("settings.agentRunsEmpty")}
+        </p>
+      )}
+    </section>
+  );
+}
+
+export { ToolSettingsSection, SecurityPolicySection, BuiltinToolsSection, McpServersSection, SkillsSection, AgentRunsSection };

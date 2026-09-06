@@ -118,7 +118,9 @@ export type BrowserDebugCommandName =
   | "cancel_injected_message"
   | "get_proposal"
   | "list_proposals"
-  | "execute_parallel_fork";
+  | "execute_parallel_fork"
+  | "list_agent_runs"
+  | "export_agent_run";
 
 /** Window shape extension used only for Tauri runtime detection. */
 interface BrowserWindowWithTauri extends Window {
@@ -2087,6 +2089,17 @@ async function invokeBrowserDebugCommandPostConversationCommands<T>(
     case "execute_parallel_fork":
       return readBrowserDebugCommand((_state): T => {
         return ["task_mock_1", "task_mock_2"] as T;
+      });
+
+    // v1.5.0 agent run audit mocks (trails are only produced by real runs).
+    case "list_agent_runs":
+      return readBrowserDebugCommand((_state): T => {
+        return [] as T;
+      });
+
+    case "export_agent_run":
+      return readBrowserDebugCommand((_state): T => {
+        return null as T;
       });
 
     default:

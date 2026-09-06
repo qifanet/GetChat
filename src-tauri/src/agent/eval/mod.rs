@@ -10,3 +10,5 @@
 pub(crate) mod mock_provider;
 #[cfg(test)]
 mod cases;
+#[cfg(test)]
+mod drift;

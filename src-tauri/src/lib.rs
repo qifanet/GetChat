@@ -354,6 +354,8 @@ pub fn run() {
             commands::streaming::update_security_policy,
             commands::streaming::inject_user_message_to_stream,
             commands::streaming::cancel_injected_message,
+            commands::agent_runs::list_agent_runs,
+            commands::agent_runs::export_agent_run,
             // MCP Server management (4 + 2 file-based)
             commands::mcp::list_mcp_servers,
             commands::mcp::add_mcp_server,

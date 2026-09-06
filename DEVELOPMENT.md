@@ -130,12 +130,12 @@
 
 ### M5 — 可观测性 + 评估入 CI
 
-- [ ] M5.1 迁移 `0017_agent_runs.sql`：run 级审计（run_id、conversation、turn_index、每轮 token/耗时、tool_calls JSON、审批记录、终止原因）；runner 埋点写入；设置页"导出本轮 Agent 轨迹"（JSON 下载）。
-- [ ] M5.2 BFCL 风格四类用例（simple/multiple/parallel/irrelevance）进入 scripted provider 用例集；CI 增加 eval job（`cargo test -p getchat --eval` 或特性开关）。
-- [ ] M5.3 前端循环指标面板（折叠，默认关）：轮次/token/工具耗时——消费 `agent_runs` 或事件流。
-- [ ] M5.4 漂移检测雏形：golden 用例 token/轮次基线记录，偏差 >20% 报警（CI 注释）。
+- [x] M5.1（2026-09-06）迁移 `0018_agent_runs.sql`（原计划编号 0017 已被 M4 注入持久化占用）：run 级审计（run_id、conversation/branch/model、每轮 token/耗时、tool_calls JSON、审批记录 JSON、outcome/outcome_detail）；`RunAuditor` 缝（`agent/audit.rs`，`ReactLoopDeps.auditor`，交互流与任务队列流均安装 `SqliteRunAuditor`；增量快照替换持久化，`finish` first-write-wins，审计写失败仅告警；runner 包装层埋点覆盖全部退出路径含软停止/连败停止，工具时延经 `execute_tool_checked` 返回 `(result, duration_ms)` 贯穿）；`list_agent_runs`/`export_agent_run` 命令；设置页"Agent 运行轨迹"分区（最近 20 次 + 逐条 JSON 导出，`downloadTextFile` 工具函数自 ExportDialog 抽出共用）。
+- [x] M5.2（2026-09-06）BFCL 风格四类用例进 `agent/eval/cases.rs`（`bfcl_simple_single_call_exact_arguments`/`bfcl_multiple_executes_only_the_requested_tool`/`bfcl_parallel_two_calls_both_executed_in_order`/`bfcl_irrelevance_answers_without_any_tool_call`：目录暴露、参数透传、去杂执行、拒绝工具权）；CI 新增 `eval` job（windows-latest，`cargo test --locked --lib agent::eval`——tauri gtk/webkit 系统依赖无法在 ubuntu runner 安装，故与 backend 同平台）。
+- [x] M5.3（2026-09-06）前端循环指标面板：`AgentMetricsPanel` 挂侧栏分支树底部，折叠默认收起；消费 `list_agent_runs`（当前会话最近 3 次），展示 outcome/轮次/token/每轮工具调用时延徽标，运行中 run 低频轮询（5s）至落定，逐 run JSON 导出；顺带补齐 TaskQueuePanel 硬编码文案 i18n（en/zh-CN 同步）。
+- [x] M5.4（2026-09-06）漂移检测雏形：`agent/eval/drift.rs` 四场景（simple/multiple/parallel/irrelevance）轮次与工具数基线表 `BASELINES`，偏差 >20%（零基线用绝对判定）断言失败并输出逐条漂移报告（CI 报警即门禁）；token 基线待真实 usage（scripted provider 完成为 `usage: None`，审计缝已记录每轮 token 供接入）。
 
-**验收门禁 M5**：一次多轮工具对话可导出完整轨迹；eval job 进 CI 且全绿。
+**验收门禁 M5**：轨迹完整性由 golden `run_auditor_records_turns_and_outcome`（两轮记录+终态+工具时延）与仓储单测（first-write-wins/最新序/限量）覆盖 ✅；导出链路命令级验证 ✅，桌面真实多轮对话导出抽查随 M6 smoke 清单；eval job 已进 CI（本地 `cargo test --lib agent::eval` 23/23 全绿）✅。后端 114/114 全绿 0 警告，前端 tsc 0 错误 + 124/124 vitest。
 
 ### M6 — 硬化与发布验收
 

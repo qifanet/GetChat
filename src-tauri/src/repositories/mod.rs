@@ -12,6 +12,7 @@
  */
 
 pub mod app_kv;
+pub mod agent_runs;
 pub mod branches;
 pub mod compressed_contexts;
 pub mod conversations;

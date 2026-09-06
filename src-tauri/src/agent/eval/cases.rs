@@ -36,7 +36,7 @@ use crate::state::SecurityPolicy;
 // ============================================================================
 
 /** A channel whose events are collected in memory for assertions. */
-fn recording_channel() -> (
+pub(crate) fn recording_channel() -> (
     Channel<ModelStreamEventDto>,
     Arc<Mutex<Vec<ModelStreamEventDto>>>,
 ) {
@@ -58,7 +58,7 @@ fn recording_channel() -> (
 }
 
 /** Build loop deps backed by the scripted model and real built-in tools. */
-async fn test_deps(scripted: Arc<ScriptedModel>, tool_names: &[&str]) -> ReactLoopDeps<'static> {
+pub(crate) async fn test_deps(scripted: Arc<ScriptedModel>, tool_names: &[&str]) -> ReactLoopDeps<'static> {
     let executor = Arc::new(BuiltinToolExecutor::new());
     let mut definitions: Vec<ToolDefinitionDto> = executor
         .definitions()
@@ -80,11 +80,12 @@ async fn test_deps(scripted: Arc<ScriptedModel>, tool_names: &[&str]) -> ReactLo
         stream: StreamBackend::Scripted(scripted),
         compression: CompressionBackend::Disabled,
         session: crate::agent::session::new_shared_session(),
+        auditor: None,
     }
 }
 
 /** A minimal valid stream request (system + user turn). */
-fn test_request(
+pub(crate) fn test_request(
     request_id: &str,
     tools: &[ToolDefinitionDto],
     workspace_path: Option<String>,
@@ -127,11 +128,14 @@ fn test_request(
     }
 }
 
-fn events(events: &Arc<Mutex<Vec<ModelStreamEventDto>>>) -> Vec<ModelStreamEventDto> {
+pub(crate) fn events(events: &Arc<Mutex<Vec<ModelStreamEventDto>>>) -> Vec<ModelStreamEventDto> {
     events.lock().expect("event recorder").clone()
 }
 
-fn has_event(events: &[ModelStreamEventDto], pred: impl Fn(&ModelStreamEventDto) -> bool) -> bool {
+pub(crate) fn has_event(
+    events: &[ModelStreamEventDto],
+    pred: impl Fn(&ModelStreamEventDto) -> bool,
+) -> bool {
     events.iter().any(pred)
 }
 
@@ -805,4 +809,189 @@ async fn script_exhaustion_fails_closed() {
     let err = outcome.expect_err("exhausted script must fail");
     assert_eq!(err.code, "SCRIPT_EXHAUSTED");
     assert!(!err.retriable);
+}
+
+/// M5.1: the run auditor observes every turn (tool calls + timings) and the
+/// terminal outcome across a tool-using run — the audit trail behind the
+/// `agent_runs` table and the export surface.
+#[tokio::test]
+async fn run_auditor_records_turns_and_outcome() {
+    let scripted = ScriptedModel::new(vec![
+        ScriptedStep::ToolCalls {
+            calls: vec![ScriptedToolCall::new("calculator", json!({"expression": "2*3"}))],
+            reasoning_content: None,
+        },
+        ScriptedStep::Text {
+            chunks: vec!["done".to_string()],
+            reasoning_content: None,
+        },
+    ]);
+    let auditor = Arc::new(crate::agent::audit::MemoryAuditor::new());
+    let deps = test_deps(scripted.clone(), &["calculator"]).await;
+    let (channel, _events) = recording_channel();
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+    let request = test_request("req_audit", &deps.tool_definitions, None);
+
+    // Swap the fixture's no-op auditor for the memory collector.
+    let deps = ReactLoopDeps {
+        auditor: Some(auditor.clone()),
+        ..deps
+    };
+
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+
+    let snapshots = auditor.snapshots().await;
+    assert_eq!(snapshots.len(), 1);
+    let snapshot = &snapshots[0];
+    assert_eq!(snapshot.outcome.as_deref(), Some("COMPLETED"));
+    assert_eq!(snapshot.turns.len(), 2);
+    assert_eq!(snapshot.turns[0].tool_calls.len(), 1);
+    assert_eq!(snapshot.turns[0].tool_calls[0].name, "calculator");
+    assert!(snapshot.turns[0].tool_calls[0].success);
+    assert!(snapshot.turns[1].tool_calls.is_empty());
+    assert!(snapshot.approvals.is_empty());
+}
+
+// ============================================================================
+// BFCL-style function-calling families (v1.5.0 M5.2)
+//
+// The Berkeley Function Calling Leaderboard groups scenarios into simple /
+// multiple / parallel / irrelevance. Our model backend is scripted, so these
+// cases pin the LOOP-side half of that contract: the tool catalog exposed to
+// the model, argument pass-through, execution accounting, and the right to
+// answer without any tool. (Model-side selection quality is evaluated live.)
+// ============================================================================
+
+/// Simple: one call, exact arguments — the loop must hand the model a clean
+/// single-tool catalog and pass the arguments through to the executor intact.
+#[tokio::test]
+async fn bfcl_simple_single_call_exact_arguments() {
+    let scripted = ScriptedModel::new(vec![
+        ScriptedStep::ToolCalls {
+            calls: vec![ScriptedToolCall::new("calculator", json!({"expression": "123+456"}))],
+            reasoning_content: None,
+        },
+        ScriptedStep::Text {
+            chunks: vec!["579".to_string()],
+            reasoning_content: None,
+        },
+    ]);
+    let deps = test_deps(scripted.clone(), &["calculator"]).await;
+    let (channel, channel_events) = recording_channel();
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_bfcl_simple", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    let requests = scripted.recorded_requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].tool_names, vec!["calculator"]);
+    assert_eq!(requests[0].tool_choice.as_deref(), Some("auto"));
+    // Arguments reached the real executor: 123+456 = 579 comes back.
+    let tool_results = requests[1].tool_results().join("\n");
+    assert!(tool_results.contains("579"), "got: {tool_results}");
+    assert!(has_event(&events(&channel_events), |e| matches!(e, ModelStreamEventDto::ToolCall { function_name, .. } if function_name == "calculator")));
+    assert!(has_event(&events(&channel_events), |e| matches!(e, ModelStreamEventDto::ToolResult { success: true, .. })));
+}
+
+/// Multiple: several tools are cataloged, the model must execute exactly the
+/// one the scenario calls for — no stray executions of the decoys.
+#[tokio::test]
+async fn bfcl_multiple_executes_only_the_requested_tool() {
+    let scripted = ScriptedModel::new(vec![
+        ScriptedStep::ToolCalls {
+            calls: vec![ScriptedToolCall::new("calculator", json!({"expression": "2+2"}))],
+            reasoning_content: None,
+        },
+        ScriptedStep::Text {
+            chunks: vec!["4".to_string()],
+            reasoning_content: None,
+        },
+    ]);
+    let deps = test_deps(scripted.clone(), &["calculator", "file", "todo"]).await;
+    let (channel, channel_events) = recording_channel();
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_bfcl_multiple", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    let requests = scripted.recorded_requests();
+    assert_eq!(requests.len(), 2);
+    // Full catalog is visible to the model (sorted, production order).
+    assert_eq!(requests[0].tool_names, vec!["calculator", "file", "todo"]);
+    // Exactly the requested tool ran; the decoys never produced an event.
+    let emitted = events(&channel_events);
+    assert!(has_event(&emitted, |e| matches!(e, ModelStreamEventDto::ToolCall { function_name, .. } if function_name == "calculator")));
+    assert!(!has_event(&emitted, |e| matches!(e, ModelStreamEventDto::ToolCall { function_name, .. } if function_name != "calculator")));
+    assert_eq!(requests[1].tool_results().len(), 1);
+}
+
+/// Parallel: two independent calls in one assistant turn — both executed,
+/// both results appended (in call order) before the next model request.
+#[tokio::test]
+async fn bfcl_parallel_two_calls_both_executed_in_order() {
+    let scripted = ScriptedModel::new(vec![
+        ScriptedStep::ToolCalls {
+            calls: vec![
+                ScriptedToolCall::new("calculator", json!({"expression": "10*3"})),
+                ScriptedToolCall::new("calculator", json!({"expression": "10*4"})),
+            ],
+            reasoning_content: None,
+        },
+        ScriptedStep::Text {
+            chunks: vec!["30 and 40".to_string()],
+            reasoning_content: None,
+        },
+    ]);
+    let deps = test_deps(scripted.clone(), &["calculator"]).await;
+    let (channel, channel_events) = recording_channel();
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_bfcl_parallel", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    let requests = scripted.recorded_requests();
+    assert_eq!(requests.len(), 2);
+    let tool_results = requests[1].tool_results();
+    assert_eq!(tool_results.len(), 2);
+    assert!(tool_results[0].contains("30"), "got: {}", tool_results[0]);
+    assert!(tool_results[1].contains("40"), "got: {}", tool_results[1]);
+    let emitted = events(&channel_events);
+    assert_eq!(
+        emitted
+            .iter()
+            .filter(|e| matches!(e, ModelStreamEventDto::ToolResult { success: true, .. }))
+            .count(),
+        2,
+        "both parallel results must be emitted"
+    );
+}
+
+/// Irrelevance: the request is out of the tool catalog's scope and the model
+/// answers directly — the loop must complete with zero executions and zero
+/// synthetic tool turns.
+#[tokio::test]
+async fn bfcl_irrelevance_answers_without_any_tool_call() {
+    let scripted = ScriptedModel::new(vec![ScriptedStep::Text {
+        chunks: vec!["That is outside what my tools cover, but the answer is 7.".to_string()],
+        reasoning_content: None,
+    }]);
+    let deps = test_deps(scripted.clone(), &["calculator", "file", "todo"]).await;
+    let (channel, channel_events) = recording_channel();
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_bfcl_irrelevance", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 5, 5, 10, 30).await;
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    // Exactly one model request: the loop neither re-asks nor fabricates a
+    // tool phase when the model declines to call tools.
+    assert_eq!(scripted.recorded_requests().len(), 1);
+    let emitted = events(&channel_events);
+    assert!(!has_event(&emitted, |e| matches!(e, ModelStreamEventDto::ToolCall { .. })));
+    assert!(!has_event(&emitted, |e| matches!(e, ModelStreamEventDto::ToolResult { .. })));
 }
