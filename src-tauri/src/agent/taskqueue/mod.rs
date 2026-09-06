@@ -17,7 +17,11 @@
  *     run in parallel;
  *   - 429 rate-limit handling: `MODEL_RATE_LIMITED` failures pause the task
  *     until the provider-advertised `Retry-After` (default 30s) instead of
- *     failing it outright, up to `MAX_TASK_ATTEMPTS`.
+ *     failing it outright, up to `MAX_TASK_ATTEMPTS`;
+ *   - transient-conflict handling: a claimed task that finds its conversation
+ *     busy in the stream registry (`active_model_streams` — an interactive
+ *     stream or another task got there first) pauses with a 30s backoff under
+ *     the same `MAX_TASK_ATTEMPTS` cap instead of clobbering the entry.
  *
  * Task execution drives a full agent stream session server-side: the scheduler
  * builds the prompt, resolves the model request, and feeds `run_react_loop`
@@ -51,6 +55,9 @@ use crate::state::{ActiveModelStream, AppState};
 
 /** Default backoff when the provider sends no parseable `Retry-After`. */
 const DEFAULT_RATE_LIMIT_RETRY_SECS: u64 = 30;
+
+/** Backoff before a conversation-busy task retries (stream registry conflict). */
+const CONVERSATION_BUSY_RETRY_SECS: u64 = 30;
 
 /** Give up on a task after this many attempts (startup recoveries + backoffs). */
 const MAX_TASK_ATTEMPTS: i64 = 5;
@@ -478,13 +485,11 @@ impl TaskQueueScheduler {
 
         // 2. Register the session + stream lock so injects, approvals and
         //    aborts behave exactly like an interactive stream. The cancel
-        //    sender is the same channel `cancel()` signals.
-        let session = crate::agent::session::new_shared_session();
-        state
-            .agent_sessions
-            .lock()
-            .await
-            .insert(cfg.request_id.clone(), session.clone());
+        //    sender is the same channel `cancel()` signals. The stream
+        //    registry doubles as the per-conversation lock (A1): like
+        //    `start_model_stream`, check-then-insert under one lock hold, so
+        //    a claimed task can never clobber an active stream (interactive
+        //    or task) in the same conversation.
         let task_cancel_tx = self
             .running
             .lock()
@@ -492,13 +497,47 @@ impl TaskQueueScheduler {
             .get(&task.id)
             .cloned()
             .ok_or_else(|| "task cancelled before start".to_string())?;
-        state.active_model_streams.lock().await.insert(
-            cfg.request_id.clone(),
-            ActiveModelStream {
-                conversation_id: Some(task.conversation_id.clone()),
-                cancel: task_cancel_tx,
-            },
-        );
+        let busy_request_id = {
+            let mut active_streams = state.active_model_streams.lock().await;
+            let conflict = active_streams
+                .iter()
+                .find(|(_, active)| {
+                    active.conversation_id.as_deref() == Some(task.conversation_id.as_str())
+                })
+                .map(|(request_id, _)| request_id.clone());
+            if conflict.is_none() {
+                active_streams.insert(
+                    cfg.request_id.clone(),
+                    ActiveModelStream {
+                        conversation_id: Some(task.conversation_id.clone()),
+                        cancel: task_cancel_tx,
+                    },
+                );
+            }
+            conflict
+        };
+        if let Some(busy_request_id) = busy_request_id {
+            // Conversation busy is transient: pause for retry while attempts
+            // remain, hard-fail otherwise. Nothing was registered above, so
+            // there is nothing to clean up.
+            let failure = ModelStreamFailure {
+                code: "CONVERSATION_BUSY".to_string(),
+                message: format!(
+                    "another stream ({busy_request_id}) is active in this conversation"
+                ),
+                retriable: true,
+                retry_after_secs: Some(CONVERSATION_BUSY_RETRY_SECS),
+            };
+            return self
+                .handle_stream_failure(task, &cfg, failure, String::new(), None, None, &state.db)
+                .await;
+        }
+        let session = crate::agent::session::new_shared_session();
+        state
+            .agent_sessions
+            .lock()
+            .await
+            .insert(cfg.request_id.clone(), session.clone());
 
         // 3. Server-side channel: parse events, accumulate the final payload,
         //    forward to the frontend and record progress.
@@ -677,7 +716,8 @@ impl TaskQueueScheduler {
         }
     }
 
-    /** Route a stream failure to either a 429 backoff or a hard failure. */
+    /** Route a stream failure to either a transient backoff (rate limit,
+     * busy conversation) or a hard failure. */
     async fn handle_stream_failure(
         &self,
         task: &TaskQueueRow,
@@ -689,11 +729,16 @@ impl TaskQueueScheduler {
         db: &SqlitePool,
     ) -> Result<(), String> {
         let is_rate_limit = failure.code == "MODEL_RATE_LIMITED";
-        if is_rate_limit && task.attempts < MAX_TASK_ATTEMPTS {
+        let is_conversation_busy = failure.code == "CONVERSATION_BUSY";
+        if (is_rate_limit || is_conversation_busy) && task.attempts < MAX_TASK_ATTEMPTS {
             let wait = failure
                 .retry_after_secs
                 .unwrap_or(DEFAULT_RATE_LIMIT_RETRY_SECS);
-            let reason = format!("rate limited; retrying in {wait}s");
+            let reason = if is_conversation_busy {
+                format!("conversation busy; retrying in {wait}s")
+            } else {
+                format!("rate limited; retrying in {wait}s")
+            };
             TaskQueueRepository::pause_for_retry(
                 &self.pool,
                 &task.id,
@@ -706,7 +751,7 @@ impl TaskQueueScheduler {
                 task_id = %task.id,
                 attempts = task.attempts + 1,
                 wait_secs = wait,
-                "taskqueue: rate limited, task paused for backoff"
+                "taskqueue: transient failure, task paused for backoff"
             );
             return Ok(());
         }

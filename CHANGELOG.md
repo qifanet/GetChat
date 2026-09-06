@@ -17,6 +17,7 @@ Agent Harness 重构收尾（DEVELOPMENT.md M0–M6）+ 可观测性与评估入
 
 ### Hardened
 - 工具名允许列表门禁前移至审批流之前：模型幻觉/禁用/伪造 `mcp__` 命名空间工具名不再触发审批弹窗，直接得到合成失败结果（golden 用例钉死）。
+- 任务流注册流锁改为与交互流对称的"检查后插入"：会话忙时任务进入 PAUSED 退避重试（`CONVERSATION_BUSY`，30s，受 attempts 上限约束），不再覆盖交互流的取消句柄。
 - 审计轨迹与流事件不含任何密钥材料（keyring 泄漏 grep 审计通过）。
 
 ### Changed
