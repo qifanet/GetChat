@@ -1,0 +1,11 @@
+# windows-gnu build configuration.
+#
+# MinGW ld auto-exports every global symbol when linking a cdylib; the
+# debug build of this crate has ~184k of them (generic monomorphizations),
+# which overflows the PE export-ordinal limit (65535) with
+# "ld: error: export ordinal too large". --exclude-all-symbols disables the
+# auto-export — rustc's generated .def still exports the real crate API, and
+# the desktop exe links the rlib anyway, so nothing needs the bulk exports.
+# MSVC/CI builds are unaffected (target-scoped).
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]

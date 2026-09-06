@@ -80,6 +80,7 @@ There is no ESLint/Prettier; `tsc --noEmit` + tests are the gates.
 - Vitest aliases `@tauri-apps/api/core` to the stub `src/test/stubs/tauriApiCore.ts`; test setup is `src/test/setup.ts`.
 - TypeScript is strict — avoid `any`.
 - Rust pitfalls: `json!`/`Value` need `use serde_json::{json, Value}`; `watch::Receiver` needs `mut` for `.changed()`; `Duration::from_secs` takes `u64`.
+- `src-tauri/.cargo/config.toml` injects `-Wl,--exclude-all-symbols` for the `x86_64-pc-windows-gnu` target — without it MinGW ld auto-exports ~184k cdylib symbols and dies with `export ordinal too large` (PE ordinal cap 65535). Do not remove; MSVC/CI unaffected. The linker warning `.rsrc merge failure: multiple non-default manifests` is benign — the surviving embedded manifest is the patched Common-Controls v6 one.
 - Golden tests for the ReAct loop live in `src-tauri/src/agent/eval/cases.rs` — run `cargo test --lib` after touching the loop, tools, or prompt assembly; do not change their assertions during M1–M4 refactors.
 
 ## Docs to read before sensitive changes
