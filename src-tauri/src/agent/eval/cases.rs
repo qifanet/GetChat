@@ -300,6 +300,55 @@ async fn parallel_batch_backfills_results_in_call_order() {
     assert_eq!(issued_ids, paired_ids, "results must follow call order");
 }
 
+/// M3 gate: a 200-round tool conversation replays without regression — every
+/// round's result lands in the next request, results accumulate in order, and
+/// the leading system prefix stays byte-identical across all 201 requests.
+#[tokio::test]
+async fn long_conversation_200_rounds_replays_without_regression() {
+    let mut steps = Vec::new();
+    for _ in 0..200 {
+        steps.push(ScriptedStep::ToolCalls {
+            calls: vec![ScriptedToolCall::new("calculator", json!({"expression": "1+1"}))],
+            reasoning_content: None,
+        });
+    }
+    steps.push(ScriptedStep::Text {
+        chunks: vec!["done".to_string()],
+        reasoning_content: None,
+    });
+    let scripted = ScriptedModel::new(steps);
+    let deps = test_deps(scripted.clone(), &["calculator"]).await;
+    let (channel, _events) = recording_channel();
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+
+    let request = test_request("req_long_200", &deps.tool_definitions, None);
+    let outcome = run_react_loop(&deps, request, &channel, cancel_rx, 210, 5, 10, 30).await;
+    drop(cancel_tx);
+
+    assert!(matches!(outcome, Ok(ReactLoopOutcome::Completed { .. })));
+    let requests = scripted.recorded_requests();
+    assert_eq!(
+        requests.len(),
+        201,
+        "one request per tool round plus the final text request"
+    );
+
+    // All 200 results accumulated, in issue order, in the final request.
+    let final_pairs = requests[200].tool_result_pairs();
+    assert_eq!(final_pairs.len(), 200, "no result may be lost across rounds");
+
+    // Prefix stability: every request starts with the byte-identical system
+    // message (Core 分节字节不变 — the prompt-cache anchor).
+    let first_system = requests[0].prompt_messages[0].content.clone();
+    assert!(requests[0].prompt_messages[0].role.eq_ignore_ascii_case("system"));
+    for (round, req) in requests.iter().enumerate() {
+        assert_eq!(
+            req.prompt_messages[0].content, first_system,
+            "system prefix changed at round {round}"
+        );
+    }
+}
+
 /// Model reports tool_calls with an empty list: loop completes without
 /// executing anything and without another model call.
 #[tokio::test]

@@ -152,6 +152,7 @@ impl BuiltinToolExecutor {
         builtin::web_search::register(&mut executor);
         builtin::load_skill::register(&mut executor);
         builtin::parallel_branch_fork::register(&mut executor);
+        builtin::read_tool_result::register(&mut executor);
         let known_disabled_tools = disabled_tools
             .into_iter()
             .filter(|name| executor.tools.contains_key(name))

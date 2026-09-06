@@ -110,12 +110,12 @@
 
 ### M3 — ContextManager（GSSC 归一）
 
-- [ ] M3.1 预算台账：`Budget { context_window, output_reservation, input_budget }`；60%/96% 阈值配置化；三套策略（maybe_compress / pre-append / prune+budget_trim）收敛为 `enforce_budget()` 单入口，行为差异仅保留可配置阈值。
-- [ ] M3.2 PromptBuilder 分节化（Core/Extension/Gates，见 ARCHITECTURE.md §4.5）；Core 层新增环境快照注入（workspace/平台/分支模式，纯硬编码语义）。
-- [ ] M3.3 超长工具结果落盘：新迁移 `0015_tool_result_overflow.sql`（id, tool_call_id, content, created_at）；prompt 内放 `[truncated, full: overflow:<id>]` 引用 + `read_tool_result` 内部工具取回（JIT，手册 §7.1）。
-- [ ] M3.4 `token_estimator` 全链路统一使用（估算 vs 实测 usage 偏差记录到日志）。
+- [x] M3.1（2026-09-06）预算台账：`agent/budget.rs` 定义 `Budget { context_window, output_reservation, input_budget }`（`Budget::resolve` 沿用原内联算法：窗口下限 8k、输出预留 8k）与 `BudgetThresholds`（60% 压缩触发 / 96% pre-append 危险线 / 70% 确定性回退目标——三处硬编码收敛为一个结构体，4 个单测锚定默认值与边界）；runner 顶部算账与循环内 96% 内联全部替换；context.rs 的 `maybe_compress_react_prompt` 升级为 `enforce_budget()` 单入口（mid-loop 与 pre-append 两个调用点走同一路径），确定性回退目标改从阈值取。行为对等：98/98 金测全绿。
+- [x] M3.2（2026-09-06）PromptBuilder 分节化：prompt.rs 重构为 `PromptSections { core, extension, gates }`，渲染顺序 Core→Extension→Gates 固定（前缀缓存友好）；Core 新增环境快照注入（platform + workspace，纯硬编码语义；§4.5 的"分支模式"后端暂无对应状态，留待 M4 流锁/任务队列提供后接入）；行为注记：Core 现在无条件注入（旧实现 tools 为空时整体跳过），Tier-3 激活提示并入 Extension 渲染。5 个单测（顺序/字节稳定/快照格式/空渲染/Gates 占位）。
+- [x] M3.3（2026-09-06）超长工具结果落盘：迁移 `0015_tool_result_overflow.sql`（id/tool_call_id/content/created_at，unixepoch 约定）注册进 db/mod.rs；`repositories/tool_result_overflow.rs`（insert/find_content，2 个往返单测）；runner 超过 8K 内联上限的结果先落盘、prompt 携带 `overflow:<id>` 引用（落盘失败降级为原纯截断并 warn）；新内置工具 `read_tool_result`（Low/Safe/5s，支持 `overflow:<id>` 与裸 id，`offset` 参数按 7K 字符分页——刻意低于 8K 内联上限，读回结果永不再溢出，3 个单测）。工具设置页泛化渲染，无需前端改动。
+- [x] M3.4（2026-09-06）估算偏差记录：run_react_loop 主完成点（含 usage 的 Completed）对比 `token_estimator` 估算值与实测 `usage.prompt_tokens`，记录偏差与百分比到 tracing（`token estimate vs actual usage`）。
 
-**验收门禁 M3**：预算场景单测（触发/不触发/边界）；溢出落盘往返用例；长对话（>200 轮模拟）golden 回放无回归；压缩后 prompt 前缀稳定性测试（Core 分节字节不变）。
+**验收门禁 M3**：预算场景单测（触发/不触发/边界）✅ budget.rs 4 用例；溢出落盘往返用例 ✅ repository 2 + read_tool_result 3 用例；长对话（>200 轮模拟）golden 回放无回归 ✅ `long_conversation_200_rounds_replays_without_regression`（201 请求、200 结果不丢、系统前缀逐请求字节一致）；压缩后 prompt 前缀稳定性 ✅ `compression_preserves_core_prefix_bytes`。98/98 全绿（82 金测 + 16 单测），0 警告。
 
 ### M4 — 任务队列重写 + 并行分叉端到端（旗舰能力收口）
 

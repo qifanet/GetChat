@@ -99,7 +99,7 @@
 |---|---|---|---|
 | B1 | **Agent 循环长在 command 层**：`run_react_loop`（~710 行）+ 审批 + 重试 + 压缩编排全部内联在 `commands/streaming.rs`（3453 行，还混有 MCP 密钥编解码、工具设置、安全策略、slash 命令） | `streaming.rs:1215-1924` 等 | 违反自家 SOP"commands 只做参数接入"；不可单测、不可复用、不可替换范式 |
 | B2 | **范式层缺失**：只有单一硬编码 ReAct 循环；无 Plan/Reflect 阶段、无策略抽象、无会话级策略配置；工具指引/技能元数据/激活提示是循环内的字符串拼接，无 PromptBuilder | `streaming.rs:1277-1376` | 手册 §3.4 混合范式、§5.1 策略模式无法落地；提示词散落 Rust 源码，无法评审与测试 |
-| B3 | **上下文管理三套策略散落在循环里**：`maybe_compress_react_prompt`(60%) / pre-append 压缩(96%) / `prune_old_tool_results`+`apply_deterministic_budget_trim`，加上 8000 字符硬截断，彼此不知道对方 | `streaming.rs:621,664,879,1011,1690-1751` | 手册 §7.2 GSSC 流水线无从谈起；预算口径分裂，行为难预测 |
+| B3 | **上下文管理三套策略散落在循环里**：`maybe_compress_react_prompt`(60%) / pre-append 压缩(96%) / `prune_old_tool_results`+`apply_deterministic_budget_trim`，加上 8000 字符硬截断，彼此不知道对方 | ~~`streaming.rs` 内联三处~~ ✅ M3 归一：预算台账 `agent/budget.rs`（Budget + 可配置阈值）+ `enforce_budget()` 单入口（`agent/context.rs`）；超长结果落盘 `tool_result_overflow` + `read_tool_result` JIT 取回 | 手册 §7.2 GSSC 流水线无从谈起；预算口径分裂，行为难预测（口径已归一；GSSC 全流水线随记忆系统 v1.6） |
 | B4 | **工具系统单体**：7 个内置工具 + MCP 路由 + 审批黑名单 + 一个 ~400 行手写计算器解析器全部在 `tool_executor.rs`（2049 行）；单轮多工具串行执行，无并行策略 | ~~`services/tool_executor.rs`~~ ✅ M2 全部完成：拆分为 `agent/tools/`（registry + executor + builtin/ 七模块）；审批数据化为 `agent/policy.rs` 规则表；并行执行落地（免审批+Safe 连续段 `join_all`、按序回填、串行回退开关） | 新工具必须改单体；BFCL 意义上的 parallel 调用无法兑现；无法按工具做风险分级 |
 | B5 | **审批策略与机制耦合**：`requires_tool_approval` + 黑名单匹配 + oneshot 等待全部内联在工具循环里（~110 行嵌套） | `streaming.rs:1543-1654`（决策与等待均已迁入 `agent/policy.rs`：规则表 + `request_user_approval`，✅ M2.3/M2.5） | 手册 §8.3 的"规则强制审批/审计"无法演进；无法配置化（审计持久化随 M5） |
 | B6 | **可观测性缺失**：循环只有 tracing 日志；无 run 级审计（轮次、每轮 token、工具时延、审批记录），前端无法展示 Agent 轨迹 | 全局检索无 `agent_runs` 类持久化 | 无法调试"这轮为什么调了这个工具"，无法做手册 §10 的持续评估 |
@@ -144,8 +144,9 @@ src-tauri/src/
 │  ├─ context/                 ContextManager（预算台账 + GSSC + 三套策略归一）
 │  ├─ tools/                   ToolRegistry + 每工具一文件 + 并行执行器（M2.1/M2.4）
 │  │   ├─ registry.rs  executor.rs（含 META 查询/并发级）
-│  │   └─ builtin/{file,terminal,todo,web_search,load_skill,parallel_branch_fork,calculator}.rs
+│  │   └─ builtin/{file,terminal,todo,web_search,load_skill,parallel_branch_fork,read_tool_result,calculator}.rs
 │  ├─ policy.rs                审批决策矩阵 + 审批等待单元（M2.3/M2.5）
+│  ├─ budget.rs                预算台账 Budget + 可配置阈值 BudgetThresholds（M3.1）
 │  ├─ paradigms/               react.rs（默认）；plan_execute.rs / reflect.rs（预留接口）
 │  ├─ taskqueue/               调度器（Notify 事件驱动 + 重启恢复 + 429 退避）+ worker
 │  └─ eval/                    scripted provider（脚本化模型）+ golden 用例

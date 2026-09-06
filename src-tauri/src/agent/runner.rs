@@ -27,7 +27,6 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
-use crate::agent::context::maybe_compress_react_prompt;
 use crate::agent::deps::{McpBackend, ReactLoopDeps, StreamBackend};
 use crate::agent::session;
 use crate::dto::common::ToolCallDto;
@@ -143,19 +142,9 @@ pub(crate) async fn run_react_loop(
         .collect();
     let current_tool_choice = initial_request.tool_choice.clone();
 
-    // Resolve context window size for mid-loop compression checks.
-    let context_window_kb: i32 = crate::repositories::provider_models::find_by_id(&deps.db, &model_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|m| m.context_window_kb)
-        .unwrap_or(64);
-    let context_budget_tokens = (context_window_kb.max(8) as u32) * 1000;
-    // Reserve ~8K tokens for model output + safety margin
-    let output_reservation: u32 = 8_000;
-    let effective_input_budget = context_budget_tokens.saturating_sub(output_reservation);
-    // Compression trigger threshold: 60% of effective budget
-    let compression_trigger_tokens = (effective_input_budget as f32 * 0.60) as u32;
+    // Resolve the context budget ledger for mid-loop enforcement (M3.1).
+    let budget = crate::agent::budget::Budget::resolve(&deps.db, &model_id).await;
+    let budget_thresholds = crate::agent::budget::BudgetThresholds::default();
 
     let shell_path = crate::repositories::app_kv::get(&deps.db, "shell_path")
         .await
@@ -190,7 +179,7 @@ pub(crate) async fn run_react_loop(
             return Ok(ReactLoopOutcome::Cancelled);
         }
 
-        maybe_compress_react_prompt(
+        crate::agent::context::enforce_budget(
             deps,
             &request_id,
             iteration,
@@ -199,9 +188,8 @@ pub(crate) async fn run_react_loop(
             &branch_id,
             &mut prompt_messages,
             &current_tools,
-            context_budget_tokens,
-            effective_input_budget,
-            compression_trigger_tokens,
+            &budget,
+            &budget_thresholds,
             channel,
         )
         .await;
@@ -287,6 +275,23 @@ pub(crate) async fn run_react_loop(
                 usage,
                 reasoning_content,
             } => {
+                // M3.4: log the estimation-vs-actual deviation so the
+                // token_estimator's accuracy stays observable over time.
+                if let Some(actual) = usage.as_ref().and_then(|u| u.prompt_tokens) {
+                    let estimated = crate::services::token_estimator::estimate_model_request_tokens(
+                        &prompt_messages,
+                        &current_tools,
+                    );
+                    let deviation = estimated as i64 - actual as i64;
+                    tracing::info!(
+                        request_id = %request_id,
+                        estimated,
+                        actual,
+                        deviation,
+                        deviation_pct = if actual > 0 { format!("{:.1}", deviation as f32 / actual as f32 * 100.0) } else { "n/a".to_string() },
+                        "react loop: token estimate vs actual usage"
+                    );
+                }
                 return Ok(ReactLoopOutcome::Completed {
                     usage,
                     reasoning_content,
@@ -508,9 +513,43 @@ pub(crate) async fn run_react_loop(
                         });
 
                         // Add tool result to prompt messages — immediately truncate
-                        // if the output is excessively large to prevent prompt overflow.
+                        // if the output is excessively large to prevent prompt
+                        // overflow. M3.3: the full output is persisted first and
+                        // referenced (`overflow:<id>`), retrievable JIT via the
+                        // read_tool_result tool.
                         const MAX_INLINE_TOOL_CHARS: usize = 8_000;
-                        let tool_content = if result.output.len() > MAX_INLINE_TOOL_CHARS {
+                        let overflow_id = if result.output.len() > MAX_INLINE_TOOL_CHARS {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            match crate::repositories::tool_result_overflow::insert(
+                                &deps.db,
+                                &id,
+                                &tc.id,
+                                &result.output,
+                            )
+                            .await
+                            {
+                                Ok(()) => Some(id),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        request_id = %request_id,
+                                        error = %e,
+                                        "tool result overflow persistence failed; falling back to plain truncation"
+                                    );
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        let tool_content = if let Some(ref overflow_id) = overflow_id {
+                            let truncated: String = result.output.chars().take(MAX_INLINE_TOOL_CHARS).collect();
+                            format!(
+                                "{}\n\n[... output truncated ({} chars total) — full output available via read_tool_result with id: overflow:{} ...]",
+                                truncated,
+                                result.output.len(),
+                                overflow_id
+                            )
+                        } else if result.output.len() > MAX_INLINE_TOOL_CHARS {
                             let truncated: String = result.output.chars().take(MAX_INLINE_TOOL_CHARS).collect();
                             format!(
                                 "{}\n\n[... output truncated ({} chars total) ...]",
@@ -543,9 +582,9 @@ pub(crate) async fn run_react_loop(
                             &current_tools,
                         );
                         let projected_tokens = pre_append_tokens.saturating_add(result_tokens);
-                        let danger_threshold = (effective_input_budget as f32 * 0.96) as u32;
+                        let danger_threshold = budget.danger_tokens(&budget_thresholds);
 
-                        if projected_tokens > danger_threshold && effective_input_budget > 0 {
+                        if projected_tokens > danger_threshold && budget.input_budget > 0 {
                             tracing::info!(
                                 request_id = %request_id,
                                 iteration,
@@ -553,9 +592,9 @@ pub(crate) async fn run_react_loop(
                                 result_tokens,
                                 projected_tokens,
                                 danger_threshold,
-                                "react loop: pre-append compression triggered (tool result would exceed 96%)"
+                                "react loop: pre-append compression triggered (tool result would exceed danger threshold)"
                             );
-                            maybe_compress_react_prompt(
+                            crate::agent::context::enforce_budget(
                                 deps,
                                 &request_id,
                                 iteration,
@@ -564,9 +603,8 @@ pub(crate) async fn run_react_loop(
                                 &branch_id,
                                 &mut prompt_messages,
                                 &current_tools,
-                                context_budget_tokens,
-                                effective_input_budget,
-                                compression_trigger_tokens,
+                                &budget,
+                                &budget_thresholds,
                                 channel,
                             )
                             .await;

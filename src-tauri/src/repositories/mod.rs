@@ -21,4 +21,5 @@ pub mod provider_models;
 pub mod providers;
 pub mod task_queue;
 pub mod proposal;
+pub mod tool_result_overflow;
 pub mod tool_calls;

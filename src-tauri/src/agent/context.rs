@@ -1,21 +1,29 @@
 /**
  * @file agent/context.rs
- * @description Mid-loop context management for the agent run (v1.5.0 M1.3).
+ * @description Mid-loop context management for the agent run (v1.5.0 M1.3,
+ * unified under the budget ledger in M3.1).
  *
  * Verbatim relocation of the compression stack that used to live in
  * `commands/streaming.rs`: budget checks, old-tool-result pruning, the
  * AI-powered mid-loop compression (via `helper_ai_service`), and the
- * deterministic fallback trim. M3 unifies these strategies behind a single
- * budget ledger (`agent/context/ContextManager`, ARCHITECTURE.md §4.2).
+ * deterministic fallback trim.
  *
- * All functions here are behavior-preserving relocations; the golden replay
- * cases in `agent/eval/cases.rs` guard the observable behavior.
+ * Since M3.1 `enforce_budget` is the SINGLE entry for prompt budget
+ * enforcement (mid-loop at the top of each iteration, and pre-append when a
+ * tool result would push the projection over the danger threshold). The
+ * ledger (`Budget`) and its configurable thresholds (`BudgetThresholds`)
+ * live in `agent/budget.rs`; the deterministic fallback trims towards
+ * `thresholds.deterministic_trim_target` instead of a hardcoded constant.
+ *
+ * The golden replay cases in `agent/eval/cases.rs` guard the observable
+ * behavior.
  */
 
 use std::collections::HashSet;
 
 use tauri::ipc::Channel;
 
+use crate::agent::budget::{Budget, BudgetThresholds};
 use crate::agent::deps::{CompressionBackend, ReactLoopDeps};
 use crate::dto::common::ToolDefinitionDto;
 use crate::dto::streaming::{ModelPromptMessageDto, ModelStreamEventDto};
@@ -304,9 +312,10 @@ async fn mid_loop_compress(
     model_id: &str,
     prompt_messages: &[ModelPromptMessageDto],
     tools: &[ToolDefinitionDto],
-    effective_budget: u32,
-    _trigger_threshold: u32,
+    budget: &Budget,
+    thresholds: &BudgetThresholds,
 ) -> Result<Option<MidLoopCompressInfo>, AppError> {
+    let effective_budget = budget.input_budget;
     // Try the full AI-powered compression via helper_ai_service. The summary is
     // persisted for the active branch and then applied to this in-flight prompt.
     // Golden-test backends carry no compression hook and skip this pass.
@@ -410,10 +419,11 @@ async fn mid_loop_compress(
                 prompt_messages,
                 tools,
             );
-            // Trim towards 70% of effective budget to create headroom for
-            // upcoming tool call iterations.  Without this margin, each tool
-            // result immediately pushes the prompt back over 100%.
-            let target_budget = (effective_budget as f32 * 0.70) as u32;
+            // Trim towards the configured fraction of the effective budget to
+            // create headroom for upcoming tool call iterations.  Without this
+            // margin, each tool result immediately pushes the prompt back over
+            // 100%.
+            let target_budget = budget.trim_target_tokens(thresholds);
             let trimmed = apply_deterministic_budget_trim(prompt_messages, target_budget, tools);
             let new_tokens = crate::services::token_estimator::estimate_model_request_tokens(
                 &trimmed,
@@ -438,8 +448,12 @@ async fn mid_loop_compress(
     }
 }
 
-/** Layer-0 prune + budget check + (when over threshold) AI compression pass. */
-pub(crate) async fn maybe_compress_react_prompt(
+/** Layer-0 prune + budget check + (when over threshold) AI compression pass.
+ *
+ * M3.1: the single entry for prompt budget enforcement. Called at the top of
+ * every ReAct iteration, and from the runner's pre-append check when adding a
+ * tool result would project past `budget.danger_tokens(thresholds)`. */
+pub(crate) async fn enforce_budget(
     deps: &ReactLoopDeps<'_>,
     request_id: &str,
     iteration: u32,
@@ -448,11 +462,14 @@ pub(crate) async fn maybe_compress_react_prompt(
     branch_id: &Option<String>,
     prompt_messages: &mut Vec<ModelPromptMessageDto>,
     tools: &[ToolDefinitionDto],
-    context_budget_tokens: u32,
-    effective_input_budget: u32,
-    compression_trigger_tokens: u32,
+    budget: &Budget,
+    thresholds: &BudgetThresholds,
     channel: &Channel<ModelStreamEventDto>,
 ) {
+    let context_budget_tokens = budget.context_window;
+    let effective_input_budget = budget.input_budget;
+    let compression_trigger_tokens = budget.compression_trigger_tokens(thresholds);
+
     // Layer 0: Prune — truncate verbose tool_result content in older messages.
     // This is a zero-cost, deterministic operation that doesn't require AI calls.
     // Inspired by opencode's prune() which truncates old tool outputs to save tokens.
@@ -547,8 +564,8 @@ pub(crate) async fn maybe_compress_react_prompt(
         model_id,
         prompt_messages,
         tools,
-        effective_input_budget,
-        compression_trigger_tokens,
+        budget,
+        thresholds,
     )
     .await
     {
@@ -595,5 +612,64 @@ pub(crate) async fn maybe_compress_react_prompt(
                 usage_ratio,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(
+        source_message_id: Option<&str>,
+        role: &str,
+        content: &str,
+    ) -> ModelPromptMessageDto {
+        ModelPromptMessageDto {
+            source_message_id: source_message_id.map(|s| s.to_string()),
+            role: role.to_string(),
+            content: content.to_string(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /** M3 gate: after compression the Core prefix (leading synthetic system
+     * messages) stays byte-identical, the summary replaces the old one, and
+     * only the compressed source messages disappear. */
+    #[test]
+    fn compression_preserves_core_prefix_bytes() {
+        let prefix = "You are GetChat.
+
+Environment: platform=windows; workspace='D:/ws'.";
+        let prompt = vec![
+            msg(None, "system", prefix),
+            msg(Some("u1"), "user", "hello"),
+            msg(Some("a1"), "assistant", "old answer"),
+            msg(Some("t1"), "tool", "old tool result"),
+        ];
+
+        let compressed: HashSet<String> = ["u1", "a1"].into_iter().map(String::from).collect();
+        let next = apply_compressed_context_to_runtime_prompt(&prompt, "the summary", &compressed);
+
+        // Core prefix: byte-identical, still first, exactly one copy.
+        assert_eq!(next[0].content, prefix, "Core prefix bytes must not change");
+        assert!(is_system_role(&next[0].role) && next[0].source_message_id.is_none());
+        assert_eq!(
+            next.iter().filter(|m| m.content == prefix).count(),
+            1,
+            "prefix must appear exactly once"
+        );
+
+        // New summary follows the prefix; old compressed messages are gone.
+        assert!(next[1].content.starts_with("[Compressed Context Summary]"));
+        assert_eq!(next[1].content, "[Compressed Context Summary]
+the summary");
+        assert!(!next.iter().any(|m| m.source_message_id.as_deref() == Some("u1")));
+        assert!(!next.iter().any(|m| m.source_message_id.as_deref() == Some("a1")));
+
+        // Uncompressed messages survive.
+        assert!(next.iter().any(|m| m.source_message_id.as_deref() == Some("t1")));
     }
 }
